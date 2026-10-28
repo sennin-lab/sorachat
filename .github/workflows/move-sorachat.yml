@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: リポジトリのチェックアウト
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # リモートの履歴を完全に取得する
 
       - name: Gitユーザー情報のセットアップ
         run: |
@@ -27,7 +29,6 @@ jobs:
             echo "sorachatフォルダが見つかりました。中身をプロジェクトルートに移動します..."
             
             shopt -s dotglob
-            # sorachatの中身をルートに移動（エラーが出ても止まらないように安全に処理）
             if [ "$(ls -A sorachat)" ]; then
               mv -f sorachat/* .
               echo "移動が完了しました。"
@@ -35,7 +36,6 @@ jobs:
               echo "sorachatフォルダの中身が空です。"
             fi
             
-            # 空になったsorachatフォルダを削除
             rm -rf sorachat
             shopt -u dotglob
           else
@@ -52,5 +52,15 @@ jobs:
             echo "変更はありません。"
           else
             git commit -m "chore: move sorachat contents to root and push [skip ci]"
-            git push
+            
+            # ブランチ名を動的に取得
+            CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
+            if [ -z "$CURRENT_BRANCH" ]; then
+              CURRENT_BRANCH=$(git branch --show-current)
+            fi
+            echo "対象ブランチ: $CURRENT_BRANCH"
+            
+            # リモートの変更を安全に取り込んでからプッシュ
+            git pull --rebase origin "$CURRENT_BRANCH" || echo "Rebase skipped"
+            git push origin "$CURRENT_BRANCH"
           fi
