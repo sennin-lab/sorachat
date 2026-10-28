@@ -1,0 +1,55 @@
+name: Extract and Push Upload Contents
+
+on:
+  workflow_dispatch: # GitHub画面から手動で実行できるようにする設定
+  push:
+    paths:
+      - 'upload/**' # uploadフォルダにファイルが追加・変更された時にも自動実行したい場合
+
+# リポジトリへの書き込み権限を付与
+permissions:
+  contents: write
+
+jobs:
+  extract-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Gitユーザー情報のセットアップ
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: uploadフォルダ内の圧縮ファイル（zip）を展開
+        run: |
+          # uploadフォルダ内にzipファイルが存在する場合、直下に展開する
+          if compgen -G "upload/*.zip" > /dev/null; then
+            echo "Zipファイルが見つかりました。展開します..."
+            unzip -o "upload/*.zip" -d .
+          elif [ -d "upload" ]; then
+            echo "uploadフォルダ内のファイルを処理します..."
+            # 必要に応じてuploadフォルダ内のファイル群を別ディレクトリに移動するなどの処理をここに記述できます
+          else
+            echo "uploadフォルダまたはzipファイルが見つかりませんでした。"
+            exit 1
+          fi
+
+      - name: 展開元のuploadフォルダを削除（必要に応じて）
+        run: |
+          # 展開が終わった元のzipやuploadフォルダ自体が不要な場合は削除します
+          rm -rf upload/
+
+      - name: 変更をコミットしてプッシュ
+        run: |
+          git add .
+          git status
+          
+          # 変更差分がある場合のみコミットとプッシュを行う
+          if git diff --staged --quiet; then
+            echo "変更はありません。"
+          else
+            git commit -m "chore: auto-extract and push from upload folder [skip ci]"
+            git push
+          fi
