@@ -145,7 +145,7 @@ dm.get("/dm/:id", async (req, res) => {
   if (error) throw error;
   const { data: rows, error: membersError } = await sb
     .from("sc_members")
-    .select("role, joined_at, sc_users(id, username, display_name, avatar_path)")
+    .select("role, joined_at, last_read_at, sc_users(id, username, display_name, avatar_path)")
     .eq("conversation_id", id)
     .order("joined_at", { ascending: true });
   if (membersError) throw membersError;
@@ -156,7 +156,12 @@ dm.get("/dm/:id", async (req, res) => {
     hasAvatar: Boolean(row.sc_users.avatar_path),
     role: row.role as Role
   }));
-  res.json({ id, isGroup: conv.is_group, title: conv.title, myRole: me.role, members });
+  // 既読の表示用：自分以外のメンバーがどこまで読んだか（last_read_at）
+  const viewer = currentUserId(res);
+  const readBy = (rows ?? [])
+    .filter((row: any) => row.sc_users.id !== viewer)
+    .map((row: any) => ({ id: row.sc_users.id, lastReadAt: row.last_read_at as string }));
+  res.json({ id, isGroup: conv.is_group, title: conv.title, myRole: me.role, members, readBy });
 });
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(40) });
@@ -328,7 +333,11 @@ dm.post("/dm/:id/read", async (req, res) => {
     res.status(404).json({ error: "会話が見つかりません。" });
     return;
   }
-  await sb.from("sc_members").update({ last_read_at: new Date().toISOString() }).eq("conversation_id", id).eq("user_id", me);
+  const readAt = new Date().toISOString();
+  const { error } = await sb.from("sc_members").update({ last_read_at: readAt }).eq("conversation_id", id).eq("user_id", me);
+  if (error) throw error;
+  // 既読をメンバー全員へ即時通知（相手の画面に「既読」を出すため）
+  await broadcastToConversation(id, { type: "read", conversationId: id, userId: me, readAt });
   res.json({ ok: true });
 });
 

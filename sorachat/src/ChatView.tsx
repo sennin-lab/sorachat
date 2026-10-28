@@ -17,7 +17,6 @@ import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
 import { ImageViewer } from "./ImageViewer";
 import { MessageMenu } from "./MessageMenu";
-import { REACTION_EMOJIS } from "./emojis";
 import { isSocketOpen, onChatEvent, sendChat } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
 import type { Conversation, Message } from "./types";
@@ -30,6 +29,11 @@ const HOUR = 60 * MINUTE;
 
 const errorText = (err: unknown) =>
   err instanceof ApiError ? err.message : "送信できませんでした。通信状態を確認してください。";
+
+type Reader = { id: string; lastReadAt: string };
+
+// ダブルタップ判定（この時間内に同じ吹き出しを2回押すと❤️）
+const DOUBLE_TAP_MS = 300;
 
 const newClientId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -116,8 +120,9 @@ export function ChatView({
   const [busy, setBusy] = useState(false);
   const [hasOlder, setHasOlder] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<Message | null>(null);
+  // 相手が既読にした時刻（1対1は1人分、グループは全員分）
+  const [readers, setReaders] = useState<Reader[]>([]);
   const [editing, setEditing] = useState<Message | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [viewing, setViewing] = useState<Message | null>(null);
@@ -134,6 +139,7 @@ export function ChatView({
   const pressTimer = useRef(0);
   const pressed = useRef(false);
   const noticeTimer = useRef(0);
+  const lastTap = useRef<{ id: string; at: number }>({ id: "", at: 0 });
 
   const commit = (next: Message[]) => {
     const sorted = [...next].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -158,6 +164,16 @@ export function ChatView({
   };
 
   const markRead = () => api(`/api/dm/${conversationId}/read`, post()).catch(() => undefined);
+
+  // 既読状況（相手がどこまで読んだか）を取得する
+  const loadReaders = async () => {
+    try {
+      const info = await api<{ readBy: Reader[] }>(`/api/dm/${conversationId}`);
+      setReaders(info.readBy);
+    } catch {
+      return;
+    }
+  };
 
   // 最新の50件を読み込む。キャッシュ済みの古いメッセージは消さずに残す
   const load = async () => {
@@ -196,10 +212,20 @@ export function ChatView({
 
   useEffect(() => {
     load();
+    loadReaders();
     markRead();
     return onChatEvent((event) => {
       if (event.type === "hello") {
         load();
+        loadReaders();
+        return;
+      }
+      if (event.type === "read" && event.conversationId === conversationId && event.userId !== meId) {
+        setReaders((current) =>
+          current.some((r) => r.id === event.userId)
+            ? current.map((r) => (r.id === event.userId ? { ...r, lastReadAt: event.readAt } : r))
+            : [...current, { id: event.userId, lastReadAt: event.readAt }]
+        );
         return;
       }
       if (event.type === "message" && event.message.conversationId === conversationId) {
@@ -334,7 +360,6 @@ export function ChatView({
   const discard = (m: Message) => commit(messagesRef.current.filter((x) => x.id !== m.id));
 
   const react = async (messageId: string, emoji: string) => {
-    setPickerFor(null);
     setMenuFor(null);
     try {
       await api(`/api/dm/messages/${messageId}/reactions`, post({ emoji }));
@@ -394,7 +419,6 @@ export function ChatView({
     window.clearTimeout(pressTimer.current);
     pressTimer.current = window.setTimeout(() => {
       pressed.current = true;
-      setPickerFor(null);
       setMenuFor(m);
       if (navigator.vibrate) navigator.vibrate(12);
     }, LONG_PRESS_MS);
@@ -405,6 +429,16 @@ export function ChatView({
   const isGroup = conversation?.isGroup ?? false;
   const menu = menuFor;
   const hasText = text.trim().length > 0;
+
+  // Instagram と同じく、既読表示は「自分が送った最後のメッセージ」にだけ出す
+  const lastMine = [...messages].reverse().find((m) => m.senderId === meId && !m.status && !m.deleted);
+  const readLabelFor = (m: Message) => {
+    if (!lastMine || lastMine.id !== m.id) return null;
+    const at = Date.parse(m.createdAt);
+    const readCount = readers.filter((r) => Date.parse(r.lastReadAt) >= at).length;
+    if (readCount === 0) return "送信済み";
+    return isGroup ? `既読 ${readCount}人` : "既読";
+  };
 
   return (
     <section className="chat">
@@ -448,7 +482,7 @@ export function ChatView({
         )}
       </header>
 
-      <div className="thread" ref={threadRef} onClick={() => setPickerFor(null)}>
+      <div className="thread" ref={threadRef}>
         {hasOlder && messages.length > 0 && (
           <button
             type="button"
@@ -478,6 +512,13 @@ export function ChatView({
             <Fragment key={m.id}>
               {info.divider && <div className="dm-divider">{info.divider}</div>}
               <div className={rowClass}>
+                {!mine && !isGroup && (
+                  <div className="msg-avatar">
+                    {!info.joinNext && conversation?.otherId && (
+                      <Avatar userId={conversation.otherId} hasAvatar={conversation.hasAvatar} name={conversation.name} size={26} />
+                    )}
+                  </div>
+                )}
                 <div className="msg-wrap">
                   {m.forwarded && !m.deleted && (
                     <span className="fwd-label">
@@ -503,7 +544,13 @@ export function ChatView({
                         setViewing(m);
                         return;
                       }
-                      setPickerFor(pickerFor === m.id ? null : m.id);
+                      const now = Date.now();
+                      if (lastTap.current.id === m.id && now - lastTap.current.at < DOUBLE_TAP_MS) {
+                        lastTap.current = { id: "", at: 0 };
+                        void react(m.id, "❤️");
+                        return;
+                      }
+                      lastTap.current = { id: m.id, at: now };
                     }}
                   >
                     {m.deleted ? (
@@ -549,15 +596,7 @@ export function ChatView({
                       ))}
                     </div>
                   )}
-                  {pickerFor === m.id && !m.deleted && (
-                    <div className="picker" onClick={(e) => e.stopPropagation()}>
-                      {REACTION_EMOJIS.map((emoji) => (
-                        <button key={emoji} onClick={() => void react(m.id, emoji)} aria-label={`${emoji} を付ける`}>
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {readLabelFor(m) && <div className="read-label">{readLabelFor(m)}</div>}
                 </div>
               </div>
             </Fragment>

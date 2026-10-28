@@ -65,7 +65,8 @@ export type ChatEvent =
   | { type: "message"; message: Message }
   | { type: "message_updated"; conversationId: string; id: string; body: string; editedAt: string }
   | { type: "message_deleted"; conversationId: string; id: string }
-  | { type: "reactions"; conversationId: string; messageId: string; reactions: Reaction[] };
+  | { type: "reactions"; conversationId: string; messageId: string; reactions: Reaction[] }
+  | { type: "read"; conversationId: string; userId: string; readAt: string };
 
 const chatListeners = new Set<(event: ChatEvent) => void>();
 

@@ -1,4 +1,4 @@
-/* SoraChat — Instagram のダイレクトメッセージ風のデザイン
+/* SoraChat — Instagram のダイレクトメッセージ風のデザイン（全画面）
    styles.css / messages.css より後に読み込み、同じ見た目を上書きします。 */
 
 :root {
@@ -33,16 +33,18 @@
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
 }
 
-html, body, #root { background: var(--bg); }
+html, body, #root { background: var(--bg); color: var(--text); }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif;
   -webkit-font-smoothing: antialiased;
+  letter-spacing: 0;
 }
 button { transition: background 0.15s ease, opacity 0.15s ease; }
 button:active { transform: none; opacity: 0.6; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input, textarea { font-family: inherit; }
 
-/* ---- 共通のアイコンボタン（枠なし・丸） ---- */
+/* ---- 共通のボタン ---- */
 .icon-btn {
   width: 36px;
   height: 36px;
@@ -56,46 +58,95 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .icon-btn:disabled { opacity: 0.35; }
 .icon-btn i { font-size: 20px; }
 
-/* ---- 左：会話一覧 ---- */
-.sidebar {
-  background: var(--panel);
-  padding-top: env(safe-area-inset-top);
+.btn {
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 0;
+  padding: 10px 14px;
 }
+.btn.primary, .line-primary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+.btn.danger { color: var(--danger); border: 1px solid var(--line); background: transparent; }
+.btn:disabled { opacity: 0.45; }
+.link { color: var(--accent); font-weight: 600; }
+.muted { color: var(--muted); }
+.error { color: var(--danger); }
+.notice { color: var(--muted); }
+
+/* ---- 左：メッセージ一覧（ホーム） ---- */
+.sidebar { background: var(--panel); padding-top: env(safe-area-inset-top); }
 
 .sidebar-head {
-  gap: 6px;
-  padding: 14px 12px 10px 16px;
+  gap: 4px;
+  padding: 14px 10px 8px 16px;
   border-bottom: 0;
 }
 .sidebar-head h1 {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  flex: 1;
+  margin: 0;
   padding-left: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 .sidebar-head h1::before { content: none; }
-.avatar-btn { width: 30px; height: 30px; }
+.avatar-btn { width: 30px; height: 30px; margin-right: 6px; }
 .avatar-btn .avatar { width: 30px !important; height: 30px !important; font-size: 13px !important; }
 .primary-icon { background: transparent; color: var(--text); }
 .primary-icon:hover { background: var(--raised); filter: none; }
 
-.convs { padding: 4px 0 12px; }
+.dm-search { padding: 2px 16px 10px; }
+.dm-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--muted);
+}
+.dm-search-field i { font-size: 14px; }
+.dm-search-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+  box-shadow: none;
+}
+.dm-search-field input::placeholder { color: var(--muted); }
+
+.convs { padding: 0 0 12px; margin: 0; list-style: none; }
 .conv {
   gap: 12px;
   margin: 0;
-  padding: 10px 16px;
+  padding: 8px 16px;
+  border: 0;
   border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: center;
 }
-.conv:hover { background: var(--raised); }
-.conv.active { background: var(--raised); }
+.conv:hover, .conv.active { background: var(--raised); }
 .conv .avatar { width: 56px !important; height: 56px !important; font-size: 22px !important; }
-.conv-body { gap: 2px; }
-.conv-top strong { font-size: 15px; font-weight: 400; color: var(--text); }
-.conv-top time { font-size: 12px; color: var(--muted); }
-.preview { font-size: 14px; color: var(--muted); }
+.conv-body { gap: 2px; min-width: 0; flex: 1; }
+.conv-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.conv-top strong { font-size: 15px; font-weight: 400; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-top time { font-size: 12px; color: var(--muted); flex: none; }
+.conv-bottom { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.preview { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .conv.unread .conv-top strong,
-.conv.unread .preview { font-weight: 600; color: var(--text); }
-
+.conv.unread .preview { font-weight: 700; color: var(--text); }
 .badge {
   width: 8px;
   min-width: 8px;
@@ -110,26 +161,41 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chat-pane { background: var(--bg); }
 
 .chat-head {
-  gap: 10px;
-  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
-.head-who { gap: 10px; padding: 4px; border-radius: 8px; }
-.head-who > span { gap: 1px; }
-.head-who strong { font-size: 15px; font-weight: 600; }
-.head-who .small { font-size: 12px; color: var(--muted); }
-.chat-head .icon-btn { font-size: 18px; }
-.back-btn { display: none; }
-
-@media (max-width: 759px) {
-  .back-btn { display: grid; }
+/* Instagram 同様に名前を中央へ。戻るボタンは幅だけ確保（PCでは非表示） */
+.back-btn { visibility: hidden; }
+.chat-head .icon-btn { font-size: 18px; justify-self: center; }
+.head-who {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
 }
+.head-who > span { display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 100%; }
+.head-who strong { max-width: 100%; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head-who .small { font-size: 12px; color: var(--muted); }
+.head-who:hover { background: var(--raised); }
 
 .thread {
-  background: var(--bg);
-  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
   gap: 0;
+  padding: 12px 12px 16px;
+  background: var(--bg);
 }
 
 /* 日付・時間の区切り（中央） */
@@ -137,6 +203,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   margin: 18px 0 10px;
   text-align: center;
   font-size: 12px;
+  font-weight: 600;
   color: var(--muted);
 }
 
@@ -152,9 +219,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .older-btn:disabled { opacity: 0.6; }
 
-.row { margin-top: 0; }
+.row { margin-top: 0; align-items: flex-end; }
 .row.group-start { margin-top: 10px; }
 .row.join-prev { margin-top: 2px; }
+
+/* 相手のアイコン（同じ人の連続では最後の1件だけ表示） */
+.msg-avatar { flex: none; width: 26px; margin-right: 6px; align-self: flex-end; }
 
 /* 吹き出し */
 .bubble {
@@ -166,7 +236,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   color: var(--bubble-in-text);
   box-shadow: none;
 }
-.bubble p { font-size: 15px; line-height: 1.42; }
+.bubble p { font-size: 15px; line-height: 1.42; margin: 0; word-break: break-word; }
 .bubble time { display: none; }
 .bubble.has-status time {
   display: block;
@@ -176,11 +246,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   color: var(--muted);
 }
 
-.row.mine .bubble {
-  background: var(--mine);
-  color: #ffffff;
-  border: 0;
-}
+.row.mine .bubble { background: var(--mine); color: #ffffff; border: 0; }
 .row.mine .bubble.has-status time { color: rgba(255, 255, 255, 0.75); }
 
 /* 同じ人の連続メッセージは、つながる側の角を小さくする */
@@ -191,12 +257,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .bubble.image { padding: 0; background: transparent; overflow: hidden; }
 .bubble.image img { max-width: 260px; border-radius: 22px; }
-.bubble.deleted {
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--muted);
-}
+.bubble.deleted { background: transparent; border: 1px solid var(--line); color: var(--muted); }
 .bubble .unsent { font-size: 14px; color: var(--muted); }
+
+/* 既読・送信済み（自分の最後のメッセージの下） */
+.read-label {
+  margin: 3px 4px 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
 
 .chips { margin-top: 2px; gap: 3px; }
 .chip {
@@ -204,22 +274,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--panel);
+  color: var(--text);
   font-size: 12px;
 }
 .chip.mine { border-color: var(--accent); }
-
-.picker {
-  border: 0;
-  border-radius: 999px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
-  padding: 4px 6px;
-  margin-top: 6px;
-}
+.chip.retry { color: var(--danger); border-color: var(--danger); }
 
 .fwd-label { font-size: 12px; color: var(--muted); }
 .retry-row { margin-top: 4px; }
-.chip.retry { color: var(--danger); border-color: var(--danger); }
 
 /* 入力欄（丸いピル型） */
 .composer {
@@ -233,17 +295,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .composer-field { flex: 1; min-width: 0; display: flex; }
 .composer textarea {
   flex: 1;
-  min-height: 40px;
+  min-height: 38px;
   max-height: 140px;
-  padding: 10px 16px;
+  padding: 9px 16px;
   border: 1px solid var(--line);
   border-radius: 22px;
   background: var(--bg);
+  color: var(--text);
   font-size: 15px;
   line-height: 1.35;
+  box-shadow: none;
 }
 .composer textarea::placeholder { color: var(--muted); }
-.composer textarea:focus { border-color: var(--muted); }
+.composer textarea:focus { border-color: var(--muted); box-shadow: none; }
 
 .send-btn {
   flex: none;
@@ -260,6 +324,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   padding: 8px 14px;
   background: var(--panel);
   border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* 空の状態（会話未選択） */
@@ -270,14 +336,51 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   color: var(--muted);
 }
 
-/* ---- 共通のシート・メニュー ---- */
-.sheet {
-  border-radius: 16px;
-  border-color: var(--line);
-  background: var(--panel);
+/* ---- 長押しメニュー（下から出るシート） ---- */
+.menu-backdrop, .sheet-backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: none;
+  place-items: end center;
+  padding: 0;
 }
-.msg-menu { border-radius: 16px; background: var(--panel); border-color: var(--line); }
-.menu-reactions { border-radius: 999px; background: var(--raised); }
+.msg-menu {
+  width: min(480px, 100%);
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  margin: 0;
+  gap: 0;
+  border: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--panel);
+  box-shadow: none;
+}
+.menu-reactions {
+  border-radius: 999px;
+  background: var(--raised);
+  margin-bottom: 6px;
+}
+.menu-preview {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.msg-menu > button {
+  padding: 15px 14px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 16px;
+  color: var(--text);
+}
+.msg-menu > button.cancel {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--raised);
+  justify-content: center;
+  font-weight: 600;
+}
+.msg-menu > button.danger { color: var(--danger); }
+
 .toast {
   border: 0;
   border-radius: 10px;
@@ -286,20 +389,149 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   bottom: calc(84px + env(safe-area-inset-bottom));
 }
 
-.btn.primary { background: var(--accent); }
-.seg { background: var(--raised); border: 0; }
+/* ---- シート（下から出る白いパネル） ---- */
+.sheet {
+  width: min(480px, 100%);
+  max-height: 88dvh;
+  gap: 14px;
+  padding: 10px 18px calc(18px + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--panel);
+  box-shadow: none;
+}
+.sheet::before {
+  content: "";
+  display: block;
+  width: 36px;
+  height: 5px;
+  margin: 0 auto 4px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.sheet h2, .sheet-title-row h2, .settings-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--text);
+}
+.eyebrow { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+
+.seg { background: var(--raised); border: 0; padding: 3px; border-radius: 9px; gap: 2px; }
+.seg button { padding: 8px; border-radius: 7px; font-size: 13px; color: var(--muted); }
 .seg button.on { background: var(--panel); color: var(--text); box-shadow: none; }
+.mode-tabs button { border-radius: 10px; border-color: var(--line); background: var(--panel); color: var(--muted); }
+.mode-tabs button.active { color: var(--accent); border-color: var(--accent); background: var(--panel); }
+
+.field { color: var(--text); font-size: 13px; font-weight: 600; }
 .field input, .field textarea {
-  border-radius: 10px;
-  border-color: var(--line);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: none;
 }
 .field input:focus, .field textarea:focus {
   border-color: var(--muted);
   box-shadow: none;
 }
+.field-hint { color: var(--muted); font-size: 12px; }
 
+.search-input-wrap > i { color: var(--muted); }
+.suggestions { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: none; }
+.suggestion:hover { background: var(--raised); }
+.suggestion + .suggestion { border-top: 1px solid var(--line); }
+.suggestion-copy small { color: var(--muted); }
+
+.settings-section, .settings-info-row { color: var(--text); }
+.theme-option { border-radius: 10px; }
+.theme-option.selected { border-color: var(--accent); }
+
+/* ---- 認証（ログイン・登録）---- */
+.auth { background: var(--bg); }
+.auth-card { gap: 12px; max-width: 350px; }
+.auth-card h1 {
+  margin: 0 0 4px;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-align: center;
+}
+.auth-card .lead { text-align: center; color: var(--muted); font-size: 14px; margin: 0 0 8px; }
+
+/* ---- LINE 風だった画面（プロフィール・設定・グループ）を Instagram 風に ---- */
+.line-screen { background: var(--bg); color: var(--text); }
+.line-screen .error { color: var(--danger); }
+.line-screen .notice { color: var(--muted); }
+
+.line-bar {
+  height: 50px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+.line-bar strong { font-size: 16px; font-weight: 600; }
+.line-bar button { color: var(--text); font-size: 24px; }
+
+.line-hero {
+  padding: 26px 20px 22px;
+  background: var(--panel);
+  color: var(--text);
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.line-hero .avatar { border: 0; }
+.line-hero h2 { font-size: 18px; font-weight: 700; }
+.line-hero .sub { font-size: 14px; color: var(--muted); opacity: 1; }
+.line-hero .bio { color: var(--text); }
+
+.line-card {
+  margin-top: 10px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.line-row { color: var(--text); border-bottom: 1px solid var(--line); }
+.line-row.danger { color: var(--danger); }
+.line-row .chev { color: var(--muted); }
+.line-row:last-child { border-bottom: 0; }
+.switch { accent-color: var(--accent); }
+
+.line-form { background: var(--panel); }
+.line-form input, .line-form textarea {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+.line-form .field { color: var(--muted); }
+.line-primary { border-radius: 8px; font-weight: 600; }
+.line-plain { color: var(--accent); font-weight: 600; }
+.line-mini { border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.line-mini.danger { color: var(--danger); border-color: var(--danger); background: var(--panel); }
+
+.line-note { background: var(--panel); color: var(--text); border-bottom: 1px solid var(--line); }
+.line-note .muted { color: var(--muted); }
+.line-note input { border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.note-tag { background: var(--raised); color: var(--text); }
+
+.round-action { color: var(--text); }
+.round-icon { background: var(--raised); color: var(--text); }
+.owner-tag { color: var(--accent); }
+.avatar { background: var(--raised); color: var(--text); }
+.group-count { color: var(--muted); }
+
+.bottom-space { height: calc(24px + env(safe-area-inset-bottom)); }
+
+/* ---- PC は2カラム（左：一覧、右：チャット） ---- */
 @media (min-width: 760px) {
   .app { grid-template-columns: 360px minmax(0, 1fr); }
   .sidebar { border-right: 1px solid var(--line); }
   .thread { max-width: none; margin: 0; }
+}
+@media (max-width: 759px) {
+  .back-btn { visibility: visible; }
 }
