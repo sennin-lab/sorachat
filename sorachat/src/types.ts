@@ -35,7 +35,13 @@ export type Message = {
   body: string | null;
   imageUrl: string | null;
   createdAt: string;
+  edited: boolean;
+  deleted: boolean;
+  forwarded: boolean;
   reactions: Reaction[];
+  clientId?: string | null;
+  // 送信中・送信失敗（ローカルだけの一時表示。保存しない）
+  status?: "sending" | "failed";
 };
 
 export type Member = {

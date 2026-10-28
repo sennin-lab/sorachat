@@ -7,7 +7,7 @@ import { ChatView } from "./ChatView";
 import { cachedConversations, saveConversations } from "./cache";
 import { ConversationList } from "./ConversationList";
 import { NewChatSheet } from "./NewChatSheet";
-import { onDataEvent, startDataSync } from "./realtime";
+import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { ProfileSheet } from "./ProfileSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import type { Conversation, Me } from "./types";
@@ -40,10 +40,11 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
 
   useEffect(() => {
     refresh();
+    connectRealtime();
     startDataSync(me.id).catch(() => undefined);
     calls.init({ id: me.id, name: me.displayName, hasAvatar: me.hasAvatar }).catch(() => undefined);
     const off = onDataEvent((event) => {
-      if (event.kind !== "reaction") scheduleRefresh();
+      if (event.kind === "change") scheduleRefresh();
     });
     const fallback = window.setInterval(refresh, 120_000);
     return () => {
@@ -85,6 +86,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
             conversationId={selectedId}
             meId={me.id}
             conversation={selected}
+            conversations={list}
             onBack={() => setSelectedId(null)}
             onActivity={scheduleRefresh}
           />

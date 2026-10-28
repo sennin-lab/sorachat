@@ -1,6 +1,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import { createServer } from "node:http";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,7 @@ import { accounts } from "./accounts.js";
 import { config } from "./config.js";
 import { dm } from "./dm.js";
 import { push } from "./push.js";
+import { attachRealtime } from "./realtime.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -47,6 +49,9 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(500).json({ error: "サーバーでエラーが発生しました。" });
 });
 
-app.listen(config.port, "0.0.0.0", () => {
+const server = createServer(app);
+attachRealtime(server);
+
+server.listen(config.port, "0.0.0.0", () => {
   console.log(`SoraChat listening on ${config.port}`);
 });

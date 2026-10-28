@@ -2,51 +2,39 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { isAllowedImage, readImage, saveImage, upload } from "./media.js";
-import { notifyRecipient } from "./push.js";
+import {
+  COLUMNS,
+  UUID,
+  broadcastList,
+  broadcastReactions,
+  broadcastToConversation,
+  insertMessage,
+  membership,
+  removeImageIfUnused,
+  summarize,
+  toMessage,
+  type MessageRow
+} from "./messages.js";
 import { sb } from "./supabase.js";
 
 export const dm = Router();
 dm.use("/dm", requireAuth);
 
-const UUID = /^[0-9a-f-]{36}$/i;
 const USERNAME = /^[a-z0-9_]{3,20}$/;
-const COLUMNS = "id, conversation_id, sender_id, kind, body, created_at";
 export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-type MessageRow = {
-  id: string;
-  conversation_id: string;
-  sender_id: string;
-  kind: "text" | "image";
-  body: string | null;
-  created_at: string;
-};
-
 type Role = "owner" | "member";
-type Reaction = { emoji: string; count: number; mine: boolean };
+type MessageWithPath = MessageRow & { image_path: string | null };
 
-const toMessage = (row: MessageRow, reactions: Reaction[]) => ({
-  id: row.id,
-  conversationId: row.conversation_id,
-  senderId: row.sender_id,
-  kind: row.kind,
-  body: row.body,
-  imageUrl: row.kind === "image" ? `/api/dm/messages/${row.id}/image` : null,
-  createdAt: row.created_at,
-  reactions
-});
-
-async function membership(conversationId: string, userId: string): Promise<{ role: Role } | null> {
-  if (!UUID.test(conversationId)) return null;
+const messageRow = async (messageId: string): Promise<MessageWithPath | null> => {
   const { data, error } = await sb
-    .from("sc_members")
-    .select("role")
-    .eq("conversation_id", conversationId)
-    .eq("user_id", userId)
+    .from("sc_messages")
+    .select(`${COLUMNS}, image_path`)
+    .eq("id", messageId)
     .maybeSingle();
   if (error) throw error;
-  return data ? { role: data.role as Role } : null;
-}
+  return (data as MessageWithPath | null) ?? null;
+};
 
 async function withReactions(rows: MessageRow[], viewer: string) {
   if (!rows.length) return [];
@@ -55,62 +43,13 @@ async function withReactions(rows: MessageRow[], viewer: string) {
     .select("message_id, user_id, emoji")
     .in("message_id", rows.map((r) => r.id));
   if (error) throw error;
-  const summary = new Map<string, Map<string, Reaction>>();
+  const grouped = new Map<string, { user_id: string; emoji: string }[]>();
   for (const r of (data ?? []) as { message_id: string; user_id: string; emoji: string }[]) {
-    const byEmoji = summary.get(r.message_id) ?? new Map<string, Reaction>();
-    const entry = byEmoji.get(r.emoji) ?? { emoji: r.emoji, count: 0, mine: false };
-    entry.count += 1;
-    if (r.user_id === viewer) entry.mine = true;
-    byEmoji.set(r.emoji, entry);
-    summary.set(r.message_id, byEmoji);
+    const list = grouped.get(r.message_id) ?? [];
+    list.push(r);
+    grouped.set(r.message_id, list);
   }
-  return rows.map((row) => toMessage(row, [...(summary.get(row.id)?.values() ?? [])]));
-}
-
-async function insertMessage(
-  conversationId: string,
-  senderId: string,
-  content: { kind: "text"; body: string } | { kind: "image"; imagePath: string },
-  preview: string
-) {
-  const now = new Date().toISOString();
-  const row =
-    content.kind === "text"
-      ? { kind: "text", body: content.body, image_path: null }
-      : { kind: "image", body: null, image_path: content.imagePath };
-  const { data, error } = await sb
-    .from("sc_messages")
-    .insert({ conversation_id: conversationId, sender_id: senderId, ...row })
-    .select(COLUMNS)
-    .single();
-  if (error) throw error;
-  await sb
-    .from("sc_conversations")
-    .update({ last_message_at: now, last_preview: preview.slice(0, 80), last_sender_id: senderId })
-    .eq("id", conversationId);
-  await sb
-    .from("sc_members")
-    .update({ last_read_at: now })
-    .eq("conversation_id", conversationId)
-    .eq("user_id", senderId);
-
-  const [{ data: sender }, { data: conv }, { data: others }] = await Promise.all([
-    sb.from("sc_users").select("display_name").eq("id", senderId).maybeSingle(),
-    sb.from("sc_conversations").select("is_group, title").eq("id", conversationId).maybeSingle(),
-    sb.from("sc_members").select("user_id").eq("conversation_id", conversationId).neq("user_id", senderId)
-  ]);
-  const senderName = conv?.is_group
-    ? `${sender?.display_name ?? "メンバー"}（${conv.title ?? "グループ"}）`
-    : sender?.display_name ?? "新着メッセージ";
-  for (const other of others ?? []) {
-    void notifyRecipient({
-      recipientId: other.user_id as string,
-      senderName,
-      preview: preview.slice(0, 80),
-      conversationId
-    });
-  }
-  return data as MessageRow;
+  return rows.map((row) => toMessage(row, summarize(grouped.get(row.id) ?? [], viewer)));
 }
 
 dm.get("/dm/conversations", async (_req, res) => {
@@ -236,6 +175,7 @@ dm.patch("/dm/:id", async (req, res) => {
   }
   const { error } = await sb.from("sc_conversations").update({ title: parsed.data.title }).eq("id", id).eq("is_group", true);
   if (error) throw error;
+  await broadcastList(id);
   res.json({ ok: true });
 });
 
@@ -268,6 +208,7 @@ dm.post("/dm/:id/members", async (req, res) => {
     { onConflict: "conversation_id,user_id", ignoreDuplicates: true }
   );
   if (error) throw error;
+  await broadcastList(id);
   res.json({ ok: true });
 });
 
@@ -281,6 +222,7 @@ dm.delete("/dm/:id/members/:userId", async (req, res) => {
   }
   const { error } = await sb.from("sc_members").delete().eq("conversation_id", id).eq("user_id", target);
   if (error) throw error;
+  await broadcastList(id);
   res.json({ ok: true });
 });
 
@@ -310,7 +252,11 @@ dm.post("/dm/:id/leave", async (req, res) => {
     if (next) await sb.from("sc_members").update({ role: "owner" }).eq("conversation_id", id).eq("user_id", next.user_id);
   }
   const { count } = await sb.from("sc_members").select("user_id", { count: "exact", head: true }).eq("conversation_id", id);
-  if (!count) await sb.from("sc_conversations").delete().eq("id", id);
+  if (!count) {
+    await sb.from("sc_conversations").delete().eq("id", id);
+  } else {
+    await broadcastList(id);
+  }
   res.json({ ok: true });
 });
 
@@ -332,7 +278,10 @@ dm.get("/dm/:id/messages", async (req, res) => {
   res.json(await withReactions(rows, me));
 });
 
-const textSchema = z.object({ body: z.string().trim().min(1).max(1000) });
+const textSchema = z.object({
+  body: z.string().trim().min(1).max(1000),
+  clientId: z.string().min(1).max(64).optional()
+});
 
 dm.post("/dm/:id/messages", async (req, res) => {
   const id = String(req.params.id);
@@ -346,8 +295,10 @@ dm.post("/dm/:id/messages", async (req, res) => {
     res.status(400).json({ error: "メッセージは1〜1000文字で入力してください。" });
     return;
   }
-  const row = await insertMessage(id, me, { kind: "text", body: parsed.data.body }, parsed.data.body);
-  res.status(201).json(toMessage(row, []));
+  const row = await insertMessage(id, me, { kind: "text", body: parsed.data.body }, parsed.data.body, {
+    clientId: parsed.data.clientId ?? null
+  });
+  res.status(201).json(toMessage(row, [], parsed.data.clientId ?? null));
 });
 
 dm.post("/dm/:id/image", upload.single("file"), async (req, res) => {
@@ -385,8 +336,8 @@ dm.post("/dm/messages/:messageId/reactions", async (req, res) => {
     res.status(400).json({ error: "この絵文字は使えません。" });
     return;
   }
-  const { data: msg } = await sb.from("sc_messages").select("conversation_id").eq("id", messageId).maybeSingle();
-  if (!msg || !(await membership(msg.conversation_id as string, me))) {
+  const msg = await messageRow(messageId);
+  if (!msg || msg.deleted_at || !(await membership(msg.conversation_id, me))) {
     res.status(404).json({ error: "メッセージが見つかりません。" });
     return;
   }
@@ -397,7 +348,119 @@ dm.post("/dm/messages/:messageId/reactions", async (req, res) => {
   } else {
     await sb.from("sc_reactions").insert(key);
   }
+  await broadcastReactions(msg.conversation_id, messageId);
   res.json({ ok: true, active: !existing });
+});
+
+const editSchema = z.object({ body: z.string().trim().min(1).max(1000) });
+
+dm.patch("/dm/messages/:messageId", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const me = currentUserId(res);
+  const msg = UUID.test(messageId) ? await messageRow(messageId) : null;
+  if (!msg) {
+    res.status(404).json({ error: "メッセージが見つかりません。" });
+    return;
+  }
+  if (msg.sender_id !== me) {
+    res.status(403).json({ error: "自分のメッセージだけ編集できます。" });
+    return;
+  }
+  if (msg.deleted_at || msg.kind !== "text") {
+    res.status(400).json({ error: "このメッセージは編集できません。" });
+    return;
+  }
+  const parsed = editSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "メッセージは1〜1000文字で入力してください。" });
+    return;
+  }
+  const body = parsed.data.body;
+  const editedAt = new Date().toISOString();
+  const { error } = await sb.from("sc_messages").update({ body, edited_at: editedAt }).eq("id", messageId);
+  if (error) throw error;
+  // 最新のメッセージなら一覧のプレビューも更新
+  await sb
+    .from("sc_conversations")
+    .update({ last_preview: body.slice(0, 80) })
+    .eq("id", msg.conversation_id)
+    .eq("last_message_at", msg.created_at);
+  await broadcastToConversation(msg.conversation_id, {
+    type: "message_updated",
+    conversationId: msg.conversation_id,
+    id: messageId,
+    body,
+    editedAt
+  });
+  await broadcastList(msg.conversation_id);
+  res.json({ ok: true, body, editedAt });
+});
+
+dm.delete("/dm/messages/:messageId", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const me = currentUserId(res);
+  const msg = UUID.test(messageId) ? await messageRow(messageId) : null;
+  if (!msg || msg.deleted_at) {
+    res.status(404).json({ error: "メッセージが見つかりません。" });
+    return;
+  }
+  if (msg.sender_id !== me) {
+    res.status(403).json({ error: "自分のメッセージだけ取り消せます。" });
+    return;
+  }
+  const deletedAt = new Date().toISOString();
+  const { error } = await sb
+    .from("sc_messages")
+    .update({ deleted_at: deletedAt, body: null, image_path: null })
+    .eq("id", messageId);
+  if (error) throw error;
+  await sb.from("sc_reactions").delete().eq("message_id", messageId);
+  if (msg.image_path) await removeImageIfUnused(msg.image_path);
+  await sb
+    .from("sc_conversations")
+    .update({ last_preview: "送信を取り消しました" })
+    .eq("id", msg.conversation_id)
+    .eq("last_message_at", msg.created_at);
+  await broadcastToConversation(msg.conversation_id, {
+    type: "message_deleted",
+    conversationId: msg.conversation_id,
+    id: messageId
+  });
+  await broadcastList(msg.conversation_id);
+  res.json({ ok: true });
+});
+
+const forwardSchema = z.object({ conversationId: z.string().regex(UUID) });
+
+dm.post("/dm/messages/:messageId/forward", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const me = currentUserId(res);
+  const parsed = forwardSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "送信先を選んでください。" });
+    return;
+  }
+  const source = UUID.test(messageId) ? await messageRow(messageId) : null;
+  if (!source || source.deleted_at || !(await membership(source.conversation_id, me))) {
+    res.status(404).json({ error: "メッセージが見つかりません。" });
+    return;
+  }
+  const target = parsed.data.conversationId;
+  if (!(await membership(target, me))) {
+    res.status(404).json({ error: "送信先が見つかりません。" });
+    return;
+  }
+  const content =
+    source.kind === "image" && source.image_path
+      ? { kind: "image" as const, imagePath: source.image_path }
+      : { kind: "text" as const, body: source.body ?? "" };
+  if (content.kind === "text" && !content.body) {
+    res.status(400).json({ error: "このメッセージは送信できません。" });
+    return;
+  }
+  const preview = content.kind === "text" ? content.body : "写真";
+  const row = await insertMessage(target, me, content, preview, { forwarded: true });
+  res.status(201).json(toMessage(row, []));
 });
 
 dm.get("/dm/messages/:messageId/image", async (req, res) => {
