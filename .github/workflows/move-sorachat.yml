@@ -1,0 +1,55 @@
+name: Move sorachat Contents to Root and Push
+
+on:
+  workflow_dispatch: # GitHub画面から手動で実行できるようにする
+  push:
+    paths:
+      - 'sorachat/**' # sorachatフォルダにファイルが追加・変更された時にも自動実行したい場合
+
+# リポジトリへの書き込み権限を付与
+permissions:
+  contents: write
+
+jobs:
+  move-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Gitユーザー情報のセットアップ
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: sorachatフォルダの中身をプロジェクトルートに移動
+        run: |
+          if [ -d "sorachat" ]; then
+            echo "sorachatフォルダが見つかりました。中身をプロジェクトルートに移動します..."
+            
+            # 隠しファイル（.envなど）も含めてルートに移動する設定
+            shopt -s dotglob
+            mv sorachat/* .
+            
+            # 空になったsorachatフォルダを削除
+            rm -rf sorachat
+            shopt -u dotglob
+            
+            echo "移動が完了しました。"
+          else
+            echo "sorachatフォルダが見つかりませんでした。"
+            exit 1
+          fi
+
+      - name: 変更をコミットしてプッシュ
+        run: |
+          git add .
+          git status
+          
+          # 変更差分がある場合のみコミットとプッシュを行う
+          if git diff --staged --quiet; then
+            echo "変更はありません。"
+          else
+            git commit -m "chore: move sorachat contents to root and push [skip ci]"
+            git push
+          fi
