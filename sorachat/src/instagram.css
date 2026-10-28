@@ -1,0 +1,305 @@
+/* SoraChat — Instagram のダイレクトメッセージ風のデザイン
+   styles.css / messages.css より後に読み込み、同じ見た目を上書きします。 */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --raised: #efefef;
+  --line: #dbdbdb;
+  --text: #262626;
+  --muted: #8e8e8e;
+  --accent: #0095f6;
+  --mine: #3797f0;
+  --bubble-in: #efefef;
+  --bubble-in-text: #262626;
+  --danger: #ed4956;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #000000;
+  --raised: #262626;
+  --line: #262626;
+  --text: #f5f5f5;
+  --muted: #a8a8a8;
+  --accent: #0095f6;
+  --mine: #3797f0;
+  --bubble-in: #262626;
+  --bubble-in-text: #f5f5f5;
+  --danger: #ff6b6b;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+}
+
+html, body, #root { background: var(--bg); }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button { transition: background 0.15s ease, opacity 0.15s ease; }
+button:active { transform: none; opacity: 0.6; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- 共通のアイコンボタン（枠なし・丸） ---- */
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  font-size: 20px;
+}
+.icon-btn:hover { background: var(--raised); }
+.icon-btn:disabled { opacity: 0.35; }
+.icon-btn i { font-size: 20px; }
+
+/* ---- 左：会話一覧 ---- */
+.sidebar {
+  background: var(--panel);
+  padding-top: env(safe-area-inset-top);
+}
+
+.sidebar-head {
+  gap: 6px;
+  padding: 14px 12px 10px 16px;
+  border-bottom: 0;
+}
+.sidebar-head h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  padding-left: 0;
+}
+.sidebar-head h1::before { content: none; }
+.avatar-btn { width: 30px; height: 30px; }
+.avatar-btn .avatar { width: 30px !important; height: 30px !important; font-size: 13px !important; }
+.primary-icon { background: transparent; color: var(--text); }
+.primary-icon:hover { background: var(--raised); filter: none; }
+
+.convs { padding: 4px 0 12px; }
+.conv {
+  gap: 12px;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 0;
+}
+.conv:hover { background: var(--raised); }
+.conv.active { background: var(--raised); }
+.conv .avatar { width: 56px !important; height: 56px !important; font-size: 22px !important; }
+.conv-body { gap: 2px; }
+.conv-top strong { font-size: 15px; font-weight: 400; color: var(--text); }
+.conv-top time { font-size: 12px; color: var(--muted); }
+.preview { font-size: 14px; color: var(--muted); }
+.conv.unread .conv-top strong,
+.conv.unread .preview { font-weight: 600; color: var(--text); }
+
+.badge {
+  width: 8px;
+  min-width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  font-size: 0;
+}
+
+/* ---- 右：チャット ---- */
+.chat-pane { background: var(--bg); }
+
+.chat-head {
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.head-who { gap: 10px; padding: 4px; border-radius: 8px; }
+.head-who > span { gap: 1px; }
+.head-who strong { font-size: 15px; font-weight: 600; }
+.head-who .small { font-size: 12px; color: var(--muted); }
+.chat-head .icon-btn { font-size: 18px; }
+.back-btn { display: none; }
+
+@media (max-width: 759px) {
+  .back-btn { display: grid; }
+}
+
+.thread {
+  background: var(--bg);
+  padding: 12px 14px 16px;
+  gap: 0;
+}
+
+/* 日付・時間の区切り（中央） */
+.dm-divider {
+  margin: 18px 0 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.older-btn {
+  align-self: center;
+  margin: 2px 0 14px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+}
+.older-btn:disabled { opacity: 0.6; }
+
+.row { margin-top: 0; }
+.row.group-start { margin-top: 10px; }
+.row.join-prev { margin-top: 2px; }
+
+/* 吹き出し */
+.bubble {
+  max-width: min(72%, 460px);
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--bubble-in);
+  color: var(--bubble-in-text);
+  box-shadow: none;
+}
+.bubble p { font-size: 15px; line-height: 1.42; }
+.bubble time { display: none; }
+.bubble.has-status time {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  text-align: right;
+  color: var(--muted);
+}
+
+.row.mine .bubble {
+  background: var(--mine);
+  color: #ffffff;
+  border: 0;
+}
+.row.mine .bubble.has-status time { color: rgba(255, 255, 255, 0.75); }
+
+/* 同じ人の連続メッセージは、つながる側の角を小さくする */
+.row:not(.mine).join-prev .bubble { border-top-left-radius: 6px; }
+.row:not(.mine).join-next .bubble { border-bottom-left-radius: 6px; }
+.row.mine.join-prev .bubble { border-top-right-radius: 6px; }
+.row.mine.join-next .bubble { border-bottom-right-radius: 6px; }
+
+.bubble.image { padding: 0; background: transparent; overflow: hidden; }
+.bubble.image img { max-width: 260px; border-radius: 22px; }
+.bubble.deleted {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.bubble .unsent { font-size: 14px; color: var(--muted); }
+
+.chips { margin-top: 2px; gap: 3px; }
+.chip {
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12px;
+}
+.chip.mine { border-color: var(--accent); }
+
+.picker {
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 4px 6px;
+  margin-top: 6px;
+}
+
+.fwd-label { font-size: 12px; color: var(--muted); }
+.retry-row { margin-top: 4px; }
+.chip.retry { color: var(--danger); border-color: var(--danger); }
+
+/* 入力欄（丸いピル型） */
+.composer {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.composer-attach { width: 36px; height: 36px; flex: none; }
+.composer-field { flex: 1; min-width: 0; display: flex; }
+.composer textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 140px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--bg);
+  font-size: 15px;
+  line-height: 1.35;
+}
+.composer textarea::placeholder { color: var(--muted); }
+.composer textarea:focus { border-color: var(--muted); }
+
+.send-btn {
+  flex: none;
+  padding: 8px 6px 8px 4px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+}
+.send-btn:disabled { opacity: 0.4; }
+
+.edit-bar {
+  padding: 8px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+/* 空の状態（会話未選択） */
+.empty {
+  flex-direction: column;
+  gap: 10px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* ---- 共通のシート・メニュー ---- */
+.sheet {
+  border-radius: 16px;
+  border-color: var(--line);
+  background: var(--panel);
+}
+.msg-menu { border-radius: 16px; background: var(--panel); border-color: var(--line); }
+.menu-reactions { border-radius: 999px; background: var(--raised); }
+.toast {
+  border: 0;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+.btn.primary { background: var(--accent); }
+.seg { background: var(--raised); border: 0; }
+.seg button.on { background: var(--panel); color: var(--text); box-shadow: none; }
+.field input, .field textarea {
+  border-radius: 10px;
+  border-color: var(--line);
+}
+.field input:focus, .field textarea:focus {
+  border-color: var(--muted);
+  box-shadow: none;
+}
+
+@media (min-width: 760px) {
+  .app { grid-template-columns: 360px minmax(0, 1fr); }
+  .sidebar { border-right: 1px solid var(--line); }
+  .thread { max-width: none; margin: 0; }
+}

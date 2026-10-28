@@ -114,6 +114,25 @@ export async function insertMessage(
   preview: string,
   options: { forwarded?: boolean; clientId?: string | null } = {}
 ): Promise<MessageRow> {
+  const clientId = options.clientId ?? null;
+
+  // 再送（タイムアウト後のリトライなど）は、既に保存済みのメッセージをそのまま返す
+  const findExisting = async () => {
+    const { data, error } = await sb
+      .from("sc_messages")
+      .select(COLUMNS)
+      .eq("conversation_id", conversationId)
+      .eq("sender_id", senderId)
+      .eq("client_id", clientId as string)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as MessageRow | null) ?? null;
+  };
+  if (clientId) {
+    const existing = await findExisting();
+    if (existing) return existing;
+  }
+
   const now = new Date().toISOString();
   const shortPreview = preview.slice(0, 80);
   const fields =
@@ -128,11 +147,19 @@ export async function insertMessage(
       sender_id: senderId,
       created_at: now,
       forwarded: options.forwarded ?? false,
+      client_id: clientId,
       ...fields
     })
     .select(COLUMNS)
     .single();
-  if (error) throw error;
+  if (error) {
+    // 同時に2回届いた場合（一意制約に違反）は、先に保存された方を返す
+    if (clientId && (error as { code?: string }).code === "23505") {
+      const existing = await findExisting();
+      if (existing) return existing;
+    }
+    throw error;
+  }
   const row = data as MessageRow;
 
   const [members] = await Promise.all([

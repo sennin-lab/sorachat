@@ -267,12 +267,16 @@ dm.get("/dm/:id/messages", async (req, res) => {
     res.status(404).json({ error: "会話が見つかりません。" });
     return;
   }
-  const { data, error } = await sb
-    .from("sc_messages")
-    .select(COLUMNS)
-    .eq("conversation_id", id)
-    .order("created_at", { ascending: false })
-    .limit(50);
+  // ?before=<ISO時刻> を渡すと、それより前の古いメッセージを50件返す（過去ログの読み込み用）
+  const beforeRaw = typeof req.query.before === "string" ? req.query.before : null;
+  const before = beforeRaw ? new Date(beforeRaw) : null;
+  if (before && Number.isNaN(before.getTime())) {
+    res.status(400).json({ error: "日時の指定が正しくありません。" });
+    return;
+  }
+  let query = sb.from("sc_messages").select(COLUMNS).eq("conversation_id", id);
+  if (before) query = query.lt("created_at", before.toISOString());
+  const { data, error } = await query.order("created_at", { ascending: false }).limit(50);
   if (error) throw error;
   const rows = ((data ?? []) as MessageRow[]).reverse();
   res.json(await withReactions(rows, me));

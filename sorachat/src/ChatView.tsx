@@ -1,9 +1,18 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  type PointerEvent
+} from "react";
 import { ApiError, api, delete_, patch, post } from "./api";
 import { Avatar } from "./Avatar";
 import { calls } from "./call";
 import { cachedMessages, saveMessages } from "./cache";
-import { formatTime } from "./format";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
 import { ImageViewer } from "./ImageViewer";
@@ -15,11 +24,22 @@ import type { Conversation, Message } from "./types";
 import "./messages.css";
 
 const LONG_PRESS_MS = 450;
+const PAGE_SIZE = 50;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 
 const errorText = (err: unknown) =>
   err instanceof ApiError ? err.message : "送信できませんでした。通信状態を確認してください。";
 
 const newClientId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+// IDで重複を除きつつ、後から渡した方（新しい情報）を優先してまとめる
+const mergeById = (base: Message[], incoming: Message[]) => {
+  const map = new Map<string, Message>();
+  for (const m of base) map.set(m.id, m);
+  for (const m of incoming) map.set(m.id, m);
+  return [...map.values()];
+};
 
 async function copyText(text: string) {
   try {
@@ -36,6 +56,42 @@ async function copyText(text: string) {
     area.remove();
     return ok;
   }
+}
+
+// 日付の区切りに出す文言（今日は時刻のみ、昨日は「昨日」、それ以外は日付つき）
+function dividerText(iso: string) {
+  const date = new Date(iso);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const time = date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+  if (date.toDateString() === now.toDateString()) return time;
+  if (date.toDateString() === yesterday.toDateString()) return `昨日 ${time}`;
+  const day = date.toLocaleDateString("ja-JP", { year: "numeric", month: "numeric", day: "numeric" });
+  return `${day} ${time}`;
+}
+
+// 直前・直後と比べて「区切り線を出すか」「同じ人の連続として束ねるか」を判定する
+function threadInfo(messages: Message[], index: number) {
+  const m = messages[index];
+  const prev = messages[index - 1];
+  const next = messages[index + 1];
+  const at = Date.parse(m.createdAt);
+
+  const prevGap = prev ? at - Date.parse(prev.createdAt) : Infinity;
+  const newSection = !prev || prevGap > HOUR || new Date(prev.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
+  const joinPrev = !newSection && prev.senderId === m.senderId && prevGap < 5 * MINUTE;
+
+  const nextGap = next ? Date.parse(next.createdAt) - at : Infinity;
+  const nextSection =
+    !next || nextGap > HOUR || new Date(next.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
+  const joinNext = !nextSection && next.senderId === m.senderId && nextGap < 5 * MINUTE;
+
+  return {
+    divider: newSection ? dividerText(m.createdAt) : null,
+    joinPrev,
+    joinNext
+  };
 }
 
 export function ChatView({
@@ -58,6 +114,8 @@ export function ChatView({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hasOlder, setHasOlder] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
@@ -70,6 +128,9 @@ export function ChatView({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const prependHeight = useRef<number | null>(null);
+  const loadingOlderRef = useRef(false);
   const pressTimer = useRef(0);
   const pressed = useRef(false);
   const noticeTimer = useRef(0);
@@ -83,11 +144,8 @@ export function ChatView({
 
   // 受信したメッセージを追加（同じ clientId の送信中表示は差し替える）
   const upsert = (incoming: Message[], dropClientId?: string | null) => {
-    const known = new Map(
-      messagesRef.current.filter((m) => !(dropClientId && m.clientId === dropClientId)).map((m) => [m.id, m])
-    );
-    for (const m of incoming) if (!known.has(m.id)) known.set(m.id, m);
-    commit([...known.values()]);
+    const base = messagesRef.current.filter((m) => !(dropClientId && m.clientId === dropClientId));
+    commit(mergeById(base, incoming));
   };
 
   const patchMessage = (id: string, change: (m: Message) => Message) =>
@@ -101,13 +159,38 @@ export function ChatView({
 
   const markRead = () => api(`/api/dm/${conversationId}/read`, post()).catch(() => undefined);
 
+  // 最新の50件を読み込む。キャッシュ済みの古いメッセージは消さずに残す
   const load = async () => {
     try {
       const list = await api<Message[]>(`/api/dm/${conversationId}/messages`);
-      const pendingLocal = messagesRef.current.filter((m) => m.status);
-      commit([...list, ...pendingLocal]);
+      if (list.length < PAGE_SIZE) setHasOlder(false);
+      const confirmed = messagesRef.current.filter((m) => !m.status);
+      const pending = messagesRef.current.filter((m) => m.status);
+      commit([...mergeById(confirmed, list), ...pending]);
     } catch {
       return;
+    }
+  };
+
+  // さらに古いメッセージを読み込む（表示位置は保ったまま上に追加する）
+  const loadOlder = async () => {
+    if (loadingOlderRef.current || !hasOlder) return;
+    const oldest = messagesRef.current.find((m) => !m.status);
+    if (!oldest) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const list = await api<Message[]>(
+        `/api/dm/${conversationId}/messages?before=${encodeURIComponent(oldest.createdAt)}`
+      );
+      if (list.length < PAGE_SIZE) setHasOlder(false);
+      prependHeight.current = threadRef.current?.scrollHeight ?? null;
+      commit(mergeById(list, messagesRef.current));
+    } catch {
+      flash("読み込めませんでした");
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
     }
   };
 
@@ -139,9 +222,20 @@ export function ChatView({
     });
   }, [conversationId]);
 
+  // 新しいメッセージが増えたときだけ最下部へ。過去分の追加では動かさない
+  const lastId = messages[messages.length - 1]?.id;
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length]);
+  }, [lastId]);
+
+  // 過去分を上に足したあと、読んでいた位置がずれないように補正する
+  useLayoutEffect(() => {
+    const el = threadRef.current;
+    if (prependHeight.current !== null && el) {
+      el.scrollTop += el.scrollHeight - prependHeight.current;
+    }
+    prependHeight.current = null;
+  }, [messages]);
 
   const dispatch = async (temp: Message) => {
     try {
@@ -174,7 +268,7 @@ export function ChatView({
     const body = text.trim();
     if (!body) return;
     if (editing) {
-      saveEdit(body);
+      void saveEdit(body);
       return;
     }
     const clientId = newClientId();
@@ -204,8 +298,10 @@ export function ChatView({
     submitText();
   };
 
+  // スマホはEnterで改行したいので、マウス・キーボード操作のときだけEnterで送信する
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches;
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !coarse) {
       event.preventDefault();
       formRef.current?.requestSubmit();
     }
@@ -242,7 +338,7 @@ export function ChatView({
     setMenuFor(null);
     try {
       await api(`/api/dm/messages/${messageId}/reactions`, post({ emoji }));
-      if (!isSocketOpen()) load();
+      if (!isSocketOpen()) void load();
     } catch (err) {
       setError(errorText(err));
     }
@@ -308,12 +404,13 @@ export function ChatView({
 
   const isGroup = conversation?.isGroup ?? false;
   const menu = menuFor;
+  const hasText = text.trim().length > 0;
 
   return (
     <section className="chat">
       <header className="chat-head">
-        <button className="icon-btn" onClick={onBack} aria-label="戻る">
-          ‹
+        <button className="icon-btn back-btn" onClick={onBack} aria-label="戻る">
+          <i className="fa-solid fa-chevron-left" />
         </button>
         <button
           className="head-who"
@@ -329,7 +426,7 @@ export function ChatView({
           <span>
             <strong>{conversation?.name ?? ""}</strong>
             {conversation && (
-              <span className="muted small">{isGroup ? `${conversation.memberCount}人` : `@${conversation.otherUsername}`}</span>
+              <span className="muted small">{isGroup ? `${conversation.memberCount}人のグループ` : `@${conversation.otherUsername}`}</span>
             )}
           </span>
         </button>
@@ -344,94 +441,126 @@ export function ChatView({
             <i className="fa-solid fa-phone" />
           </button>
         )}
+        {conversation && isGroup && (
+          <button className="icon-btn" aria-label="グループ情報" onClick={() => setShowInfo(true)}>
+            <i className="fa-solid fa-circle-info" />
+          </button>
+        )}
       </header>
 
-      <div className="thread" onClick={() => setPickerFor(null)}>
-        {messages.map((m) => {
+      <div className="thread" ref={threadRef} onClick={() => setPickerFor(null)}>
+        {hasOlder && messages.length > 0 && (
+          <button
+            type="button"
+            className="older-btn"
+            disabled={loadingOlder}
+            onClick={(e) => {
+              e.stopPropagation();
+              void loadOlder();
+            }}
+          >
+            {loadingOlder ? "読み込み中…" : "以前のメッセージを表示"}
+          </button>
+        )}
+
+        {messages.map((m, index) => {
+          const info = threadInfo(messages, index);
           const mine = m.senderId === meId;
           const showImage = m.kind === "image" && !m.deleted && m.imageUrl;
+          const hasStatus = Boolean(m.status) || (m.edited && !m.deleted);
+          const rowClass = [
+            "row",
+            mine ? "mine" : "",
+            info.joinPrev ? "join-prev" : "group-start",
+            info.joinNext ? "join-next" : ""
+          ].join(" ");
           return (
-            <div key={m.id} className={`row ${mine ? "mine" : ""}`}>
-              <div className="msg-wrap">
-                {m.forwarded && !m.deleted && (
-                  <span className="fwd-label">
-                    <i className="fa-solid fa-share" /> 転送
-                  </span>
-                )}
-                <div
-                  className={`bubble ${showImage ? "image" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""}`}
-                  onPointerDown={startPress(m)}
-                  onPointerUp={endPress}
-                  onPointerLeave={endPress}
-                  onPointerMove={endPress}
-                  onPointerCancel={endPress}
-                  onContextMenu={(e) => e.preventDefault()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (pressed.current) {
-                      pressed.current = false;
-                      return;
-                    }
-                    if (m.deleted || m.status) return;
-                    if (showImage) {
-                      setViewing(m);
-                      return;
-                    }
-                    setPickerFor(pickerFor === m.id ? null : m.id);
-                  }}
-                >
-                  {m.deleted ? (
-                    <p className="unsent">送信を取り消しました</p>
-                  ) : showImage ? (
-                    <img src={m.imageUrl!} alt="送信された画像" loading="lazy" draggable={false} />
-                  ) : (
-                    <p>{m.body}</p>
+            <Fragment key={m.id}>
+              {info.divider && <div className="dm-divider">{info.divider}</div>}
+              <div className={rowClass}>
+                <div className="msg-wrap">
+                  {m.forwarded && !m.deleted && (
+                    <span className="fwd-label">
+                      <i className="fa-solid fa-share" /> 転送
+                    </span>
                   )}
-                  <time>
-                    {m.status === "sending"
-                      ? "送信中…"
-                      : m.status === "failed"
-                        ? "送信できませんでした"
-                        : `${m.edited && !m.deleted ? "編集済み · " : ""}${formatTime(m.createdAt)}`}
-                  </time>
+                  <div
+                    className={`bubble ${showImage ? "image" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
+                    onPointerDown={startPress(m)}
+                    onPointerUp={endPress}
+                    onPointerLeave={endPress}
+                    onPointerMove={endPress}
+                    onPointerCancel={endPress}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (pressed.current) {
+                        pressed.current = false;
+                        return;
+                      }
+                      if (m.deleted || m.status) return;
+                      if (showImage) {
+                        setViewing(m);
+                        return;
+                      }
+                      setPickerFor(pickerFor === m.id ? null : m.id);
+                    }}
+                  >
+                    {m.deleted ? (
+                      <p className="unsent">送信を取り消しました</p>
+                    ) : showImage ? (
+                      <img src={m.imageUrl!} alt="送信された画像" loading="lazy" draggable={false} />
+                    ) : (
+                      <p>{m.body}</p>
+                    )}
+                    <time>
+                      {m.status === "sending"
+                        ? "送信中…"
+                        : m.status === "failed"
+                          ? "送信できませんでした"
+                          : m.edited && !m.deleted
+                            ? "編集済み"
+                            : ""}
+                    </time>
+                  </div>
+                  {m.status === "failed" && (
+                    <div className="retry-row">
+                      <button className="chip retry" onClick={() => retry(m)}>
+                        再送
+                      </button>
+                      <button className="chip" onClick={() => discard(m)}>
+                        削除
+                      </button>
+                    </div>
+                  )}
+                  {m.reactions.length > 0 && !m.deleted && (
+                    <div className="chips">
+                      {m.reactions.map((r) => (
+                        <button
+                          key={r.emoji}
+                          className={`chip ${r.mine ? "mine" : ""}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void react(m.id, r.emoji);
+                          }}
+                        >
+                          {r.emoji} {r.count}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {pickerFor === m.id && !m.deleted && (
+                    <div className="picker" onClick={(e) => e.stopPropagation()}>
+                      {REACTION_EMOJIS.map((emoji) => (
+                        <button key={emoji} onClick={() => void react(m.id, emoji)} aria-label={`${emoji} を付ける`}>
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {m.status === "failed" && (
-                  <div className="retry-row">
-                    <button className="chip retry" onClick={() => retry(m)}>
-                      再送
-                    </button>
-                    <button className="chip" onClick={() => discard(m)}>
-                      削除
-                    </button>
-                  </div>
-                )}
-                {m.reactions.length > 0 && !m.deleted && (
-                  <div className="chips">
-                    {m.reactions.map((r) => (
-                      <button
-                        key={r.emoji}
-                        className={`chip ${r.mine ? "mine" : ""}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          react(m.id, r.emoji);
-                        }}
-                      >
-                        {r.emoji} {r.count}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {pickerFor === m.id && !m.deleted && (
-                  <div className="picker" onClick={(e) => e.stopPropagation()}>
-                    {REACTION_EMOJIS.map((emoji) => (
-                      <button key={emoji} onClick={() => react(m.id, emoji)} aria-label={`${emoji} を付ける`}>
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
-            </div>
+            </Fragment>
           );
         })}
         <div ref={bottomRef} />
@@ -453,26 +582,31 @@ export function ChatView({
       <form className="composer" ref={formRef} onSubmit={onSubmit}>
         <button
           type="button"
-          className="icon-btn"
+          className="icon-btn composer-attach"
           onClick={() => fileRef.current?.click()}
           aria-label="画像を添付"
-          disabled={Boolean(editing)}
+          disabled={Boolean(editing) || busy}
         >
-          ＋
+          <i className="fa-regular fa-image" />
         </button>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={pickImage} />
-        <textarea
-          ref={textRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          maxLength={1000}
-          placeholder="メッセージ"
-        />
-        <button className="btn primary send" disabled={busy || !text.trim()}>
-          {editing ? "保存" : "送信"}
-        </button>
+        <div className="composer-field">
+          <textarea
+            ref={textRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            maxLength={1000}
+            placeholder={editing ? "メッセージを編集" : "メッセージを入力…"}
+            aria-label="メッセージ"
+          />
+        </div>
+        {(hasText || editing) && (
+          <button className="send-btn" disabled={busy || !hasText}>
+            {editing ? "保存" : "送信"}
+          </button>
+        )}
       </form>
 
       {menu && (
@@ -480,14 +614,14 @@ export function ChatView({
           message={menu}
           mine={menu.senderId === meId}
           onClose={() => setMenuFor(null)}
-          onReact={(emoji) => react(menu.id, emoji)}
-          onCopy={() => copy(menu)}
+          onReact={(emoji) => void react(menu.id, emoji)}
+          onCopy={() => void copy(menu)}
           onEdit={() => startEdit(menu)}
           onForward={() => {
             setMenuFor(null);
             setForwarding(menu);
           }}
-          onUnsend={() => unsend(menu)}
+          onUnsend={() => void unsend(menu)}
         />
       )}
       {forwarding && (

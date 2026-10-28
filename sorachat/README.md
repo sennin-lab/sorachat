@@ -21,9 +21,12 @@ iPad・スマホ向けのチャットアプリです。1対1とグループの�
 
 ## セットアップ
 
-1. Supabase の SQL Editor で次の順に実行します（どちらも再実行して問題ありません）。
+1. Supabase の SQL Editor で次の順に実行します（どれも再実行して問題ありません）。
    - `supabase/schema.sql`
    - `supabase/schema_v2.sql`
+   - `supabase/schema_v3.sql`（プロフィールの連絡先・Web サイト）
+   - `supabase/schema_v4.sql`（編集・送信取り消し・転送）
+   - `supabase/schema_v5.sql`（送信の重複防止・過去ログの読み込み）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。
@@ -53,6 +56,8 @@ iPad・スマホ向けのチャットアプリです。1対1とグループの�
 
 
 ## UI update notes
+
+- 画面のデザインは Instagram のダイレクトメッセージ風に変更しました（`src/instagram.css`）。自分の吹き出しは青、相手は灰色で、連続メッセージはまとめて表示します。未読は青い点で示します。
 
 - ライトテーマを初期設定にし、設定からライト / ダークを切り替えられます。選択したテーマはブラウザーに保存されます。
 - プロフィール編集で連絡先と Web サイト URL を設定できます。

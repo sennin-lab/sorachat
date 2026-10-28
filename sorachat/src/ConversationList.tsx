@@ -23,7 +23,11 @@ export function ConversationList({
     <ul className="convs">
       {list.map((c) => (
         <li key={c.id}>
-          <button className={`conv ${c.id === selectedId ? "active" : ""}`} onClick={() => onSelect(c.id)}>
+          <button
+            className={`conv ${c.id === selectedId ? "active" : ""} ${c.unread > 0 ? "unread" : ""}`}
+            onClick={() => onSelect(c.id)}
+            aria-label={c.unread > 0 ? `${c.name}（未読 ${c.unread}件）` : c.name}
+          >
             <Avatar
               userId={c.isGroup ? "" : c.otherId ?? ""}
               hasAvatar={c.hasAvatar}
@@ -39,7 +43,7 @@ export function ConversationList({
               </span>
               <span className="conv-bottom">
                 <span className="preview">{previewOf(c)}</span>
-                {c.unread > 0 && <span className="badge">{c.unread > 99 ? "99+" : c.unread}</span>}
+                {c.unread > 0 && <span className="badge" aria-hidden="true" />}
               </span>
             </span>
           </button>
