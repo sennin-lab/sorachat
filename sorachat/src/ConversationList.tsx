@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Avatar } from "./Avatar";
+import { Icon } from "./Icon";
 import { formatTime } from "./format";
 import type { Conversation } from "./types";
 
@@ -27,7 +28,7 @@ export function ConversationList({
     <>
       <div className="dm-search">
         <label className="dm-search-field">
-          <i className="fa-solid fa-magnifying-glass" aria-hidden="true" />
+          <Icon name="search" size={16} />
           <input
             type="search"
             value={query}
@@ -48,7 +49,10 @@ export function ConversationList({
                 onClick={() => onSelect(c.id)}
                 aria-label={c.unread > 0 ? `${c.name}（未読 ${c.unread}件）` : c.name}
               >
-                <Avatar userId={c.isGroup ? "" : c.otherId ?? ""} hasAvatar={c.hasAvatar} name={c.name} />
+                <span className="conv-avatar">
+                  {c.note && !c.isGroup && <span className="note-bubble">{c.note}</span>}
+                  <Avatar userId={c.isGroup ? "" : c.otherId ?? ""} hasAvatar={c.hasAvatar} name={c.name} />
+                </span>
                 <span className="conv-body">
                   <span className="conv-top">
                     <strong>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
 
 export function ImageViewer({ src, id, onClose }: { src: string; id: string; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -37,10 +38,10 @@ export function ImageViewer({ src, id, onClose }: { src: string; id: string; onC
     <div className="viewer" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} aria-label="閉じる">
-          <i className="fa-solid fa-xmark" />
+          <Icon name="close" size={24} />
         </button>
-        <button onClick={download} disabled={busy} aria-label="ダウンロード">
-          <i className="fa-solid fa-download" />
+        <button onClick={download} disabled={busy} aria-label="保存">
+          <Icon name="download" size={24} />
         </button>
       </div>
       <img src={src} alt="画像" onClick={(e) => e.stopPropagation()} />

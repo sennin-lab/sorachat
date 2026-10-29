@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { Avatar } from "./Avatar";
 import { calls } from "./call";
+import { Icon } from "./Icon";
 import type { UserProfile } from "./types";
 
 export function UserProfileSheet({ userId, onClose }: { userId: string; onClose: () => void }) {
@@ -9,47 +10,46 @@ export function UserProfileSheet({ userId, onClose }: { userId: string; onClose:
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    api<UserProfile>(`/api/users/${userId}/profile`)
-      .then(setProfile)
-      .catch(() => setFailed(true));
+    api<UserProfile>(`/api/users/${userId}/profile`).then(setProfile).catch(() => setFailed(true));
   }, [userId]);
 
   return (
-    <div className="line-screen" role="dialog">
-      <header className="line-bar">
-        <button onClick={onClose} aria-label="閉じる">
-          ‹
+    <div className="page" role="dialog" aria-label="プロフィール">
+      <header className="page-bar">
+        <button onClick={onClose} aria-label="戻る">
+          <Icon name="back" size={26} />
         </button>
-        <strong>プロフィール</strong>
+        <strong>{profile?.username ?? ""}</strong>
         <span />
       </header>
-      {failed && <p className="error">プロフィールを読み込めませんでした。</p>}
+      {failed && <p className="notice center error">プロフィールを読み込めませんでした。</p>}
       {profile && (
         <>
-          <div className="line-hero">
-            <Avatar userId={profile.id} hasAvatar={profile.hasAvatar} name={profile.displayName} size={96} />
-            <h2>{profile.displayName}</h2>
-            <p className="sub">@{profile.username}</p>
+          <div className="page-hero">
+            <Avatar userId={profile.id} hasAvatar={profile.hasAvatar} name={profile.displayName} size={86} />
+            <strong className="hero-name">{profile.displayName}</strong>
             {profile.bio && <p className="bio">{profile.bio}</p>}
-            {profile.contact && <p className="profile-extra"><i className="fa-solid fa-address-card" /> {profile.contact}</p>}
-            {profile.profileUrl && <p className="profile-extra"><i className="fa-solid fa-arrow-up-right-from-square" /> <a href={profile.profileUrl} target="_blank" rel="noreferrer">{profile.profileUrl}</a></p>}
+            {profile.contact && <p className="muted small">{profile.contact}</p>}
+            {profile.profileUrl && (
+              <a className="small link" href={profile.profileUrl} target="_blank" rel="noreferrer">
+                {profile.profileUrl}
+              </a>
+            )}
           </div>
           {profile.note && (
-            <div className="line-note">
+            <div className="note">
               <span className="note-tag">ノート</span>
               <span>{profile.note}</span>
             </div>
           )}
-          <div className="line-btn-row">
-            <button className="round-action" onClick={onClose}>
-              <span className="round-icon"><i className="fa-solid fa-comment-dots" /></span>
-              トーク
+          <div className="action-row">
+            <button className="btn-primary" onClick={onClose}>
+              メッセージ
             </button>
             <button
-              className="round-action"
+              className="btn-secondary"
               onClick={() => calls.start({ id: profile.id, name: profile.displayName, hasAvatar: profile.hasAvatar })}
             >
-              <span className="round-icon"><i className="fa-solid fa-phone" /></span>
               通話
             </button>
           </div>

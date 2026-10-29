@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiError, api, post } from "./api";
 
-type Mode = "choose" | "register" | "login";
+type Mode = "start" | "register" | "login";
 
 export function AuthScreen({ initialError }: { initialError: string | null }) {
-  const [mode, setMode] = useState<Mode>("choose");
+  const [mode, setMode] = useState<Mode>("start");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -32,21 +32,25 @@ export function AuthScreen({ initialError }: { initialError: string | null }) {
     }
   };
 
-  if (mode === "choose") {
+  if (mode === "start") {
     return (
       <div className="auth">
         <div className="auth-card">
-          <h1>SoraChat</h1>
-          <p className="lead">ひとりひとりとのDMを、静かに。</p>
-          {error && <p className="error">{error}</p>}
-          <a className="btn primary wide" href="/api/auth/sennin/login">
-            仙人アカウントで続行
+          <h1 className="wordmark">SoraChat</h1>
+          {error && <p className="notice error center">{error}</p>}
+          <a className="btn-primary wide" href="/api/auth/sennin/login">
+            仙人アカウントで続ける
           </a>
-          <button className="btn ghost wide" onClick={() => setMode("register")}>
-            ユーザー名とパスワードで新規登録
+          <div className="divider">
+            <span>または</span>
+          </div>
+          <button className="btn-secondary wide" onClick={() => setMode("login")}>
+            ログイン
           </button>
-          <button className="link" onClick={() => setMode("login")}>
-            ユーザー名とパスワードでログイン
+        </div>
+        <div className="auth-footer">
+          <button className="link" onClick={() => setMode("register")}>
+            アカウントを作成
           </button>
         </div>
       </div>
@@ -54,49 +58,47 @@ export function AuthScreen({ initialError }: { initialError: string | null }) {
   }
 
   const isRegister = mode === "register";
+  const ready = username && password && (!isRegister || displayName);
 
   return (
     <div className="auth">
       <form className="auth-card" onSubmit={submit}>
-        <button type="button" className="link start" onClick={() => setMode("choose")}>
-          ‹ 戻る
-        </button>
-        <h1>{isRegister ? "新規登録" : "ログイン"}</h1>
+        <h1 className="wordmark">SoraChat</h1>
         {isRegister && (
-          <label className="field">
-            <span>表示名</span>
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={40}
-              autoComplete="nickname"
-            />
-          </label>
+          <input
+            className="auth-input"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            maxLength={40}
+            placeholder="名前"
+            autoComplete="nickname"
+          />
         )}
-        <label className="field">
-          <span>ユーザー名（英小文字・数字・_）</span>
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoCapitalize="none"
-            autoCorrect="off"
-            autoComplete="username"
-            maxLength={20}
-          />
-        </label>
-        <label className="field">
-          <span>パスワード{isRegister ? "（8文字以上）" : ""}</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={isRegister ? "new-password" : "current-password"}
-            maxLength={72}
-          />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button className="btn primary wide" disabled={busy || !username || !password || (isRegister && !displayName)}>
-          {isRegister ? "登録して始める" : "ログイン"}
+        <input
+          className="auth-input"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="username"
+          maxLength={20}
+          placeholder="ユーザー名"
+        />
+        <input
+          className="auth-input"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete={isRegister ? "new-password" : "current-password"}
+          maxLength={72}
+          placeholder={isRegister ? "パスワード（8文字以上）" : "パスワード"}
+        />
+        {error && <p className="notice error center">{error}</p>}
+        <button className="btn-primary wide" disabled={busy || !ready}>
+          {isRegister ? "登録" : "ログイン"}
+        </button>
+        <button type="button" className="btn-text" onClick={() => setMode("start")}>
+          戻る
         </button>
       </form>
     </div>

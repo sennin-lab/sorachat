@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api, patch, post } from "./api";
 import { Avatar } from "./Avatar";
+import { Icon } from "./Icon";
 import type { Member } from "./types";
 
 type Detail = { id: string; isGroup: boolean; title: string; myRole: "owner" | "member"; members: Member[] };
@@ -58,21 +59,21 @@ export function GroupSheet({
   const isOwner = detail.myRole === "owner";
 
   return (
-    <div className="line-screen" role="dialog">
-      <header className="line-bar">
+    <div className="page" role="dialog">
+      <header className="page-bar">
         <button onClick={onClose} aria-label="閉じる">
-          ‹
+          <Icon name="back" size={26} />
         </button>
         <strong>グループ情報</strong>
         <span />
       </header>
-      <div className="line-hero">
+      <div className="page-hero">
         <Avatar userId="" hasAvatar={false} name={detail.title} size={96} />
         {isOwner ? (
           <div className="inline-edit">
             <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={40} />
             <button
-              className="line-mini"
+              className="btn-small"
               onClick={() => run(() => api(`/api/dm/${conversationId}`, patch({ title: title.trim() })).then(() => undefined), "グループ名を変更しました。")}
             >
               変更
@@ -84,8 +85,8 @@ export function GroupSheet({
         <p className="sub">{detail.members.length}人のメンバー</p>
       </div>
 
-      <div className="line-card">
-        <div className="line-form">
+      <div className="page-card">
+        <div className="page-form">
           <input
             value={adding}
             onChange={(e) => setAdding(e.target.value)}
@@ -94,7 +95,7 @@ export function GroupSheet({
             autoCorrect="off"
           />
           <button
-            className="line-primary"
+            className="btn-primary"
             disabled={!adding.trim()}
             onClick={() =>
               run(async () => {
@@ -108,7 +109,7 @@ export function GroupSheet({
           </button>
         </div>
         {detail.members.map((m) => (
-          <div className="line-row member" key={m.id}>
+          <div className="page-row member" key={m.id}>
             <Avatar userId={m.id} hasAvatar={m.hasAvatar} name={m.displayName} size={40} />
             <span className="member-name">
               {m.displayName}
@@ -118,7 +119,7 @@ export function GroupSheet({
             </span>
             {isOwner && m.id !== meId && (
               <button
-                className="line-mini danger"
+                className="btn-small danger"
                 onClick={() => run(() => api(`/api/dm/${conversationId}/members/${m.id}`, { method: "DELETE" }).then(() => undefined), "削除しました。")}
               >
                 削除
@@ -130,9 +131,9 @@ export function GroupSheet({
 
       {status && <p className="notice center">{status}</p>}
 
-      <div className="line-card">
+      <div className="page-card">
         <button
-          className="line-row danger"
+          className="page-row danger"
           onClick={async () => {
             try {
               await api(`/api/dm/${conversationId}/leave`, post());

@@ -1,4 +1,5 @@
 import { REACTION_EMOJIS } from "./emojis";
+import { Icon } from "./Icon";
 import type { Message } from "./types";
 
 export function MessageMenu({
@@ -9,6 +10,7 @@ export function MessageMenu({
   onCopy,
   onEdit,
   onForward,
+  onReply,
   onUnsend
 }: {
   message: Message;
@@ -18,10 +20,10 @@ export function MessageMenu({
   onCopy: () => void;
   onEdit: () => void;
   onForward: () => void;
+  onReply: () => void;
   onUnsend: () => void;
 }) {
   const isText = message.kind === "text" && !message.deleted;
-  const preview = message.kind === "image" ? "写真" : message.body ?? "";
 
   return (
     <div className="sheet-backdrop menu-backdrop" onClick={onClose}>
@@ -33,25 +35,29 @@ export function MessageMenu({
             </button>
           ))}
         </div>
-        {preview && <div className="menu-preview">{preview}</div>}
         {isText && (
           <button onClick={onCopy}>
-            <i className="fa-regular fa-copy" /> コピー
+            <Icon name="copy" size={20} /> コピー
           </button>
         )}
         {mine && isText && (
           <button onClick={onEdit}>
-            <i className="fa-solid fa-pen" /> 編集
+            <Icon name="edit" size={20} /> 編集
+          </button>
+        )}
+        {!message.deleted && (
+          <button onClick={onReply}>
+            <Icon name="reply" size={20} /> 返信
           </button>
         )}
         {!message.deleted && (
           <button onClick={onForward}>
-            <i className="fa-solid fa-share" /> ほかの人に送信
+            <Icon name="forward" size={20} /> 送信
           </button>
         )}
         {mine && !message.deleted && (
           <button className="danger" onClick={onUnsend}>
-            <i className="fa-solid fa-rotate-left" /> 送信取り消し
+            <Icon name="unsend" size={20} /> 送信を取り消す
           </button>
         )}
         <button className="cancel" onClick={onClose}>

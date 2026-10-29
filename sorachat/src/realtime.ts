@@ -102,6 +102,7 @@ function openSocket() {
 
   ws.onopen = () => {
     retryCount = 0;
+    reportPresence();
     emitChat({ type: "hello" });
     emit({ kind: "change" });
   };
@@ -139,12 +140,19 @@ function openSocket() {
   };
 }
 
+// 画面が前面にあるかをサーバーへ伝える。背面（iOSのロック・ホーム画面に戻った状態など）なら通知を送るため
+export function reportPresence() {
+  if (isSocketOpen()) socket!.send(JSON.stringify({ type: "presence", visible: !document.hidden }));
+}
+
 export function connectRealtime() {
   if (!listening) {
     listening = true;
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) connectRealtime();
+      reportPresence();
     });
+    window.addEventListener("pagehide", () => reportPresence());
     window.addEventListener("online", connectRealtime);
   }
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
@@ -153,9 +161,17 @@ export function connectRealtime() {
 }
 
 // 送信: 接続中はWebSocketで送り、サーバーの保存完了（ack）を待つ。切断中はHTTPで送る。
-export function sendChat(args: { clientId: string; conversationId: string; body: string }): Promise<Message> {
+export function sendChat(args: {
+  clientId: string;
+  conversationId: string;
+  body: string;
+  replyTo?: string | null;
+}): Promise<Message> {
   if (!isSocketOpen()) {
-    return api<Message>(`/api/dm/${args.conversationId}/messages`, post({ body: args.body, clientId: args.clientId }));
+    return api<Message>(
+      `/api/dm/${args.conversationId}/messages`,
+      post({ body: args.body, clientId: args.clientId, replyTo: args.replyTo ?? undefined })
+    );
   }
   return new Promise<Message>((resolve, reject) => {
     const timer = window.setTimeout(() => {
@@ -163,6 +179,6 @@ export function sendChat(args: { clientId: string; conversationId: string; body:
       reject(new Error("送信がタイムアウトしました。"));
     }, 10_000);
     pending.set(args.clientId, { resolve, reject, timer });
-    socket!.send(JSON.stringify({ type: "send", ...args }));
+    socket!.send(JSON.stringify({ type: "send", ...args, replyTo: args.replyTo ?? undefined }));
   });
 }

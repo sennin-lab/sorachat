@@ -15,12 +15,12 @@ import { calls } from "./call";
 import { cachedMessages, saveMessages } from "./cache";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
+import { Icon } from "./Icon";
 import { ImageViewer } from "./ImageViewer";
 import { MessageMenu } from "./MessageMenu";
 import { isSocketOpen, onChatEvent, sendChat } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
 import type { Conversation, Message } from "./types";
-import "./messages.css";
 
 const LONG_PRESS_MS = 450;
 const PAGE_SIZE = 50;
@@ -31,6 +31,18 @@ const errorText = (err: unknown) =>
   err instanceof ApiError ? err.message : "送信できませんでした。通信状態を確認してください。";
 
 type Reader = { id: string; lastReadAt: string };
+
+const replyPreview = (m: Message) => (m.deleted ? "送信を取り消しました" : m.kind === "image" ? "写真" : m.body ?? "");
+
+// 返信先のメッセージを吹き出しの上に引用表示する（Instagramと同じく、元の吹き出しを小さく見せる）
+function ReplyQuote({ target, meId, otherName }: { target: Message | null; meId: string; otherName: string }) {
+  return (
+    <div className="reply-quote">
+      <strong>{target ? (target.senderId === meId ? "自分" : otherName) : "返信"}</strong>
+      <span>{target ? replyPreview(target) : "元のメッセージ"}</span>
+    </div>
+  );
+}
 
 // ダブルタップ判定（この時間内に同じ吹き出しを2回押すと❤️）
 const DOUBLE_TAP_MS = 300;
@@ -124,6 +136,8 @@ export function ChatView({
   // 相手が既読にした時刻（1対1は1人分、グループは全員分）
   const [readers, setReaders] = useState<Reader[]>([]);
   const [editing, setEditing] = useState<Message | null>(null);
+  // 返信先（返信バーに表示中のメッセージ）
+  const [replying, setReplying] = useState<Message | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [viewing, setViewing] = useState<Message | null>(null);
   const [showInfo, setShowInfo] = useState(false);
@@ -265,7 +279,12 @@ export function ChatView({
 
   const dispatch = async (temp: Message) => {
     try {
-      const message = await sendChat({ clientId: temp.clientId!, conversationId, body: temp.body ?? "" });
+      const message = await sendChat({
+        clientId: temp.clientId!,
+        conversationId,
+        body: temp.body ?? "",
+        replyTo: temp.replyTo ?? null
+      });
       upsert([message], temp.clientId);
       onActivity();
     } catch {
@@ -297,7 +316,17 @@ export function ChatView({
       void saveEdit(body);
       return;
     }
+    enqueue(body);
+  };
+
+  const sendHeart = () => {
+    if (!editing) enqueue("❤️");
+  };
+
+  const enqueue = (body: string) => {
     const clientId = newClientId();
+    // 保存済みのメッセージにだけ返信できる（送信中のものは保存後のIDがまだないため）
+    const replyTo = replying && !replying.status ? replying.id : null;
     const temp: Message = {
       id: `tmp-${clientId}`,
       clientId,
@@ -311,8 +340,10 @@ export function ChatView({
       edited: false,
       deleted: false,
       forwarded: false,
+      replyTo,
       reactions: []
     };
+    setReplying(null);
     setText("");
     setError("");
     upsert([temp]);
@@ -375,6 +406,15 @@ export function ChatView({
     setText(m.body ?? "");
     textRef.current?.focus();
   };
+
+  const startReply = (m: Message) => {
+    setMenuFor(null);
+    setEditing(null);
+    setReplying(m);
+    textRef.current?.focus();
+  };
+
+  const cancelReply = () => setReplying(null);
 
   const cancelEdit = () => {
     setEditing(null);
@@ -444,7 +484,7 @@ export function ChatView({
     <section className="chat">
       <header className="chat-head">
         <button className="icon-btn back-btn" onClick={onBack} aria-label="戻る">
-          <i className="fa-solid fa-chevron-left" />
+          <Icon name="back" size={26} />
         </button>
         <button
           className="head-who"
@@ -472,12 +512,12 @@ export function ChatView({
               calls.start({ id: conversation.otherId!, name: conversation.name, hasAvatar: conversation.hasAvatar })
             }
           >
-            <i className="fa-solid fa-phone" />
+            <Icon name="phone" size={22} />
           </button>
         )}
         {conversation && isGroup && (
           <button className="icon-btn" aria-label="グループ情報" onClick={() => setShowInfo(true)}>
-            <i className="fa-solid fa-circle-info" />
+            <Icon name="info" size={22} />
           </button>
         )}
       </header>
@@ -522,7 +562,7 @@ export function ChatView({
                 <div className="msg-wrap">
                   {m.forwarded && !m.deleted && (
                     <span className="fwd-label">
-                      <i className="fa-solid fa-share" /> 転送
+                      <Icon name="forward" size={13} /> 転送
                     </span>
                   )}
                   <div
@@ -553,6 +593,13 @@ export function ChatView({
                       lastTap.current = { id: m.id, at: now };
                     }}
                   >
+                    {m.replyTo && !m.deleted && (
+                      <ReplyQuote
+                        target={messages.find((x) => x.id === m.replyTo) ?? null}
+                        meId={meId}
+                        otherName={conversation?.name ?? "相手"}
+                      />
+                    )}
                     {m.deleted ? (
                       <p className="unsent">送信を取り消しました</p>
                     ) : showImage ? (
@@ -607,10 +654,25 @@ export function ChatView({
 
       {error && <p className="error">{error}</p>}
 
+      {replying && !editing && (
+        <div className="reply-bar">
+          <div className="reply-bar-text">
+            <Icon name="reply" size={16} />
+            <span>
+              <strong>{replying.senderId === meId ? "自分" : conversation?.name ?? "相手"}</strong> に返信
+              <em>{replyPreview(replying)}</em>
+            </span>
+          </div>
+          <button type="button" className="icon-btn" onClick={cancelReply} aria-label="返信をやめる">
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+      )}
+
       {editing && (
         <div className="edit-bar">
           <span>
-            <i className="fa-solid fa-pen" /> メッセージを編集中
+            <Icon name="edit" size={16} /> メッセージを編集中
           </span>
           <button type="button" className="chip" onClick={cancelEdit}>
             やめる
@@ -619,15 +681,6 @@ export function ChatView({
       )}
 
       <form className="composer" ref={formRef} onSubmit={onSubmit}>
-        <button
-          type="button"
-          className="icon-btn composer-attach"
-          onClick={() => fileRef.current?.click()}
-          aria-label="画像を添付"
-          disabled={Boolean(editing) || busy}
-        >
-          <i className="fa-regular fa-image" />
-        </button>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={pickImage} />
         <div className="composer-field">
           <textarea
@@ -640,10 +693,25 @@ export function ChatView({
             placeholder={editing ? "メッセージを編集" : "メッセージを入力…"}
             aria-label="メッセージ"
           />
+          {!hasText && !editing && (
+            <button
+              type="button"
+              className="composer-icon"
+              onClick={() => fileRef.current?.click()}
+              aria-label="画像を添付"
+              disabled={busy}
+            >
+              <Icon name="image" size={24} />
+            </button>
+          )}
         </div>
-        {(hasText || editing) && (
+        {hasText || editing ? (
           <button className="send-btn" disabled={busy || !hasText}>
             {editing ? "保存" : "送信"}
+          </button>
+        ) : (
+          <button type="button" className="composer-icon heart" onClick={sendHeart} aria-label="❤️を送る">
+            <Icon name="heart" size={26} />
           </button>
         )}
       </form>
@@ -660,6 +728,7 @@ export function ChatView({
             setMenuFor(null);
             setForwarding(menu);
           }}
+          onReply={() => startReply(menu)}
           onUnsend={() => void unsend(menu)}
         />
       )}

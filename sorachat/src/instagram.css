@@ -1,537 +1,114 @@
-/* SoraChat — Instagram のダイレクトメッセージ風のデザイン（全画面）
-   styles.css / messages.css より後に読み込み、同じ見た目を上書きします。 */
+/* Instagram のダイレクトメッセージ風の追加スタイル（styles.css の後に読み込む） */
 
-:root {
-  color-scheme: light;
-  --bg: #ffffff;
-  --panel: #ffffff;
-  --raised: #efefef;
-  --line: #dbdbdb;
-  --text: #262626;
-  --muted: #8e8e8e;
-  --accent: #0095f6;
-  --mine: #3797f0;
-  --bubble-in: #efefef;
-  --bubble-in-text: #262626;
-  --danger: #ed4956;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #000000;
-  --panel: #000000;
-  --raised: #262626;
-  --line: #262626;
-  --text: #f5f5f5;
-  --muted: #a8a8a8;
-  --accent: #0095f6;
-  --mine: #3797f0;
-  --bubble-in: #262626;
-  --bubble-in-text: #f5f5f5;
-  --danger: #ff6b6b;
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
-}
-
-html, body, #root { background: var(--bg); color: var(--text); }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  letter-spacing: 0;
-}
-button { transition: background 0.15s ease, opacity 0.15s ease; }
-button:active { transform: none; opacity: 0.6; }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-input, textarea { font-family: inherit; }
-
-/* ---- 共通のボタン ---- */
-.icon-btn {
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text);
-  font-size: 20px;
-}
-.icon-btn:hover { background: var(--raised); }
-.icon-btn:disabled { opacity: 0.35; }
-.icon-btn i { font-size: 20px; }
-
-.btn {
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  border: 0;
-  padding: 10px 14px;
-}
-.btn.primary, .line-primary { background: var(--accent); color: #fff; border-color: transparent; }
-.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
-.btn.danger { color: var(--danger); border: 1px solid var(--line); background: transparent; }
-.btn:disabled { opacity: 0.45; }
-.link { color: var(--accent); font-weight: 600; }
-.muted { color: var(--muted); }
-.error { color: var(--danger); }
-.notice { color: var(--muted); }
-
-/* ---- 左：メッセージ一覧（ホーム） ---- */
-.sidebar { background: var(--panel); padding-top: env(safe-area-inset-top); }
-
-.sidebar-head {
-  gap: 4px;
-  padding: 14px 10px 8px 16px;
-  border-bottom: 0;
-}
-.sidebar-head h1 {
-  flex: 1;
-  margin: 0;
-  padding-left: 0;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-.sidebar-head h1::before { content: none; }
-.avatar-btn { width: 30px; height: 30px; margin-right: 6px; }
-.avatar-btn .avatar { width: 30px !important; height: 30px !important; font-size: 13px !important; }
-.primary-icon { background: transparent; color: var(--text); }
-.primary-icon:hover { background: var(--raised); filter: none; }
-
-.dm-search { padding: 2px 16px 10px; }
-.dm-search-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 12px;
-  border-radius: 10px;
-  background: var(--raised);
-  color: var(--muted);
-}
-.dm-search-field i { font-size: 14px; }
-.dm-search-field input {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 15px;
-  outline: none;
-  box-shadow: none;
-}
-.dm-search-field input::placeholder { color: var(--muted); }
-
-.convs { padding: 0 0 12px; margin: 0; list-style: none; }
-.conv {
-  gap: 12px;
-  margin: 0;
-  padding: 8px 16px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  width: 100%;
-  display: flex;
-  align-items: center;
-}
-.conv:hover, .conv.active { background: var(--raised); }
-.conv .avatar { width: 56px !important; height: 56px !important; font-size: 22px !important; }
-.conv-body { gap: 2px; min-width: 0; flex: 1; }
-.conv-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.conv-top strong { font-size: 15px; font-weight: 400; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conv-top time { font-size: 12px; color: var(--muted); flex: none; }
-.conv-bottom { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.preview { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-.conv.unread .conv-top strong,
-.conv.unread .preview { font-weight: 700; color: var(--text); }
-.badge {
-  width: 8px;
-  min-width: 8px;
-  height: 8px;
-  padding: 0;
-  border-radius: 50%;
-  background: var(--accent);
-  font-size: 0;
-}
-
-/* ---- 右：チャット ---- */
-.chat-pane { background: var(--bg); }
-
-.chat-head {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 8px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-}
-/* Instagram 同様に名前を中央へ。戻るボタンは幅だけ確保（PCでは非表示） */
-.back-btn { visibility: hidden; }
-.chat-head .icon-btn { font-size: 18px; justify-self: center; }
-.head-who {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 0;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--text);
-}
-.head-who > span { display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 100%; }
-.head-who strong { max-width: 100%; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.head-who .small { font-size: 12px; color: var(--muted); }
-.head-who:hover { background: var(--raised); }
-
-.thread {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 12px 12px 16px;
-  background: var(--bg);
-}
-
-/* 日付・時間の区切り（中央） */
-.dm-divider {
-  margin: 18px 0 10px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.older-btn {
-  align-self: center;
-  margin: 2px 0 14px;
-  padding: 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 13px;
-}
-.older-btn:disabled { opacity: 0.6; }
-
-.row { margin-top: 0; align-items: flex-end; }
-.row.group-start { margin-top: 10px; }
-.row.join-prev { margin-top: 2px; }
-
-/* 相手のアイコン（同じ人の連続では最後の1件だけ表示） */
-.msg-avatar { flex: none; width: 26px; margin-right: 6px; align-self: flex-end; }
-
-/* 吹き出し */
-.bubble {
-  max-width: min(72%, 460px);
-  padding: 8px 14px;
-  border: 0;
-  border-radius: 22px;
-  background: var(--bubble-in);
-  color: var(--bubble-in-text);
-  box-shadow: none;
-}
-.bubble p { font-size: 15px; line-height: 1.42; margin: 0; word-break: break-word; }
-.bubble time { display: none; }
-.bubble.has-status time {
-  display: block;
-  margin-top: 3px;
-  font-size: 11px;
-  text-align: right;
-  color: var(--muted);
-}
-
-.row.mine .bubble { background: var(--mine); color: #ffffff; border: 0; }
-.row.mine .bubble.has-status time { color: rgba(255, 255, 255, 0.75); }
-
-/* 同じ人の連続メッセージは、つながる側の角を小さくする */
-.row:not(.mine).join-prev .bubble { border-top-left-radius: 6px; }
-.row:not(.mine).join-next .bubble { border-bottom-left-radius: 6px; }
-.row.mine.join-prev .bubble { border-top-right-radius: 6px; }
-.row.mine.join-next .bubble { border-bottom-right-radius: 6px; }
-
-.bubble.image { padding: 0; background: transparent; overflow: hidden; }
-.bubble.image img { max-width: 260px; border-radius: 22px; }
-.bubble.deleted { background: transparent; border: 1px solid var(--line); color: var(--muted); }
-.bubble .unsent { font-size: 14px; color: var(--muted); }
-
-/* 既読・送信済み（自分の最後のメッセージの下） */
-.read-label {
-  margin: 3px 4px 0;
-  font-size: 12px;
-  color: var(--muted);
-  text-align: right;
-}
-
-.chips { margin-top: 2px; gap: 3px; }
-.chip {
-  padding: 1px 7px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 12px;
-}
-.chip.mine { border-color: var(--accent); }
-.chip.retry { color: var(--danger); border-color: var(--danger); }
-
-.fwd-label { font-size: 12px; color: var(--muted); }
-.retry-row { margin-top: 4px; }
-
-/* 入力欄（丸いピル型） */
-.composer {
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-}
-.composer-attach { width: 36px; height: 36px; flex: none; }
-.composer-field { flex: 1; min-width: 0; display: flex; }
-.composer textarea {
-  flex: 1;
-  min-height: 38px;
-  max-height: 140px;
-  padding: 9px 16px;
-  border: 1px solid var(--line);
-  border-radius: 22px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 15px;
-  line-height: 1.35;
-  box-shadow: none;
-}
-.composer textarea::placeholder { color: var(--muted); }
-.composer textarea:focus { border-color: var(--muted); box-shadow: none; }
-
-.send-btn {
+/* ---- ノート：DM一覧のアバターの上に小さな吹き出しで表示 ---- */
+.conv-avatar {
+  position: relative;
+  display: inline-flex;
   flex: none;
-  padding: 8px 6px 8px 4px;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font-size: 15px;
-  font-weight: 600;
 }
-.send-btn:disabled { opacity: 0.4; }
-
-.edit-bar {
-  padding: 8px 14px;
+.conv-avatar:has(.note-bubble) {
+  margin-top: 18px;
+}
+.note-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  max-width: 132px;
+  padding: 5px 10px;
+  border-radius: 16px;
   background: var(--panel);
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 13px;
-}
-
-/* 空の状態（会話未選択） */
-.empty {
-  flex-direction: column;
-  gap: 10px;
-  font-size: 15px;
-  color: var(--muted);
-}
-
-/* ---- 長押しメニュー（下から出るシート） ---- */
-.menu-backdrop, .sheet-backdrop {
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: none;
-  place-items: end center;
-  padding: 0;
-}
-.msg-menu {
-  width: min(480px, 100%);
-  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
-  margin: 0;
-  gap: 0;
-  border: 0;
-  border-radius: 14px 14px 0 0;
-  background: var(--panel);
-  box-shadow: none;
-}
-.menu-reactions {
-  border-radius: 999px;
-  background: var(--raised);
-  margin-bottom: 6px;
-}
-.menu-preview {
-  padding: 8px 14px;
-  font-size: 13px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
-}
-.msg-menu > button {
-  padding: 15px 14px;
-  border-radius: 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 16px;
+  box-shadow: 0 0 0 1px var(--line);
   color: var(--text);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }
-.msg-menu > button.cancel {
-  margin-top: 8px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--raised);
-  justify-content: center;
-  font-weight: 600;
-}
-.msg-menu > button.danger { color: var(--danger); }
-
-.toast {
-  border: 0;
-  border-radius: 10px;
-  background: var(--text);
-  color: var(--bg);
-  bottom: calc(84px + env(safe-area-inset-bottom));
-}
-
-/* ---- シート（下から出る白いパネル） ---- */
-.sheet {
-  width: min(480px, 100%);
-  max-height: 88dvh;
-  gap: 14px;
-  padding: 10px 18px calc(18px + env(safe-area-inset-bottom));
-  border: 0;
-  border-radius: 14px 14px 0 0;
-  background: var(--panel);
-  box-shadow: none;
-}
-.sheet::before {
+/* Instagram と同じ、吹き出し下の小さな丸（しっぽ） */
+.note-bubble::after,
+.note-bubble::before {
   content: "";
-  display: block;
-  width: 36px;
-  height: 5px;
-  margin: 0 auto 4px;
-  border-radius: 3px;
-  background: var(--line);
-}
-.sheet h2, .sheet-title-row h2, .settings-heading h2 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: var(--text);
-}
-.eyebrow { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
-
-.seg { background: var(--raised); border: 0; padding: 3px; border-radius: 9px; gap: 2px; }
-.seg button { padding: 8px; border-radius: 7px; font-size: 13px; color: var(--muted); }
-.seg button.on { background: var(--panel); color: var(--text); box-shadow: none; }
-.mode-tabs button { border-radius: 10px; border-color: var(--line); background: var(--panel); color: var(--muted); }
-.mode-tabs button.active { color: var(--accent); border-color: var(--accent); background: var(--panel); }
-
-.field { color: var(--text); font-size: 13px; font-weight: 600; }
-.field input, .field textarea {
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
-  box-shadow: none;
-}
-.field input:focus, .field textarea:focus {
-  border-color: var(--muted);
-  box-shadow: none;
-}
-.field-hint { color: var(--muted); font-size: 12px; }
-
-.search-input-wrap > i { color: var(--muted); }
-.suggestions { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: none; }
-.suggestion:hover { background: var(--raised); }
-.suggestion + .suggestion { border-top: 1px solid var(--line); }
-.suggestion-copy small { color: var(--muted); }
-
-.settings-section, .settings-info-row { color: var(--text); }
-.theme-option { border-radius: 10px; }
-.theme-option.selected { border-color: var(--accent); }
-
-/* ---- 認証（ログイン・登録）---- */
-.auth { background: var(--bg); }
-.auth-card { gap: 12px; max-width: 350px; }
-.auth-card h1 {
-  margin: 0 0 4px;
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
-  text-align: center;
-}
-.auth-card .lead { text-align: center; color: var(--muted); font-size: 14px; margin: 0 0 8px; }
-
-/* ---- LINE 風だった画面（プロフィール・設定・グループ）を Instagram 風に ---- */
-.line-screen { background: var(--bg); color: var(--text); }
-.line-screen .error { color: var(--danger); }
-.line-screen .notice { color: var(--muted); }
-
-.line-bar {
-  height: 50px;
-  padding: 0 8px;
+  position: absolute;
+  left: 50%;
+  border-radius: 50%;
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line);
+  transform: translateX(-50%);
 }
-.line-bar strong { font-size: 16px; font-weight: 600; }
-.line-bar button { color: var(--text); font-size: 24px; }
-
-.line-hero {
-  padding: 26px 20px 22px;
-  background: var(--panel);
-  color: var(--text);
-  gap: 6px;
-  border-bottom: 1px solid var(--line);
+.note-bubble::after {
+  top: 100%;
+  margin-top: 3px;
+  width: 6px;
+  height: 6px;
 }
-.line-hero .avatar { border: 0; }
-.line-hero h2 { font-size: 18px; font-weight: 700; }
-.line-hero .sub { font-size: 14px; color: var(--muted); opacity: 1; }
-.line-hero .bio { color: var(--text); }
+.note-bubble::before {
+  top: calc(100% + 11px);
+  margin-top: 0;
+  width: 3px;
+  height: 3px;
+}
 
-.line-card {
-  margin-top: 10px;
-  background: var(--panel);
+/* ---- 返信：吹き出しの中に返信元を引用表示 ---- */
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-left: 3px solid rgba(255, 255, 255, 0.75);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.row:not(.mine) .reply-quote {
+  border-left-color: var(--muted);
+  background: rgba(0, 0, 0, 0.05);
+}
+.reply-quote strong {
+  font-weight: 600;
+}
+.reply-quote span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+/* ---- 返信バー：入力欄の上に表示 ---- */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
   border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 13px;
 }
-.line-row { color: var(--text); border-bottom: 1px solid var(--line); }
-.line-row.danger { color: var(--danger); }
-.line-row .chev { color: var(--muted); }
-.line-row:last-child { border-bottom: 0; }
-.switch { accent-color: var(--accent); }
-
-.line-form { background: var(--panel); }
-.line-form input, .line-form textarea {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg);
+.reply-bar-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+}
+.reply-bar-text > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.reply-bar-text strong {
   color: var(--text);
+  font-weight: 600;
 }
-.line-form .field { color: var(--muted); }
-.line-primary { border-radius: 8px; font-weight: 600; }
-.line-plain { color: var(--accent); font-weight: 600; }
-.line-mini { border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
-.line-mini.danger { color: var(--danger); border-color: var(--danger); background: var(--panel); }
-
-.line-note { background: var(--panel); color: var(--text); border-bottom: 1px solid var(--line); }
-.line-note .muted { color: var(--muted); }
-.line-note input { border: 1px solid var(--line); background: var(--bg); color: var(--text); }
-.note-tag { background: var(--raised); color: var(--text); }
-
-.round-action { color: var(--text); }
-.round-icon { background: var(--raised); color: var(--text); }
-.owner-tag { color: var(--accent); }
-.avatar { background: var(--raised); color: var(--text); }
-.group-count { color: var(--muted); }
-
-.bottom-space { height: calc(24px + env(safe-area-inset-bottom)); }
-
-/* ---- PC は2カラム（左：一覧、右：チャット） ---- */
-@media (min-width: 760px) {
-  .app { grid-template-columns: 360px minmax(0, 1fr); }
-  .sidebar { border-right: 1px solid var(--line); }
-  .thread { max-width: none; margin: 0; }
-}
-@media (max-width: 759px) {
-  .back-btn { visibility: visible; }
+.reply-bar-text em {
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Avatar } from "./Avatar";
+import { Icon } from "./Icon";
 import type { Conversation } from "./types";
 
 export function ForwardSheet({
@@ -17,25 +18,29 @@ export function ForwardSheet({
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet forward-sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="sheet" role="dialog" aria-label="送信先" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-title-row">
-          <h2>ほかの人に送信</h2>
           <button className="icon-btn" onClick={onClose} aria-label="閉じる">
-            <i className="fa-solid fa-xmark" />
+            <Icon name="close" size={22} />
           </button>
+          <strong>送信先</strong>
+          <span />
         </div>
-        <input className="fwd-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="検索" />
-        <ul className="fwd-list">
+        <input className="search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="検索" />
+        <ul className="user-list">
           {list.map((c) => (
             <li key={c.id}>
               <button onClick={() => onPick(c.id)}>
-                <Avatar userId={c.isGroup ? "" : c.otherId ?? ""} hasAvatar={c.hasAvatar} name={c.name} size={36} />
-                <span>{c.name}</span>
+                <Avatar userId={c.isGroup ? "" : c.otherId ?? ""} hasAvatar={c.hasAvatar} name={c.name} size={44} />
+                <span className="user-text">
+                  <strong>{c.name}</strong>
+                </span>
+                <span className="send-chip">送信</span>
               </button>
             </li>
           ))}
         </ul>
-        {!list.length && <p className="muted">送信先がありません。</p>}
+        {!list.length && <p className="muted center">送信先がありません。</p>}
       </div>
     </div>
   );
