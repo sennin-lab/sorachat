@@ -82,7 +82,7 @@ export async function notifyRecipient(args: {
           await webpush.sendNotification(
             { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
             payload,
-            { TTL: 3600 }
+            { TTL: 3600, urgency: "high" }
           );
         } catch (error) {
           const status = (error as { statusCode?: number }).statusCode;

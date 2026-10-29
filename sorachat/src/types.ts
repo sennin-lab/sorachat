@@ -23,6 +23,8 @@ export type Conversation = {
   unread: number;
   myRole: "owner" | "member";
   memberCount: number;
+  // 相手のノート（24時間以内、1対1のみ）
+  note?: string | null;
 };
 
 export type Reaction = { emoji: string; count: number; mine: boolean };
@@ -38,6 +40,7 @@ export type Message = {
   edited: boolean;
   deleted: boolean;
   forwarded: boolean;
+  replyTo?: string | null;
   reactions: Reaction[];
   clientId?: string | null;
   // 送信中・送信失敗（ローカルだけの一時表示。保存しない）

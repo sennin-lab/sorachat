@@ -27,10 +27,23 @@ export function SettingsSheet({
     setBusy(true);
     setStatus("");
     setNotify(on);
+    // 許可ダイアログはユーザー操作の直後に出す必要があるため、APIを待つ前に通知の登録を始める
+    const pushResult = on ? enablePush() : null;
     try {
+      if (on) {
+        const result = await pushResult!;
+        if (!result.ok) {
+          // 許可されなかった場合はトグルを戻し、理由を表示する
+          setNotify(false);
+          setStatus(result.message);
+          onChange(await api<Me>("/api/me", patch({ notifyDm: false })));
+          return;
+        }
+        setStatus(result.message);
+      } else {
+        await disablePush();
+      }
       onChange(await api<Me>("/api/me", patch({ notifyDm: on })));
-      if (on) await enablePush();
-      else await disablePush();
     } catch (err) {
       setNotify(!on);
       setStatus(err instanceof ApiError ? err.message : "通知の設定を変更できませんでした。");

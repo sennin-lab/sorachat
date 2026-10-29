@@ -27,6 +27,7 @@ iPad・スマホ向けのチャットアプリです。1対1とグループの�
    - `supabase/schema_v3.sql`（プロフィールの連絡先・Web サイト）
    - `supabase/schema_v4.sql`（編集・送信取り消し・転送）
    - `supabase/schema_v5.sql`（送信の重複防止・過去ログの読み込み）
+   - `supabase/schema_v6.sql`（返信機能）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。
@@ -64,3 +65,10 @@ iPad・スマホ向けのチャットアプリです。1対1とグループの�
 - ユーザー名検索は候補を表示し、QR モードは対応ブラウザーのカメラで SoraChat のユーザー QR を読み取ります。
 - 追加したプロフィール項目を利用する前に、Supabase SQL Editor で `supabase/schema_v3.sql` を実行してください。
 - Font Awesome と Inter フォントは CDN から読み込みます。QR コード画像は QRServer の生成 API を利用します。
+
+## v6 の変更点
+
+- 通知：iOS で届かない問題を修正しました。通知の許可を求めるタイミング（操作直後）を直し、アプリが前面にあるときだけオンラインとして扱うようにしました（バックグラウンドのソケットが残っても通知を送ります）。アプリを開くたびに購読を登録し直します。
+- 返信：メッセージの長押しメニューの「返信」から返信できます。吹き出しの上に返信元を引用表示します。
+- ノート：DM一覧で、相手のノートを Instagram のように吹き出しで表示します（24時間で消えます）。
+- デザイン：`src/instagram.css` に、ノート・返信の表示を追加しました。

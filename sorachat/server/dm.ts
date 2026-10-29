@@ -134,6 +134,28 @@ dm.post("/dm/group", async (req, res) => {
   res.status(201).json({ id });
 });
 
+// DM一覧にノートを表示するため、指定ユーザーの有効なノートをまとめて返す（24時間以内のもの）
+dm.get("/dm/notes", async (req, res) => {
+  const ids = String(req.query.ids ?? "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => /^[0-9a-f-]{36}$/i.test(v))
+    .slice(0, 200);
+  if (!ids.length) {
+    res.json({});
+    return;
+  }
+  const { data, error } = await sb
+    .from("sc_notes")
+    .select("user_id, body, expires_at")
+    .in("user_id", ids)
+    .gt("expires_at", new Date().toISOString());
+  if (error) throw error;
+  const notes: Record<string, string> = {};
+  for (const row of (data ?? []) as { user_id: string; body: string }[]) notes[row.user_id] = row.body;
+  res.json(notes);
+});
+
 dm.get("/dm/:id", async (req, res) => {
   const id = String(req.params.id);
   const me = await membership(id, currentUserId(res));
@@ -289,7 +311,8 @@ dm.get("/dm/:id/messages", async (req, res) => {
 
 const textSchema = z.object({
   body: z.string().trim().min(1).max(1000),
-  clientId: z.string().min(1).max(64).optional()
+  clientId: z.string().min(1).max(64).optional(),
+  replyTo: z.string().max(36).optional()
 });
 
 dm.post("/dm/:id/messages", async (req, res) => {
@@ -305,7 +328,8 @@ dm.post("/dm/:id/messages", async (req, res) => {
     return;
   }
   const row = await insertMessage(id, me, { kind: "text", body: parsed.data.body }, parsed.data.body, {
-    clientId: parsed.data.clientId ?? null
+    clientId: parsed.data.clientId ?? null,
+    replyTo: parsed.data.replyTo ?? null
   });
   res.status(201).json(toMessage(row, [], parsed.data.clientId ?? null));
 });

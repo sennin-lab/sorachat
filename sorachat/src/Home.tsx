@@ -10,6 +10,7 @@ import { Icon } from "./Icon";
 import { NewChatSheet } from "./NewChatSheet";
 import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { ProfileSheet } from "./ProfileSheet";
+import { refreshPushSubscription } from "./push";
 import type { Conversation, Me } from "./types";
 
 export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me) => void; onLogout: () => void }) {
@@ -28,13 +29,20 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   }, [theme]);
 
   const refresh = useCallback(async () => {
+    let next: Conversation[];
     try {
-      const next = await api<Conversation[]>("/api/dm/conversations");
-      setList(next);
-      saveConversations(next);
+      next = await api<Conversation[]>("/api/dm/conversations");
     } catch {
       return;
     }
+    // 相手のノートを一緒に取得し、DM一覧の吹き出しに使う（取得に失敗しても一覧は表示する）
+    const ids = next.filter((c) => !c.isGroup && c.otherId).map((c) => c.otherId!);
+    const notes = ids.length
+      ? await api<Record<string, string>>(`/api/dm/notes?ids=${ids.join(",")}`).catch(() => ({} as Record<string, string>))
+      : {};
+    const withNotes = next.map((c) => ({ ...c, note: c.otherId ? notes[c.otherId] ?? null : null }));
+    setList(withNotes);
+    saveConversations(withNotes);
   }, []);
 
   const scheduleRefresh = useCallback(() => {
@@ -45,6 +53,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   useEffect(() => {
     refresh();
     connectRealtime();
+    if (me.notifyDm) refreshPushSubscription();
     startDataSync(me.id).catch(() => undefined);
     calls.init({ id: me.id, name: me.displayName, hasAvatar: me.hasAvatar }).catch(() => undefined);
     const off = onDataEvent((event) => {
