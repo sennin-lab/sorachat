@@ -3,7 +3,7 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { z } from "zod";
 import { SESSION_COOKIE, sha256 } from "./auth.js";
-import { addSocket, removeSocket, setVisible } from "./hub.js";
+import { addSocket, removeSocket } from "./hub.js";
 import { UUID, insertMessage, membership, toMessage } from "./messages.js";
 import { sb } from "./supabase.js";
 
@@ -13,11 +13,8 @@ const sendSchema = z.object({
   type: z.literal("send"),
   clientId: z.string().min(1).max(64),
   conversationId: z.string().regex(UUID),
-  body: z.string().trim().min(1).max(1000),
-  replyTo: z.string().regex(UUID).optional()
+  body: z.string().trim().min(1).max(1000)
 });
-
-const presenceSchema = z.object({ type: z.literal("presence"), visible: z.boolean() });
 
 async function userFromRequest(req: IncomingMessage): Promise<string | null> {
   const match = req.headers.cookie?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
@@ -99,24 +96,19 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
   } catch {
     return;
   }
-  if (data?.type === "presence") {
-    const presence = presenceSchema.safeParse(data);
-    if (presence.success) setVisible(ws, presence.data.visible);
-    return;
-  }
   if (data?.type !== "send") return;
   const parsed = sendSchema.safeParse(data);
   if (!parsed.success) {
     reply(ws, { type: "error", clientId: typeof data.clientId === "string" ? data.clientId : null, error: "メッセージは1〜1000文字で入力してください。" });
     return;
   }
-  const { clientId, conversationId, body, replyTo } = parsed.data;
+  const { clientId, conversationId, body } = parsed.data;
   try {
     if (!(await membership(conversationId, userId))) {
       reply(ws, { type: "error", clientId, error: "会話が見つかりません。" });
       return;
     }
-    const row = await insertMessage(conversationId, userId, { kind: "text", body }, body, { clientId, replyTo: replyTo ?? null });
+    const row = await insertMessage(conversationId, userId, { kind: "text", body }, body, { clientId });
     reply(ws, { type: "ack", clientId, message: toMessage(row, [], clientId) });
   } catch {
     reply(ws, { type: "error", clientId, error: "送信できませんでした。" });

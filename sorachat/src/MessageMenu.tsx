@@ -10,7 +10,6 @@ export function MessageMenu({
   onCopy,
   onEdit,
   onForward,
-  onReply,
   onUnsend
 }: {
   message: Message;
@@ -20,7 +19,6 @@ export function MessageMenu({
   onCopy: () => void;
   onEdit: () => void;
   onForward: () => void;
-  onReply: () => void;
   onUnsend: () => void;
 }) {
   const isText = message.kind === "text" && !message.deleted;
@@ -43,11 +41,6 @@ export function MessageMenu({
         {mine && isText && (
           <button onClick={onEdit}>
             <Icon name="edit" size={20} /> 編集
-          </button>
-        )}
-        {!message.deleted && (
-          <button onClick={onReply}>
-            <Icon name="reply" size={20} /> 返信
           </button>
         )}
         {!message.deleted && (
