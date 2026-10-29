@@ -23,6 +23,8 @@ const PATHS: Record<string, string> = {
   chevron: '<polyline points="9 6 15 12 9 18"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21.2l7.8-7.8 1-1.1a5.5 5.5 0 0 0 0-7.7z"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M5 17a4 4 0 0 1 8 0M16 10h4M16 14h4"/>',
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
 };
 

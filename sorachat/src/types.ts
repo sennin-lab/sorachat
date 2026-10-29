@@ -31,9 +31,13 @@ export type Message = {
   id: string;
   conversationId: string;
   senderId: string;
-  kind: "text" | "image";
+  kind: "text" | "image" | "file" | "contact";
   body: string | null;
   imageUrl: string | null;
+  fileName?: string | null;
+  fileSize?: number | null;
+  fileUrl?: string | null;
+  contact?: { id: string; username: string; displayName: string; hasAvatar: boolean } | null;
   createdAt: string;
   edited: boolean;
   deleted: boolean;

@@ -20,9 +20,23 @@ import { ImageViewer } from "./ImageViewer";
 import { MessageMenu } from "./MessageMenu";
 import { isSocketOpen, onChatEvent, sendChat } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
+import { AttachSheet } from "./AttachSheet";
+import { ContactSheet } from "./ContactSheet";
 import type { Conversation, Message } from "./types";
 
-const LONG_PRESS_MS = 450;
+type ContactInfo = NonNullable<Message["contact"]>;
+
+// Android は長押しの前に指の小さな動きでスクロール扱いになり、長押しが取り消されることがある。
+// 判定を少し早め、動きは一定距離を超えたときだけ取り消す。
+const LONG_PRESS_MS = 380;
+const PRESS_MOVE_PX = 12;
+
+const formatSize = (bytes?: number | null) => {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+};
 const PAGE_SIZE = 50;
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -128,10 +142,15 @@ export function ChatView({
   const [viewing, setViewing] = useState<Message | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactUser, setContactUser] = useState<ContactInfo | null>(null);
   const messagesRef = useRef(messages);
   const formRef = useRef<HTMLFormElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const anyFileRef = useRef<HTMLInputElement>(null);
+  const pressStart = useRef({ x: 0, y: 0 });
   const bottomRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const prependHeight = useRef<number | null>(null);
@@ -343,16 +362,41 @@ export function ChatView({
     }
   };
 
-  const pickImage = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
+  // 画像・ファイルを送る（同じ形で送信し、返ってきたメッセージを表示する）
+  const uploadFile = async (path: "image" | "file", file: File) => {
     setBusy(true);
     setError("");
     try {
       const form = new FormData();
       form.append("file", file);
-      const message = await api<Message>(`/api/dm/${conversationId}/image`, { method: "POST", body: form });
+      const message = await api<Message>(`/api/dm/${conversationId}/${path}`, { method: "POST", body: form });
+      upsert([message]);
+      onActivity();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pickImage = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void uploadFile("image", file);
+  };
+
+  const pickAnyFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void uploadFile("file", file);
+  };
+
+  const shareContact = async (username: string) => {
+    setContactOpen(false);
+    setBusy(true);
+    setError("");
+    try {
+      const message = await api<Message>(`/api/dm/${conversationId}/contact`, post({ username }));
       upsert([message]);
       onActivity();
     } catch (err) {
@@ -422,16 +466,23 @@ export function ChatView({
     }
   };
 
-  // 長押しでメニュー。指が動いたり離れたりしたら取り消す
+  // 長押しでメニュー。指が大きく動いたとき（スクロール）だけ取り消す
   const startPress = (m: Message) => (event: PointerEvent) => {
     if (m.status || event.button > 0) return;
     pressed.current = false;
+    pressStart.current = { x: event.clientX, y: event.clientY };
     window.clearTimeout(pressTimer.current);
     pressTimer.current = window.setTimeout(() => {
       pressed.current = true;
       setMenuFor(m);
       if (navigator.vibrate) navigator.vibrate(12);
     }, LONG_PRESS_MS);
+  };
+
+  const movePress = (event: PointerEvent) => {
+    const dx = event.clientX - pressStart.current.x;
+    const dy = event.clientY - pressStart.current.y;
+    if (Math.hypot(dx, dy) > PRESS_MOVE_PX) window.clearTimeout(pressTimer.current);
   };
 
   const endPress = () => window.clearTimeout(pressTimer.current);
@@ -539,8 +590,7 @@ export function ChatView({
                     className={`bubble ${showImage ? "image" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
                     onPointerDown={startPress(m)}
                     onPointerUp={endPress}
-                    onPointerLeave={endPress}
-                    onPointerMove={endPress}
+                    onPointerMove={movePress}
                     onPointerCancel={endPress}
                     onContextMenu={(e) => e.preventDefault()}
                     onClick={(e) => {
@@ -567,6 +617,36 @@ export function ChatView({
                       <p className="unsent">送信を取り消しました</p>
                     ) : showImage ? (
                       <img src={m.imageUrl!} alt="送信された画像" loading="lazy" draggable={false} />
+                    ) : m.kind === "file" && m.fileUrl ? (
+                      <a
+                        className="file-card"
+                        href={m.fileUrl}
+                        download={m.fileName ?? undefined}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (pressed.current) e.preventDefault();
+                        }}
+                      >
+                        <Icon name="file" size={28} />
+                        <span className="file-text">
+                          <strong>{m.fileName}</strong>
+                          <small>{formatSize(m.fileSize)}</small>
+                        </span>
+                      </a>
+                    ) : m.kind === "contact" && m.contact ? (
+                      <button
+                        className="contact-card"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!pressed.current) setContactUser(m.contact ?? null);
+                        }}
+                      >
+                        <Avatar userId={m.contact.id} hasAvatar={m.contact.hasAvatar} name={m.contact.displayName} size={40} />
+                        <span className="file-text">
+                          <strong>{m.contact.displayName}</strong>
+                          <small>@{m.contact.username}</small>
+                        </span>
+                      </button>
                     ) : (
                       <p>{m.body}</p>
                     )}
@@ -630,6 +710,16 @@ export function ChatView({
 
       <form className="composer" ref={formRef} onSubmit={onSubmit}>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={pickImage} />
+        <input ref={anyFileRef} type="file" hidden onChange={pickAnyFile} />
+        <button
+          type="button"
+          className="composer-icon plus"
+          onClick={() => setAttachOpen(true)}
+          aria-label="添付"
+          disabled={busy || Boolean(editing)}
+        >
+          <Icon name="plus" size={26} />
+        </button>
         <div className="composer-field">
           <textarea
             ref={textRef}
@@ -641,21 +731,10 @@ export function ChatView({
             placeholder={editing ? "メッセージを編集" : "メッセージを入力…"}
             aria-label="メッセージ"
           />
-          {!hasText && !editing && (
-            <button
-              type="button"
-              className="composer-icon"
-              onClick={() => fileRef.current?.click()}
-              aria-label="画像を添付"
-              disabled={busy}
-            >
-              <Icon name="image" size={24} />
-            </button>
-          )}
         </div>
         {hasText || editing ? (
-          <button className="send-btn" disabled={busy || !hasText}>
-            {editing ? "保存" : "送信"}
+          <button className="send-btn" disabled={busy || !hasText} aria-label={editing ? "保存" : "送信"}>
+            <i className={editing ? "fa-solid fa-check" : "fa-solid fa-paper-plane"} aria-hidden="true" />
           </button>
         ) : (
           <button type="button" className="composer-icon heart" onClick={sendHeart} aria-label="❤️を送る">
@@ -700,6 +779,32 @@ export function ChatView({
           onChanged={onActivity}
         />
       )}
+      {attachOpen && (
+        <AttachSheet
+          onClose={() => setAttachOpen(false)}
+          onImage={() => {
+            setAttachOpen(false);
+            fileRef.current?.click();
+          }}
+          onFile={() => {
+            setAttachOpen(false);
+            anyFileRef.current?.click();
+          }}
+          onContact={() => {
+            setAttachOpen(false);
+            setContactOpen(true);
+          }}
+        />
+      )}
+      {contactOpen && (
+        <ContactSheet
+          conversations={conversations}
+          meId={meId}
+          onPick={(username) => void shareContact(username)}
+          onClose={() => setContactOpen(false)}
+        />
+      )}
+      {contactUser && <UserProfileSheet userId={contactUser.id} onClose={() => setContactUser(null)} />}
       {showProfile && conversation?.otherId && (
         <UserProfileSheet userId={conversation.otherId} onClose={() => setShowProfile(false)} />
       )}

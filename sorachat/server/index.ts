@@ -42,7 +42,7 @@ if (existsSync(path.join(dist, "index.html"))) {
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
-    res.status(413).json({ error: "画像は10MB以下にしてください。" });
+    res.status(413).json({ error: "ファイルが大きすぎます。" });
     return;
   }
   console.error(error);

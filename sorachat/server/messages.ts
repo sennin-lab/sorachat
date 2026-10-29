@@ -4,7 +4,7 @@ import { notifyRecipient } from "./push.js";
 import { sb } from "./supabase.js";
 
 export const UUID = /^[0-9a-f-]{36}$/i;
-export const COLUMNS = "id, conversation_id, sender_id, kind, body, created_at, edited_at, deleted_at, forwarded";
+export const COLUMNS = "id, conversation_id, sender_id, kind, body, created_at, edited_at, deleted_at, forwarded, file_name, file_size, contact_user_id";
 
 export type Role = "owner" | "member";
 export type Reaction = { emoji: string; count: number; mine: boolean };
@@ -12,16 +12,29 @@ export type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  kind: "text" | "image";
+  kind: "text" | "image" | "file" | "contact";
   body: string | null;
   created_at: string;
   edited_at: string | null;
   deleted_at: string | null;
   forwarded: boolean;
+  file_name: string | null;
+  file_size: number | null;
+  contact_user_id: string | null;
 };
-export type Content = { kind: "text"; body: string } | { kind: "image"; imagePath: string };
+export type ContactInfo = { id: string; username: string; displayName: string; hasAvatar: boolean };
+export type Content =
+  | { kind: "text"; body: string }
+  | { kind: "image"; imagePath: string }
+  | { kind: "file"; filePath: string; fileName: string; fileSize: number }
+  | { kind: "contact"; contactUserId: string };
 
-export function toMessage(row: MessageRow, reactions: Reaction[] = [], clientId: string | null = null) {
+export function toMessage(
+  row: MessageRow,
+  reactions: Reaction[] = [],
+  clientId: string | null = null,
+  contact: ContactInfo | null = null
+) {
   const deleted = row.deleted_at !== null;
   return {
     id: row.id,
@@ -30,6 +43,10 @@ export function toMessage(row: MessageRow, reactions: Reaction[] = [], clientId:
     kind: row.kind,
     body: deleted ? null : row.body,
     imageUrl: row.kind === "image" && !deleted ? `/api/dm/messages/${row.id}/image` : null,
+    fileName: row.kind === "file" && !deleted ? row.file_name : null,
+    fileSize: row.kind === "file" && !deleted ? row.file_size : null,
+    fileUrl: row.kind === "file" && !deleted ? `/api/dm/messages/${row.id}/file` : null,
+    contact: row.kind === "contact" && !deleted ? contact : null,
     createdAt: row.created_at,
     edited: row.edited_at !== null,
     deleted,
@@ -135,10 +152,15 @@ export async function insertMessage(
 
   const now = new Date().toISOString();
   const shortPreview = preview.slice(0, 80);
+  const none = { image_path: null, file_path: null, file_name: null, file_size: null, contact_user_id: null };
   const fields =
     content.kind === "text"
-      ? { kind: "text", body: content.body, image_path: null }
-      : { kind: "image", body: null, image_path: content.imagePath };
+      ? { ...none, kind: "text", body: content.body }
+      : content.kind === "image"
+        ? { ...none, kind: "image", body: null, image_path: content.imagePath }
+        : content.kind === "file"
+          ? { ...none, kind: "file", body: null, file_path: content.filePath, file_name: content.fileName, file_size: content.fileSize }
+          : { ...none, kind: "contact", body: null, contact_user_id: content.contactUserId };
 
   const { data, error } = await sb
     .from("sc_messages")
@@ -180,7 +202,11 @@ export async function insertMessage(
   return row;
 }
 
+// 画像・ファイルの実体は、どのメッセージからも参照されなくなったときに消す（転送で共有するため）
 export async function removeImageIfUnused(path: string) {
-  const { count } = await sb.from("sc_messages").select("id", { count: "exact", head: true }).eq("image_path", path);
+  const { count } = await sb
+    .from("sc_messages")
+    .select("id", { count: "exact", head: true })
+    .or(`image_path.eq.${path},file_path.eq.${path}`);
   if (!count) await removeImage(path);
 }

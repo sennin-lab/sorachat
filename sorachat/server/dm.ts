@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
-import { isAllowedImage, readImage, saveImage, upload } from "./media.js";
+import { fileNameOf, FILE_LIMIT, isAllowedImage, readImage, saveFile, saveImage, upload, uploadFile } from "./media.js";
 import {
   COLUMNS,
   UUID,
+  type ContactInfo,
+  type Content,
   broadcastList,
   broadcastReactions,
   broadcastToConversation,
@@ -24,12 +26,12 @@ const USERNAME = /^[a-z0-9_]{3,20}$/;
 export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 type Role = "owner" | "member";
-type MessageWithPath = MessageRow & { image_path: string | null };
+type MessageWithPath = MessageRow & { image_path: string | null; file_path: string | null };
 
 const messageRow = async (messageId: string): Promise<MessageWithPath | null> => {
   const { data, error } = await sb
     .from("sc_messages")
-    .select(`${COLUMNS}, image_path`)
+    .select(`${COLUMNS}, image_path, file_path`)
     .eq("id", messageId)
     .maybeSingle();
   if (error) throw error;
@@ -38,6 +40,18 @@ const messageRow = async (messageId: string): Promise<MessageWithPath | null> =>
 
 async function withReactions(rows: MessageRow[], viewer: string) {
   if (!rows.length) return [];
+  const contactIds = [...new Set(rows.map((r) => r.contact_user_id).filter((v): v is string => Boolean(v)))];
+  const contacts = new Map<string, ContactInfo>();
+  if (contactIds.length) {
+    const { data: users, error: usersError } = await sb
+      .from("sc_users")
+      .select("id, username, display_name, avatar_path")
+      .in("id", contactIds);
+    if (usersError) throw usersError;
+    for (const u of (users ?? []) as { id: string; username: string; display_name: string; avatar_path: string | null }[]) {
+      contacts.set(u.id, { id: u.id, username: u.username, displayName: u.display_name, hasAvatar: Boolean(u.avatar_path) });
+    }
+  }
   const { data, error } = await sb
     .from("sc_reactions")
     .select("message_id, user_id, emoji")
@@ -49,7 +63,14 @@ async function withReactions(rows: MessageRow[], viewer: string) {
     list.push(r);
     grouped.set(r.message_id, list);
   }
-  return rows.map((row) => toMessage(row, summarize(grouped.get(row.id) ?? [], viewer)));
+  return rows.map((row) =>
+    toMessage(
+      row,
+      summarize(grouped.get(row.id) ?? [], viewer),
+      null,
+      row.contact_user_id ? contacts.get(row.contact_user_id) ?? null : null
+    )
+  );
 }
 
 dm.get("/dm/conversations", async (_req, res) => {
@@ -424,11 +445,12 @@ dm.delete("/dm/messages/:messageId", async (req, res) => {
   const deletedAt = new Date().toISOString();
   const { error } = await sb
     .from("sc_messages")
-    .update({ deleted_at: deletedAt, body: null, image_path: null })
+    .update({ deleted_at: deletedAt, body: null, image_path: null, file_path: null, contact_user_id: null })
     .eq("id", messageId);
   if (error) throw error;
   await sb.from("sc_reactions").delete().eq("message_id", messageId);
   if (msg.image_path) await removeImageIfUnused(msg.image_path);
+  if (msg.file_path) await removeImageIfUnused(msg.file_path);
   await sb
     .from("sc_conversations")
     .update({ last_preview: "送信を取り消しました" })
@@ -463,17 +485,107 @@ dm.post("/dm/messages/:messageId/forward", async (req, res) => {
     res.status(404).json({ error: "送信先が見つかりません。" });
     return;
   }
-  const content =
-    source.kind === "image" && source.image_path
-      ? { kind: "image" as const, imagePath: source.image_path }
-      : { kind: "text" as const, body: source.body ?? "" };
+  let content: Content = { kind: "text", body: source.body ?? "" };
+  if (source.kind === "image" && source.image_path) {
+    content = { kind: "image", imagePath: source.image_path };
+  } else if (source.kind === "file" && source.file_path) {
+    content = { kind: "file", filePath: source.file_path, fileName: source.file_name ?? "file", fileSize: Number(source.file_size ?? 0) };
+  } else if (source.kind === "contact" && source.contact_user_id) {
+    content = { kind: "contact", contactUserId: source.contact_user_id };
+  }
   if (content.kind === "text" && !content.body) {
     res.status(400).json({ error: "このメッセージは送信できません。" });
     return;
   }
-  const preview = content.kind === "text" ? content.body : "写真";
+  const preview = previewOf(content);
   const row = await insertMessage(target, me, content, preview, { forwarded: true });
-  res.status(201).json(toMessage(row, []));
+  res.status(201).json((await withReactions([row], me))[0]);
+});
+
+// 送信するメッセージの一覧表示用の短い説明
+function previewOf(content: Content) {
+  if (content.kind === "text") return content.body;
+  if (content.kind === "image") return "写真";
+  if (content.kind === "file") return `ファイル: ${content.fileName}`.slice(0, 80);
+  return "連絡先";
+}
+
+// ファイル添付（画像以外のすべて・20MBまで）
+dm.post("/dm/:id/file", uploadFile.single("file"), async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  if (!(await membership(id, me))) {
+    res.status(404).json({ error: "会話が見つかりません。" });
+    return;
+  }
+  const file = req.file;
+  if (!file || file.size === 0) {
+    res.status(400).json({ error: "ファイルを選んでください。" });
+    return;
+  }
+  if (file.size > FILE_LIMIT) {
+    res.status(413).json({ error: "ファイルは20MB以下にしてください。" });
+    return;
+  }
+  const name = fileNameOf(file);
+  const path = await saveFile(file, `dm/${id}/files`);
+  const row = await insertMessage(id, me, { kind: "file", filePath: path, fileName: name, fileSize: file.size }, previewOf({ kind: "file", filePath: path, fileName: name, fileSize: file.size }));
+  res.status(201).json((await withReactions([row], me))[0]);
+});
+
+// 連絡先（SoraChatのユーザー）を送る
+const contactSchema = z.object({ username: z.string().trim().toLowerCase().regex(USERNAME) });
+
+dm.post("/dm/:id/contact", async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  if (!(await membership(id, me))) {
+    res.status(404).json({ error: "会話が見つかりません。" });
+    return;
+  }
+  const parsed = contactSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "ユーザー名を選んでください。" });
+    return;
+  }
+  const { data: user, error } = await sb.from("sc_users").select("id").eq("username", parsed.data.username).maybeSingle();
+  if (error) throw error;
+  if (!user) {
+    res.status(404).json({ error: "そのユーザーは見つかりません。" });
+    return;
+  }
+  if (user.id === me) {
+    res.status(400).json({ error: "自分の連絡先は送れません。" });
+    return;
+  }
+  const content: Content = { kind: "contact", contactUserId: user.id };
+  const row = await insertMessage(id, me, content, previewOf(content));
+  res.status(201).json((await withReactions([row], me))[0]);
+});
+
+// ファイルのダウンロード（常に添付として返し、ブラウザでの実行を防ぐ）
+dm.get("/dm/messages/:messageId/file", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const { data, error } = await sb
+    .from("sc_messages")
+    .select("conversation_id, file_path, file_name, deleted_at")
+    .eq("id", messageId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.file_path || data.deleted_at || !(await membership(data.conversation_id as string, currentUserId(res)))) {
+    res.status(404).json({ error: "ファイルが見つかりません。" });
+    return;
+  }
+  const file = await readImage(data.file_path as string);
+  if (!file) {
+    res.status(404).json({ error: "ファイルが見つかりません。" });
+    return;
+  }
+  const name = String(data.file_name ?? "file");
+  res.setHeader("content-type", "application/octet-stream");
+  res.setHeader("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
+  res.setHeader("x-content-type-options", "nosniff");
+  res.send(file.buffer);
 });
 
 dm.get("/dm/messages/:messageId/image", async (req, res) => {
