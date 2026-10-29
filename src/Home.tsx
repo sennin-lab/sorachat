@@ -5,6 +5,8 @@ import { cachedConversations, saveConversations } from "./cache";
 import { ConversationList } from "./ConversationList";
 import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { refreshPush } from "./push";
+import { NotifyPrompt } from "./NotifyPrompt";
+import { OpenChatSheet } from "./OpenChatSheet";
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -16,6 +18,23 @@ import { Avatar } from "./Avatar";
 import type { Conversation, Me } from "./types";
 
 type Tab = "talk" | "friends" | "more";
+
+// 「あとで」を押したら、この日数のあいだは通知の確認を出さない
+const NOTIFY_LATER_KEY = "sorachat-notify-later";
+const NOTIFY_LATER_DAYS = 3;
+
+// 通知がオフ（または許可されていない）ときだけ確認を出す。通知に対応していない環境では出さない
+const shouldAskNotify = (me: Me) => {
+  if (!("Notification" in window) || !("PushManager" in window)) return false;
+  if (me.notifyDm && Notification.permission === "granted") return false;
+  try {
+    const last = Number(localStorage.getItem(NOTIFY_LATER_KEY));
+    if (last && Date.now() - last < NOTIFY_LATER_DAYS * 24 * 60 * 60 * 1000) return false;
+  } catch {
+    return true;
+  }
+  return true;
+};
 
 const TABS: { id: Tab; label: string; icon: "chat" | "users" | "menu" }[] = [
   { id: "talk", label: "トーク", icon: "chat" },
@@ -30,6 +49,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showOpenChats, setShowOpenChats] = useState(false);
+  const [showNotifyPrompt, setShowNotifyPrompt] = useState(() => shouldAskNotify(me));
   const [showAdd, setShowAdd] = useState(false);
   const [viewUser, setViewUser] = useState<string | null>(null);
   // 友だちが増えた・減ったときに友だち一覧を取り直すための番号
@@ -143,6 +164,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => setShowOpenChats(true)}>
+                    <span className="option-icon">
+                      <Icon name="users" size={20} />
+                    </span>
+                    オープンチャット
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => setShowSettings(true)}>
                     <span className="option-icon">
                       <Icon name="settings" size={20} />
@@ -241,6 +271,33 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           onClose={() => setViewUser(null)}
           onMessage={(username) => void openDmWith(username)}
           onFriendsChanged={bumpFriends}
+        />
+      )}
+      {showOpenChats && (
+        <OpenChatSheet
+          onClose={() => setShowOpenChats(false)}
+          onOpen={(id) => {
+            setShowOpenChats(false);
+            setTab("talk");
+            select(id);
+            refresh();
+          }}
+        />
+      )}
+      {showNotifyPrompt && (
+        <NotifyPrompt
+          onEnabled={(next) => {
+            onMeChange(next);
+            setShowNotifyPrompt(false);
+          }}
+          onLater={() => {
+            try {
+              localStorage.setItem(NOTIFY_LATER_KEY, String(Date.now()));
+            } catch {
+              // 保存できなくても、この画面では閉じる
+            }
+            setShowNotifyPrompt(false);
+          }}
         />
       )}
     </div>

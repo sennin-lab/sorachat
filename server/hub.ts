@@ -31,6 +31,13 @@ export const isActive = (userId: string) => {
   return false;
 };
 
+// 利用停止になったユーザーの接続をすべて閉じる
+export function disconnectUser(userId: string) {
+  const set = sockets.get(userId);
+  if (!set) return;
+  for (const ws of set) ws.close(4003, "banned");
+}
+
 export function sendToUser(userId: string, payload: unknown) {
   const set = sockets.get(userId);
   if (!set) return;

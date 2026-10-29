@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { config } from "./config.js";
-import { cookieBase, currentUserId, endSession, randomToken, requireAuth, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
+import { BANNED_MESSAGE, cookieBase, currentUserId, endSession, isBanned, randomToken, requireAuth, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
 import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
 import { friendIdsOf } from "./friends.js";
 import { sb } from "./supabase.js";
@@ -116,6 +116,10 @@ accounts.post("/auth/login", authLimit, async (req, res) => {
     res.status(401).json({ error: "ユーザー名かパスワードが違います。" });
     return;
   }
+  if (await isBanned(data as string)) {
+    res.status(403).json({ error: BANNED_MESSAGE });
+    return;
+  }
   await startSession(res, data as string);
   res.json({ ok: true });
 });
@@ -206,6 +210,7 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
     }
     const profile = await fetchSenninProfile(tokenData.access_token);
     const userId = await upsertSenninUser(profile.id, profile.name);
+    if (await isBanned(userId)) throw new Error(BANNED_MESSAGE);
     res.clearCookie("sc_oauth", cookieBase);
     await startSession(res, userId);
     res.redirect(`${config.appOrigin}/`);

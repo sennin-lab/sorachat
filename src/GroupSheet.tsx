@@ -1,12 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { ApiError, api, patch, post } from "./api";
 import { Avatar } from "./Avatar";
+import { AvatarCropper } from "./AvatarCropper";
 import { FriendSelectPage } from "./FriendSelectPage";
 import { Icon } from "./Icon";
 import { UserRow } from "./UserRow";
 import type { Friend, Member } from "./types";
 
-type Detail = { id: string; isGroup: boolean; title: string; myRole: "owner" | "member"; members: Member[] };
+type Detail = {
+  id: string;
+  isGroup: boolean;
+  title: string;
+  hasAvatar: boolean;
+  myRole: "owner" | "member";
+  members: Member[];
+};
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
 
@@ -29,6 +37,9 @@ export function GroupSheet({
   const [adding, setAdding] = useState(false);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  // 切り抜き中の画像と、アイコンを差し替えたあとの再読み込み用の番号
+  const [cropSource, setCropSource] = useState<string | null>(null);
+  const [avatarKey, setAvatarKey] = useState(0);
 
   const load = async () => {
     const next = await api<Detail>(`/api/dm/${conversationId}`);
@@ -53,6 +64,41 @@ export function GroupSheet({
       setAdding(false);
       setStatus(`${picked.length}人を追加しました。`);
       onChanged();
+    } catch (err) {
+      setStatus(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pickAvatar = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setStatus("画像ファイルを選択してください。");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setCropSource(reader.result);
+    };
+    reader.onerror = () => setStatus("画像を読み込めませんでした。");
+    reader.readAsDataURL(file);
+  };
+
+  const saveAvatar = async (blob: Blob) => {
+    setCropSource(null);
+    setBusy(true);
+    setStatus("");
+    try {
+      const form = new FormData();
+      form.append("file", blob, "group.jpg");
+      await api(`/api/dm/${conversationId}/avatar`, { method: "POST", body: form });
+      setAvatarKey((k) => k + 1);
+      await load();
+      onChanged();
+      setStatus("グループのアイコンを更新しました。");
     } catch (err) {
       setStatus(messageOf(err));
     } finally {
@@ -116,7 +162,29 @@ export function GroupSheet({
       </header>
 
       <div className="group-hero">
-        <Avatar userId="" hasAvatar={false} name={detail.title} size={96} />
+        {isOwner ? (
+          <label className="profile-avatar group-avatar" aria-label="グループのアイコンを変更">
+            <Avatar
+              userId=""
+              hasAvatar={detail.hasAvatar}
+              name={detail.title}
+              size={96}
+              src={`/api/dm/${conversationId}/avatar?v=${avatarKey}`}
+            />
+            <span className="avatar-badge" aria-hidden="true">
+              <Icon name="camera" size={14} />
+            </span>
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={pickAvatar} disabled={busy} />
+          </label>
+        ) : (
+          <Avatar
+            userId=""
+            hasAvatar={detail.hasAvatar}
+            name={detail.title}
+            size={96}
+            src={`/api/dm/${conversationId}/avatar?v=${avatarKey}`}
+          />
+        )}
         {isOwner ? (
           <div className="inline-edit">
             <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={40} aria-label="グループ名" />
@@ -170,6 +238,9 @@ export function GroupSheet({
         ))}
       </ul>
 
+      {cropSource && (
+        <AvatarCropper source={cropSource} onCancel={() => setCropSource(null)} onSave={(blob) => void saveAvatar(blob)} />
+      )}
       {status && <p className="notice center">{status}</p>}
 
       <div className="page-card leave-card">

@@ -63,7 +63,13 @@ export function ConversationList({
                 onClick={() => onSelect(c.id)}
                 aria-label={c.unread > 0 ? `${c.name}（未読 ${c.unread}件）` : c.name}
               >
-                <Avatar userId={c.isGroup ? "" : c.otherId ?? ""} hasAvatar={c.hasAvatar} name={c.name} size={52} />
+                <Avatar
+                  userId={c.isGroup ? "" : c.otherId ?? ""}
+                  hasAvatar={c.hasAvatar}
+                  name={c.name}
+                  size={52}
+                  src={c.isGroup ? `/api/dm/${c.id}/avatar` : undefined}
+                />
                 <span className="conv-body">
                   <span className="conv-top">
                     <strong>

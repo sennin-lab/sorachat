@@ -3,7 +3,8 @@ import type { CoverTheme } from "./types";
 
 // プロフィールの背景テーマ（LINE のプロフィールのように、色のグラデーションで背景を選べる）
 export const COVER_THEMES: { id: CoverTheme; label: string; from: string; to: string }[] = [
-  { id: "green", label: "グリーン", from: "#06c755", to: "#00a046" },
+  // id は保存済みの値との互換のため "green" のまま。見た目は薄い青
+  { id: "green", label: "ライトブルー", from: "#b9dcfb", to: "#79b9ef" },
   { id: "sky", label: "スカイ", from: "#4fb8ff", to: "#2d6cdf" },
   { id: "sunset", label: "サンセット", from: "#ffb86b", to: "#ff5e7e" },
   { id: "lavender", label: "ラベンダー", from: "#b59cff", to: "#7057e6" },

@@ -47,10 +47,8 @@ export function AuthScreen({ initialError }: { initialError: string | null }) {
           <button className="btn-secondary wide" onClick={() => setMode("login")}>
             ログイン
           </button>
-        </div>
-        <div className="auth-footer">
-          <button className="link" onClick={() => setMode("register")}>
-            アカウントを作成
+          <button className="btn-secondary wide" onClick={() => setMode("register")}>
+            新規登録
           </button>
         </div>
       </div>

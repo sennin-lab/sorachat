@@ -7,9 +7,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { accounts } from "./accounts.js";
+import { admin } from "./admin.js";
 import { config } from "./config.js";
 import { dm } from "./dm.js";
 import { friends } from "./friends.js";
+import { openChats } from "./openchat.js";
 import { push } from "./push.js";
 import { attachRealtime } from "./realtime.js";
 
@@ -29,6 +31,8 @@ app.use("/api", accounts);
 app.use("/api", dm);
 app.use("/api", friends);
 app.use("/api", push);
+app.use("/api", openChats);
+app.use("/api", admin);
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "見つかりません。" });
 });

@@ -59,6 +59,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
 export const currentUserId = (res: Response) => res.locals.userId as string;
 
+export const BANNED_MESSAGE = "このアカウントは利用停止中です。";
+
+export async function isBanned(userId: string) {
+  const { data, error } = await sb.from("sc_users").select("banned_at").eq("id", userId).maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.banned_at);
+}
+
 export function signRealtimeToken(userId: string, ttlSeconds = 3600) {
   const now = Math.floor(Date.now() / 1000);
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");

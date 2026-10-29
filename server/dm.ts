@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { friendIdsOf } from "./friends.js";
-import { fileNameOf, FILE_LIMIT, isAllowedImage, readImage, saveFile, saveImage, upload, uploadFile } from "./media.js";
+import { fileNameOf, FILE_LIMIT, isAllowedImage, readImage, removeImage, saveFile, saveImage, upload, uploadFile } from "./media.js";
 import {
   COLUMNS,
   UUID,
@@ -182,7 +182,7 @@ dm.get("/dm/:id", async (req, res) => {
     res.status(404).json({ error: "会話が見つかりません。" });
     return;
   }
-  const { data: conv, error } = await sb.from("sc_conversations").select("is_group, title").eq("id", id).single();
+  const { data: conv, error } = await sb.from("sc_conversations").select("is_group, title, avatar_path").eq("id", id).single();
   if (error) throw error;
   const { data: rows, error: membersError } = await sb
     .from("sc_members")
@@ -202,7 +202,7 @@ dm.get("/dm/:id", async (req, res) => {
   const readBy = (rows ?? [])
     .filter((row: any) => row.sc_users.id !== viewer)
     .map((row: any) => ({ id: row.sc_users.id, lastReadAt: row.last_read_at as string }));
-  res.json({ id, isGroup: conv.is_group, title: conv.title, myRole: me.role, members, readBy });
+  res.json({ id, isGroup: conv.is_group, title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, members, readBy });
 });
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(40) });
@@ -226,6 +226,53 @@ dm.patch("/dm/:id", async (req, res) => {
 });
 
 const addSchema = z.object({ usernames: z.array(z.string().trim().toLowerCase().regex(USERNAME)).min(1).max(20) });
+
+// グループのアイコン画像（名前の変更と同じく管理者だけ変えられる）
+dm.post("/dm/:id/avatar", upload.single("file"), async (req, res) => {
+  const id = String(req.params.id);
+  const me = await membership(id, currentUserId(res));
+  if (!me || me.role !== "owner") {
+    res.status(403).json({ error: "アイコンを変更できるのは管理者だけです。" });
+    return;
+  }
+  if (!isAllowedImage(req.file)) {
+    res.status(415).json({ error: "JPEG・PNG・WebP・GIF の画像を選んでください。" });
+    return;
+  }
+  const { data: conv, error } = await sb.from("sc_conversations").select("is_group, avatar_path").eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (!conv?.is_group) {
+    res.status(400).json({ error: "グループ以外のアイコンは変更できません。" });
+    return;
+  }
+  const path = await saveImage(req.file!, `groups/${id}`);
+  const { error: updateError } = await sb.from("sc_conversations").update({ avatar_path: path }).eq("id", id);
+  if (updateError) throw updateError;
+  await removeImage(conv.avatar_path ?? null);
+  await broadcastList(id);
+  res.json({ hasAvatar: true });
+});
+
+dm.get("/dm/:id/avatar", async (req, res) => {
+  const id = String(req.params.id);
+  if (!(await membership(id, currentUserId(res)))) {
+    res.status(404).end();
+    return;
+  }
+  const { data } = await sb.from("sc_conversations").select("avatar_path").eq("id", id).maybeSingle();
+  if (!data?.avatar_path) {
+    res.status(404).end();
+    return;
+  }
+  const image = await readImage(data.avatar_path);
+  if (!image) {
+    res.status(404).end();
+    return;
+  }
+  res.setHeader("content-type", image.type);
+  res.setHeader("cache-control", "private, no-cache");
+  res.send(image.buffer);
+});
 
 dm.post("/dm/:id/members", async (req, res) => {
   const id = String(req.params.id);
