@@ -46,6 +46,15 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; background: var(--bg); color: var(--text); }
+/* チャット本体はページ自体をスクロールさせない。iOS がキーボード表示時に
+   ページ全体を押し上げ、閉じた後に下が空白で残るのを防ぐ（スクロールは各領域の中だけ） */
+body.app-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  width: 100%;
+}
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -435,7 +444,9 @@ a { color: var(--accent); text-decoration: none; }
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 10px 10px 14px;
+  /* 入力欄が持ち上がった分、最新のメッセージが入力欄の裏に隠れないよう下を空ける */
+  padding: 10px 10px calc(14px + var(--kb, 0px));
+  scroll-padding-bottom: calc(14px + var(--kb, 0px));
   background: var(--chat-bg);
   -webkit-overflow-scrolling: touch;
 }
@@ -579,6 +590,9 @@ a { color: var(--accent); text-decoration: none; }
   gap: 6px;
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
+  /* キーボードの高さ分だけ入力欄を持ち上げる（画面全体は動かさない） */
+  transform: translateY(calc(var(--kb, 0px) * -1));
+  will-change: transform;
   background: var(--panel);
 }
 .composer-field {

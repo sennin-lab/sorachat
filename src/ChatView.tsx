@@ -791,6 +791,10 @@ export function ChatView({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
+            onFocus={() => {
+              // キーボードが出きったあと、最新メッセージを入力欄の上に見せる
+              window.setTimeout(() => bottomRef.current?.scrollIntoView({ block: "end" }), 350);
+            }}
             rows={1}
             maxLength={1000}
             placeholder={editing ? "メッセージを編集" : "メッセージを入力…"}
