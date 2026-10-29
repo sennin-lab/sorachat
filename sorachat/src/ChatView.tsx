@@ -32,18 +32,6 @@ const errorText = (err: unknown) =>
 
 type Reader = { id: string; lastReadAt: string };
 
-const replyPreview = (m: Message) => (m.deleted ? "送信を取り消しました" : m.kind === "image" ? "写真" : m.body ?? "");
-
-// 返信先のメッセージを吹き出しの上に引用表示する（Instagramと同じく、元の吹き出しを小さく見せる）
-function ReplyQuote({ target, meId, otherName }: { target: Message | null; meId: string; otherName: string }) {
-  return (
-    <div className="reply-quote">
-      <strong>{target ? (target.senderId === meId ? "自分" : otherName) : "返信"}</strong>
-      <span>{target ? replyPreview(target) : "元のメッセージ"}</span>
-    </div>
-  );
-}
-
 // ダブルタップ判定（この時間内に同じ吹き出しを2回押すと❤️）
 const DOUBLE_TAP_MS = 300;
 
@@ -136,8 +124,6 @@ export function ChatView({
   // 相手が既読にした時刻（1対1は1人分、グループは全員分）
   const [readers, setReaders] = useState<Reader[]>([]);
   const [editing, setEditing] = useState<Message | null>(null);
-  // 返信先（返信バーに表示中のメッセージ）
-  const [replying, setReplying] = useState<Message | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [viewing, setViewing] = useState<Message | null>(null);
   const [showInfo, setShowInfo] = useState(false);
@@ -197,8 +183,10 @@ export function ChatView({
       const confirmed = messagesRef.current.filter((m) => !m.status);
       const pending = messagesRef.current.filter((m) => m.status);
       commit([...mergeById(confirmed, list), ...pending]);
-    } catch {
-      return;
+      setError("");
+    } catch (err) {
+      // 読み込みに失敗したら、空の画面のまま黙らず理由を表示する
+      setError(err instanceof ApiError ? err.message : "メッセージを読み込めませんでした。通信状態を確認してください。");
     }
   };
 
@@ -279,12 +267,7 @@ export function ChatView({
 
   const dispatch = async (temp: Message) => {
     try {
-      const message = await sendChat({
-        clientId: temp.clientId!,
-        conversationId,
-        body: temp.body ?? "",
-        replyTo: temp.replyTo ?? null
-      });
+      const message = await sendChat({ clientId: temp.clientId!, conversationId, body: temp.body ?? "" });
       upsert([message], temp.clientId);
       onActivity();
     } catch {
@@ -325,8 +308,6 @@ export function ChatView({
 
   const enqueue = (body: string) => {
     const clientId = newClientId();
-    // 保存済みのメッセージにだけ返信できる（送信中のものは保存後のIDがまだないため）
-    const replyTo = replying && !replying.status ? replying.id : null;
     const temp: Message = {
       id: `tmp-${clientId}`,
       clientId,
@@ -340,10 +321,8 @@ export function ChatView({
       edited: false,
       deleted: false,
       forwarded: false,
-      replyTo,
       reactions: []
     };
-    setReplying(null);
     setText("");
     setError("");
     upsert([temp]);
@@ -406,15 +385,6 @@ export function ChatView({
     setText(m.body ?? "");
     textRef.current?.focus();
   };
-
-  const startReply = (m: Message) => {
-    setMenuFor(null);
-    setEditing(null);
-    setReplying(m);
-    textRef.current?.focus();
-  };
-
-  const cancelReply = () => setReplying(null);
 
   const cancelEdit = () => {
     setEditing(null);
@@ -593,13 +563,6 @@ export function ChatView({
                       lastTap.current = { id: m.id, at: now };
                     }}
                   >
-                    {m.replyTo && !m.deleted && (
-                      <ReplyQuote
-                        target={messages.find((x) => x.id === m.replyTo) ?? null}
-                        meId={meId}
-                        otherName={conversation?.name ?? "相手"}
-                      />
-                    )}
                     {m.deleted ? (
                       <p className="unsent">送信を取り消しました</p>
                     ) : showImage ? (
@@ -653,21 +616,6 @@ export function ChatView({
       </div>
 
       {error && <p className="error">{error}</p>}
-
-      {replying && !editing && (
-        <div className="reply-bar">
-          <div className="reply-bar-text">
-            <Icon name="reply" size={16} />
-            <span>
-              <strong>{replying.senderId === meId ? "自分" : conversation?.name ?? "相手"}</strong> に返信
-              <em>{replyPreview(replying)}</em>
-            </span>
-          </div>
-          <button type="button" className="icon-btn" onClick={cancelReply} aria-label="返信をやめる">
-            <Icon name="close" size={18} />
-          </button>
-        </div>
-      )}
 
       {editing && (
         <div className="edit-bar">
@@ -728,7 +676,6 @@ export function ChatView({
             setMenuFor(null);
             setForwarding(menu);
           }}
-          onReply={() => startReply(menu)}
           onUnsend={() => void unsend(menu)}
         />
       )}

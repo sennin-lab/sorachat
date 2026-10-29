@@ -573,3 +573,17 @@ a { color: var(--accent); text-decoration: none; }
 .viewer-bar button:disabled { opacity: 0.4; }
 
 .muted.pad, .pad { padding: 16px; }
+
+/* ---- アバター（写真がない場合はイニシャル） ---- */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--raised);
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}

@@ -4,7 +4,7 @@ import { notifyRecipient } from "./push.js";
 import { sb } from "./supabase.js";
 
 export const UUID = /^[0-9a-f-]{36}$/i;
-export const COLUMNS = "id, conversation_id, sender_id, kind, body, created_at, edited_at, deleted_at, forwarded, reply_to";
+export const COLUMNS = "id, conversation_id, sender_id, kind, body, created_at, edited_at, deleted_at, forwarded";
 
 export type Role = "owner" | "member";
 export type Reaction = { emoji: string; count: number; mine: boolean };
@@ -18,7 +18,6 @@ export type MessageRow = {
   edited_at: string | null;
   deleted_at: string | null;
   forwarded: boolean;
-  reply_to: string | null;
 };
 export type Content = { kind: "text"; body: string } | { kind: "image"; imagePath: string };
 
@@ -35,7 +34,6 @@ export function toMessage(row: MessageRow, reactions: Reaction[] = [], clientId:
     edited: row.edited_at !== null,
     deleted,
     forwarded: row.forwarded,
-    replyTo: row.reply_to ?? null,
     reactions,
     clientId
   };
@@ -114,21 +112,9 @@ export async function insertMessage(
   senderId: string,
   content: Content,
   preview: string,
-  options: { forwarded?: boolean; clientId?: string | null; replyTo?: string | null } = {}
+  options: { forwarded?: boolean; clientId?: string | null } = {}
 ): Promise<MessageRow> {
   const clientId = options.clientId ?? null;
-
-  // 返信先は同じ会話内のメッセージだけ有効にする（別の会話のIDが混ざった場合は通常の送信として扱う）
-  let replyTo: string | null = null;
-  if (options.replyTo && UUID.test(options.replyTo)) {
-    const { data: target } = await sb
-      .from("sc_messages")
-      .select("id")
-      .eq("id", options.replyTo)
-      .eq("conversation_id", conversationId)
-      .maybeSingle();
-    replyTo = target ? (target as { id: string }).id : null;
-  }
 
   // 再送（タイムアウト後のリトライなど）は、既に保存済みのメッセージをそのまま返す
   const findExisting = async () => {
@@ -161,7 +147,6 @@ export async function insertMessage(
       sender_id: senderId,
       created_at: now,
       forwarded: options.forwarded ?? false,
-      reply_to: replyTo,
       client_id: clientId,
       ...fields
     })

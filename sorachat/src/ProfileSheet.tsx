@@ -159,7 +159,7 @@ export function ProfileSheet({
       ) : (
         <button className="note" onClick={() => setNoteDraft(note?.body ?? "")}>
           <span className="note-tag">ノート</span>
-          <span className={note ? "" : "muted"}>{note ? note.body : "ノートを書く（24時間で消えます）"}</span>
+          <span className={note ? "" : "muted"}>{note ? note.body : "書く（24時間で消えます）"}</span>
         </button>
       )}
 
