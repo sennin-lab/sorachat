@@ -13,24 +13,6 @@ const UNSUPPORTED = "このブラウザでは通知を使えません。ホー�
 const supported = () =>
   "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
-const isHomeScreenApp = () =>
-  window.matchMedia("(display-mode: standalone)").matches ||
-  ("standalone" in navigator && (navigator as Navigator & { standalone?: boolean }).standalone === true);
-
-function explainPushError(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.status === 401 || error.status === 403) return "ログイン状態を確認できませんでした。いったんログアウトして、再ログインしてください。";
-    if (error.status === 404) return "通知APIが見つかりません。サーバーが最新のバージョンか確認してください。";
-    if (error.status === 503) return error.message;
-    return `通知サーバーとの通信に失敗しました（HTTP ${error.status}）。時間をおいて再試行してください。`;
-  }
-  const name = error instanceof Error ? error.name : "";
-  if (name === "NotAllowedError") return "通知が許可されていません。iPadの設定でSoraChatの通知を許可してください。";
-  if (name === "InvalidStateError") return "通知の準備が完了していません。SoraChatを閉じて、ホーム画面から開き直してください。";
-  if (name === "AbortError" || name === "NetworkError" || name === "TypeError") return "通知サービスに接続できませんでした。学校のWi-Fiで制限されている可能性があります。別のネットワークでも確認してください。";
-  return "通知を登録できませんでした。iPadOS・通知の許可・サーバーのVAPID設定を確認してください。";
-}
-
 // 既存の購読が今のVAPID公開鍵で作られたものか（鍵を変えた後は作り直す必要がある）
 const sameKey = (subscription: PushSubscription, key: Uint8Array) => {
   const current = subscription.options?.applicationServerKey;
@@ -56,35 +38,44 @@ async function subscribeWith(publicKey: string) {
 }
 
 export async function enablePush(): Promise<PushResult> {
-  if (!supported()) {
-    return {
-      ok: false,
-      message: isHomeScreenApp()
-        ? "このiPadでは通知機能を利用できません。iPadOSを更新してから再度お試しください。"
-        : "SafariでSoraChatをホーム画面に追加し、追加したアイコンから開いてください。"
-    };
-  }
+  if (!supported()) return { ok: false, message: UNSUPPORTED };
 
+  let stage = "通知の許可確認";
   try {
-    // iOS は許可の確認を「スイッチを押した直後」にしか出せないため、最初に呼ぶ
-    let permission: NotificationPermission;
-    if (Notification.permission === "granted") {
-      permission = "granted";
-    } else if (Notification.permission === "denied") {
-      return { ok: false, message: "通知がブロックされています。iPadの「設定」からSoraChatの通知を許可してから、もう一度お試しください。" };
-    } else {
-      permission = await Notification.requestPermission();
-    }
+    // iOS は許可の確認を「スイッチを押した直後」にしか出せないため、どの await より前に呼ぶ
+    const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
     if (permission !== "granted") {
-      return { ok: false, message: "通知が許可されませんでした。iPadの設定で通知を許可してください。" };
+      return { ok: false, message: "通知が許可されませんでした。iPadの設定から通知を許可してください。" };
     }
 
+    stage = "通知設定の取得";
     const { enabled, publicKey } = await api<{ enabled: boolean; publicKey: string | null }>("/api/push/public-key");
-    if (!enabled || !publicKey) return { ok: false, message: "通知サーバーの設定が未完了です。管理者がVAPID_PUBLIC_KEYとVAPID_PRIVATE_KEYを設定する必要があります。" };
-    await subscribeWith(publicKey);
+    if (!enabled || !publicKey) return { ok: false, message: "サーバーでプッシュ通知が有効になっていません（VAPID公開鍵が未設定の可能性があります）。" };
+
+    stage = "Service Workerの登録";
+    const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    await navigator.serviceWorker.ready;
+
+    stage = "プッシュ通知の購読";
+    const key = toBytes(publicKey);
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription && !sameKey(subscription, key)) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+
+    stage = "通知登録情報のサーバー保存";
+    await api("/api/push/subscribe", post(subscription.toJSON()));
+    setPushEndpoint(subscription.endpoint);
     return { ok: true, message: "通知を有効にしました。" };
-  } catch (error) {
-    return { ok: false, message: explainPushError(error) };
+  } catch (err) {
+    const detail = err instanceof ApiError
+      ? `${err.message}（HTTP ${err.status || "通信不可"}）`
+      : err instanceof Error
+        ? `${err.name}: ${err.message}`
+        : String(err);
+    return { ok: false, message: `${stage}に失敗しました。${detail}` };
   }
 }
 

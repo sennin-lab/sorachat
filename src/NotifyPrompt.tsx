@@ -19,8 +19,9 @@ export function NotifyPrompt({ onEnabled, onLater }: { onEnabled: (me: Me) => vo
         return;
       }
       onEnabled(await api<Me>("/api/me", patch({ notifyDm: true })));
-    } catch {
-      setMessage("通知を有効にできませんでした。通信状態を確認してください。");
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      setMessage(`通知設定の更新に失敗しました。${detail}`);
     } finally {
       setBusy(false);
     }
