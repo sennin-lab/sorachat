@@ -1,22 +1,49 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "./api";
-import { Avatar } from "./Avatar";
-import { calls } from "./call";
-import { CallOverlay } from "./CallOverlay";
+import { api, post } from "./api";
 import { ChatView } from "./ChatView";
 import { cachedConversations, saveConversations } from "./cache";
 import { ConversationList } from "./ConversationList";
+import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
+import { refreshPush } from "./push";
+import { AddFriendSheet } from "./AddFriendSheet";
+import { FriendsTab } from "./FriendsTab";
+import { Icon } from "./Icon";
 import { NewChatSheet } from "./NewChatSheet";
-import { onDataEvent, startDataSync } from "./realtime";
 import { ProfileSheet } from "./ProfileSheet";
+import { SettingsSheet } from "./SettingsSheet";
+import { UserProfileSheet } from "./UserProfileSheet";
+import { Avatar } from "./Avatar";
 import type { Conversation, Me } from "./types";
+
+type Tab = "talk" | "friends" | "more";
+
+const TABS: { id: Tab; label: string; icon: "chat" | "users" | "menu" }[] = [
+  { id: "talk", label: "トーク", icon: "chat" },
+  { id: "friends", label: "友だち", icon: "users" },
+  { id: "more", label: "その他", icon: "menu" }
+];
 
 export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me) => void; onLogout: () => void }) {
   const [list, setList] = useState<Conversation[]>(cachedConversations);
   const [selectedId, setSelectedId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("dm"));
+  const [tab, setTab] = useState<Tab>("talk");
   const [showProfile, setShowProfile] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [viewUser, setViewUser] = useState<string | null>(null);
+  // 友だちが増えた・減ったときに友だち一覧を取り直すための番号
+  const [friendsVersion, setFriendsVersion] = useState(0);
+  const bumpFriends = () => setFriendsVersion((v) => v + 1);
+  const [theme, setTheme] = useState<"light" | "dark">(() =>
+    localStorage.getItem("sorachat-theme") === "dark" ? "dark" : "light"
+  );
   const timer = useRef(0);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("sorachat-theme", theme);
+  }, [theme]);
 
   const refresh = useCallback(async () => {
     try {
@@ -33,12 +60,17 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     timer.current = window.setTimeout(refresh, 400);
   }, [refresh]);
 
+  // 通知を許可済みなら、起動のたびに購読を確かめ直す（端末側の購読が切れていても届くように）
+  useEffect(() => {
+    if (me.notifyDm) void refreshPush();
+  }, [me.id, me.notifyDm]);
+
   useEffect(() => {
     refresh();
+    connectRealtime();
     startDataSync(me.id).catch(() => undefined);
-    calls.init({ id: me.id, name: me.displayName, hasAvatar: me.hasAvatar }).catch(() => undefined);
     const off = onDataEvent((event) => {
-      if (event.kind !== "reaction") scheduleRefresh();
+      if (event.kind === "change") scheduleRefresh();
     });
     const fallback = window.setInterval(refresh, 120_000);
     return () => {
@@ -53,21 +85,97 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     setList((current) => current.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
   };
 
-  const selected = list.find((c) => c.id === selectedId) ?? null;
+  // 名前（ユーザー名）からトークを開く。友だちの画面から「トーク」を押したとき
+  const openDmWith = async (username: string) => {
+    try {
+      const result = await api<{ id: string }>("/api/dm/open", post({ username }));
+      setViewUser(null);
+      setTab("talk");
+      select(result.id);
+      refresh();
+    } catch {
+      return;
+    }
+  };
+
+  const totalUnread = list.reduce((sum, c) => sum + c.unread, 0);
 
   return (
     <div className={`app ${selectedId ? "has-chat" : ""}`}>
       <aside className="sidebar">
-        <header className="sidebar-head">
-          <button className="avatar-btn" onClick={() => setShowProfile(true)} aria-label="プロフィール">
-            <Avatar userId={me.id} hasAvatar={me.hasAvatar} name={me.displayName} size={36} />
-          </button>
-          <h1>SoraChat</h1>
-          <button className="icon-btn" onClick={() => setShowNew(true)} aria-label="新しいトーク">
-            ＋
-          </button>
-        </header>
-        <ConversationList list={list} selectedId={selectedId} onSelect={select} />
+        <div className="sidebar-body" key={tab}>
+          {tab === "talk" && (
+            <ConversationList list={list} selectedId={selectedId} onSelect={select} onCompose={() => setShowNew(true)} />
+          )}
+          {tab === "friends" && (
+            <FriendsTab
+              me={me}
+              onOpenMe={() => setShowProfile(true)}
+              onOpenUser={(id) => setViewUser(id)}
+              version={friendsVersion}
+              onAdd={() => setShowAdd(true)}
+            />
+          )}
+          {tab === "more" && (
+            <div className="tab-panel" key="more">
+              <header className="tab-head">
+                <strong className="tab-title">その他</strong>
+                <button className="icon-btn" onClick={() => setShowSettings(true)} aria-label="設定">
+                  <Icon name="settings" size={23} />
+                </button>
+              </header>
+              <button className="profile-card" onClick={() => setShowProfile(true)}>
+                <Avatar userId={me.id} hasAvatar={me.hasAvatar} name={me.displayName} size={64} />
+                <span className="row-text">
+                  <strong>{me.displayName}</strong>
+                  <small>{me.bio || "ステータスメッセージを設定しよう"}</small>
+                </span>
+                <Icon name="chevron" size={18} className="chev" />
+              </button>
+              <ul className="more-list">
+                <li>
+                  <button onClick={() => setShowProfile(true)}>
+                    <span className="option-icon">
+                      <Icon name="user" size={20} />
+                    </span>
+                    プロフィール
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
+                  <button onClick={() => setShowSettings(true)}>
+                    <span className="option-icon">
+                      <Icon name="settings" size={20} />
+                    </span>
+                    設定
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <nav className="tabbar" aria-label="メニュー">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`tab-btn ${tab === t.id ? "on" : ""}`}
+              aria-current={tab === t.id ? "page" : undefined}
+              onClick={() => setTab(t.id)}
+            >
+              <span className="tab-icon">
+                <Icon name={t.icon} size={24} />
+                {t.id === "talk" && totalUnread > 0 && (
+                  <span className="tab-badge" key={totalUnread}>
+                    {totalUnread > 99 ? "99+" : totalUnread}
+                  </span>
+                )}
+              </span>
+              <span className="tab-label">{t.label}</span>
+            </button>
+          ))}
+        </nav>
       </aside>
 
       <main className="chat-pane">
@@ -76,29 +184,65 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
             key={selectedId}
             conversationId={selectedId}
             meId={me.id}
-            conversation={selected}
+            conversation={list.find((c) => c.id === selectedId) ?? null}
+            conversations={list}
             onBack={() => setSelectedId(null)}
             onActivity={scheduleRefresh}
           />
         ) : (
-          <div className="empty">会話を選ぶか、＋から新しいトークを始めましょう。</div>
+          <div className="empty">
+            <div className="empty-mark" aria-hidden="true">
+              <Icon name="chat" size={56} />
+            </div>
+            <p className="empty-title">トークを選んでください</p>
+            <p className="muted">友だちとのトークを選ぶか、新規トークを始めましょう。</p>
+            <button className="btn-primary" onClick={() => setShowNew(true)}>
+              新規トーク
+            </button>
+          </div>
         )}
       </main>
 
       {showProfile && (
-        <ProfileSheet me={me} onClose={() => setShowProfile(false)} onChange={onMeChange} onLogout={onLogout} />
+        <ProfileSheet
+          me={me}
+          theme={theme}
+          onThemeChange={setTheme}
+          onClose={() => setShowProfile(false)}
+          onChange={onMeChange}
+          onLogout={onLogout}
+        />
+      )}
+      {showSettings && (
+        <SettingsSheet
+          me={me}
+          theme={theme}
+          onThemeChange={setTheme}
+          onChange={onMeChange}
+          onClose={() => setShowSettings(false)}
+          onLogout={onLogout}
+        />
       )}
       {showNew && (
         <NewChatSheet
           onClose={() => setShowNew(false)}
           onOpen={(id) => {
             setShowNew(false);
+            setTab("talk");
             select(id);
             refresh();
           }}
         />
       )}
-      <CallOverlay />
+      {showAdd && <AddFriendSheet onClose={() => setShowAdd(false)} onAdded={bumpFriends} />}
+      {viewUser && (
+        <UserProfileSheet
+          userId={viewUser}
+          onClose={() => setViewUser(null)}
+          onMessage={(username) => void openDmWith(username)}
+          onFriendsChanged={bumpFriends}
+        />
+      )}
     </div>
   );
 }

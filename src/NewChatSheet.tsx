@@ -1,94 +1,122 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, api, post } from "./api";
+import { FriendSelectPage } from "./FriendSelectPage";
+import { Icon } from "./Icon";
+import { UserRow } from "./UserRow";
+import type { Friend } from "./types";
 
-type Tab = "direct" | "group";
+const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
 
+// 「新規トーク」：友だちを選んで1対1で話す、またはグループを作る
 export function NewChatSheet({ onClose, onOpen }: { onClose: () => void; onOpen: (id: string) => void }) {
-  const [tab, setTab] = useState<Tab>("direct");
-  const [username, setUsername] = useState("");
-  const [title, setTitle] = useState("");
-  const [members, setMembers] = useState("");
-  const [error, setError] = useState("");
+  const [mode, setMode] = useState<"start" | "group">("start");
+  const [friends, setFriends] = useState<Friend[] | null>(null);
+  const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  const usernames = members
-    .split(/[,\s]+/)
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+  useEffect(() => {
+    api<Friend[]>("/api/friends")
+      .then(setFriends)
+      .catch(() => setFriends([]));
+  }, []);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const openDirect = async (username: string) => {
     setBusy(true);
     setError("");
     try {
-      const result =
-        tab === "direct"
-          ? await api<{ id: string }>("/api/dm/open", post({ username: username.trim().toLowerCase() }))
-          : await api<{ id: string }>("/api/dm/group", post({ title: title.trim(), usernames }));
+      const result = await api<{ id: string }>("/api/dm/open", post({ username }));
       onOpen(result.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "通信に失敗しました。");
+      setError(messageOf(err));
       setBusy(false);
     }
   };
 
-  const ready = tab === "direct" ? username.trim().length > 0 : title.trim().length > 0 && usernames.length > 0;
+  const createGroup = async (picked: Friend[], name: string) => {
+    // 名前が空なら、選んだ人の名前を並べて自動でつける
+    const autoTitle = picked.map((f) => f.displayName).join("、").slice(0, 40);
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ id: string }>(
+        "/api/dm/group",
+        post({ title: name || autoTitle, usernames: picked.map((f) => f.username) })
+      );
+      onOpen(result.id);
+    } catch (err) {
+      setError(messageOf(err));
+      setBusy(false);
+    }
+  };
+
+  if (mode === "group") {
+    return (
+      <FriendSelectPage
+        title="グループを作成"
+        friends={friends ?? []}
+        confirmLabel="作成"
+        showName
+        busy={busy}
+        error={error}
+        emptyText="グループに追加できる友だちがいません。先に友だちを追加してください。"
+        onConfirm={(picked, name) => void createGroup(picked, name)}
+        onClose={() => setMode("start")}
+      />
+    );
+  }
+
+  const q = query.trim().toLowerCase();
+  const shown = (friends ?? []).filter((f) => !q || f.displayName.toLowerCase().includes(q) || f.username.includes(q));
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="seg">
-          <button className={tab === "direct" ? "on" : ""} onClick={() => setTab("direct")}>
-            1対1
-          </button>
-          <button className={tab === "group" ? "on" : ""} onClick={() => setTab("group")}>
-            グループ
-          </button>
-        </div>
-        <form onSubmit={submit} className="sheet-form">
-          {tab === "direct" ? (
-            <label className="field">
-              <span>相手のユーザー名</span>
-              <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="例: sora_01"
-                autoFocus
-                autoCapitalize="none"
-                autoCorrect="off"
-                maxLength={20}
-              />
-            </label>
-          ) : (
-            <>
-              <label className="field">
-                <span>グループ名</span>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={40} autoFocus />
-              </label>
-              <label className="field">
-                <span>メンバーのユーザー名（カンマ区切り、{usernames.length}人）</span>
-                <textarea
-                  value={members}
-                  onChange={(e) => setMembers(e.target.value)}
-                  rows={3}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  placeholder="sora_01, kaito_22"
-                />
-              </label>
-            </>
-          )}
-          {error && <p className="error">{error}</p>}
-          <div className="sheet-actions">
-            <button type="button" className="btn ghost" onClick={onClose}>
-              キャンセル
-            </button>
-            <button className="btn primary" disabled={busy || !ready}>
-              開始
-            </button>
-          </div>
-        </form>
+    <div className="page" role="dialog" aria-label="新規トーク">
+      <header className="page-bar">
+        <button onClick={onClose} aria-label="閉じる">
+          <Icon name="close" size={24} />
+        </button>
+        <strong>新規トーク</strong>
+        <span />
+      </header>
+
+      <div className="option-list">
+        <button onClick={() => setMode("group")}>
+          <span className="option-icon">
+            <Icon name="users" size={20} />
+          </span>
+          <span>グループを作成</span>
+          <Icon name="chevron" size={18} className="chev" />
+        </button>
       </div>
+
+      <div className="section-label">
+        <span>友だち</span>
+        {friends && <span className="section-count">{friends.length}</span>}
+      </div>
+
+      <div className="search-bar">
+        <label className="search-field">
+          <Icon name="search" size={16} />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="検索" aria-label="友だちを検索" />
+        </label>
+      </div>
+
+      {friends && !friends.length && <p className="muted center pad">友だちがまだいません。友だち追加から追加できます。</p>}
+      <ul className="user-list-ul">
+        {shown.map((f, i) => (
+          <UserRow
+            key={f.id}
+            index={i}
+            userId={f.id}
+            hasAvatar={f.hasAvatar}
+            name={f.displayName}
+            sub={`@${f.username}`}
+            onClick={busy ? undefined : () => void openDirect(f.username)}
+          />
+        ))}
+      </ul>
+
+      {error && <p className="notice center error shake">{error}</p>}
     </div>
   );
 }

@@ -87,12 +87,16 @@ export async function notifyRecipient(args: {
         } catch (error) {
           const status = (error as { statusCode?: number }).statusCode;
           if (status === 404 || status === 410) {
+            // 端末側で購読が無効になったもの。二度と使わないので消す
             await sb.from("sc_push_subscriptions").delete().eq("endpoint", sub.endpoint);
+          } else {
+            // 届かなかった理由を残す（VAPID鍵の不一致など。以前は握りつぶして原因が見えなかった）
+            console.error("Web Push の送信に失敗しました:", status ?? "unknown", (error as Error).message);
           }
         }
       })
     );
-  } catch {
-    return;
+  } catch (error) {
+    console.error("通知の準備に失敗しました:", error);
   }
 }

@@ -10,6 +10,31 @@ export const IMAGE_TYPES: Record<string, string> = {
 };
 
 export const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+export const FILE_LIMIT = 20 * 1024 * 1024;
+export const uploadFile = multer({ storage: multer.memoryStorage(), limits: { fileSize: FILE_LIMIT } });
+
+// 日本語のファイル名がずれて届くことがあるので、UTF-8として読み直す
+export function fileNameOf(file: Express.Multer.File) {
+  const decoded = Buffer.from(file.originalname, "latin1").toString("utf8");
+  const name = decoded.includes("\uFFFD") ? file.originalname : decoded;
+  return name.replace(/[\\/\r\n]/g, "_").trim().slice(0, 120) || "file";
+}
+
+const safeExt = (name: string) => {
+  const match = name.match(/\.([a-zA-Z0-9]{1,10})$/);
+  return match ? match[1].toLowerCase() : "bin";
+};
+
+// 任意ファイルは中身の型を信用せず application/octet-stream で保存する
+export async function saveFile(file: Express.Multer.File, folder: string) {
+  const path = `${folder}/${randomUUID()}.${safeExt(fileNameOf(file))}`;
+  const { error } = await sb.storage.from(IMAGE_BUCKET).upload(path, file.buffer, {
+    contentType: "application/octet-stream",
+    upsert: false
+  });
+  if (error) throw error;
+  return path;
+}
 
 export const isAllowedImage = (file?: Express.Multer.File) => Boolean(file && IMAGE_TYPES[file.mimetype]);
 
