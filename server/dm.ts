@@ -207,7 +207,7 @@ dm.get("/dm/:id", async (req, res) => {
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(40) });
 
-dm.patch("/dm/:id", async (req, res) => {
+dm.post("/dm/:id", async (req, res) => {
   const id = String(req.params.id);
   const me = await membership(id, currentUserId(res));
   if (!me || me.role !== "owner") {
@@ -472,7 +472,7 @@ dm.post("/dm/messages/:messageId/reactions", async (req, res) => {
 
 const editSchema = z.object({ body: z.string().trim().min(1).max(1000) });
 
-dm.patch("/dm/messages/:messageId", async (req, res) => {
+dm.post("/dm/messages/:messageId", async (req, res) => {
   const messageId = String(req.params.messageId);
   const me = currentUserId(res);
   const msg = UUID.test(messageId) ? await messageRow(messageId) : null;

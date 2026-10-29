@@ -31,7 +31,7 @@ export const post = (body?: unknown): RequestInit => ({
 });
 
 export const patch = (body: unknown): RequestInit => ({
-  method: "PATCH",
+  method: "POST", // 学校のネットワークがPATCHを通さないためPOSTで送る（サーバー側もPOSTで受ける）
   body: JSON.stringify(body)
 });
 

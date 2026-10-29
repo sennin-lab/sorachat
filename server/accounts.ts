@@ -234,7 +234,7 @@ accounts.get("/me", requireAuth, async (_req, res) => {
   res.json(me);
 });
 
-accounts.patch("/me", requireAuth, async (req, res) => {
+accounts.post("/me", requireAuth, async (req, res) => {
   const parsed = patchSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0].message });
