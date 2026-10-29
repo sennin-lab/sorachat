@@ -1,3 +1,5 @@
+export type CoverTheme = "green" | "sky" | "sunset" | "lavender" | "sand" | "graphite";
+
 export type Me = {
   id: string;
   username: string;
@@ -8,6 +10,7 @@ export type Me = {
   hasAvatar: boolean;
   notifyDm: boolean;
   sennin: boolean;
+  coverTheme: CoverTheme;
 };
 
 export type Conversation = {
@@ -64,5 +67,17 @@ export type UserProfile = {
   contact: string;
   profileUrl: string;
   hasAvatar: boolean;
+  coverTheme: CoverTheme;
+  isFriend: boolean;
   note: string | null;
+};
+
+// 友だち一覧の1人分（bio はステータスメッセージとして表示する）
+export type Friend = {
+  id: string;
+  username: string;
+  displayName: string;
+  bio: string;
+  hasAvatar: boolean;
+  coverTheme: CoverTheme;
 };

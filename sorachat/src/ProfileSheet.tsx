@@ -1,15 +1,17 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { ApiError, api, patch, put } from "./api";
 import { Avatar } from "./Avatar";
+import { COVER_THEMES, Cover } from "./Cover";
 import { Icon } from "./Icon";
 import { makeQrImage, profileQrValue } from "./qr";
 import { SettingsSheet } from "./SettingsSheet";
-import type { Me } from "./types";
+import type { CoverTheme, Me } from "./types";
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
 
 type Note = { body: string; expiresAt: string } | null;
 
+// 自分のプロフィール（LINE のプロフィール画面のように、背景・アバター・ステータスメッセージを表示する）
 export function ProfileSheet({
   me,
   theme,
@@ -27,6 +29,7 @@ export function ProfileSheet({
 }) {
   const [editing, setEditing] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const [showCovers, setShowCovers] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [qrImage, setQrImage] = useState("");
   const [displayName, setDisplayName] = useState(me.displayName);
@@ -71,6 +74,13 @@ export function ProfileSheet({
       return "保存しました。";
     });
 
+  const chooseCover = (id: CoverTheme) =>
+    run(async () => {
+      if (id === me.coverTheme) return "";
+      onChange(await api<Me>("/api/me", patch({ coverTheme: id })));
+      return "";
+    });
+
   const saveNote = () =>
     run(async () => {
       const body = (noteDraft ?? "").trim();
@@ -110,41 +120,69 @@ export function ProfileSheet({
   }
 
   return (
-    <div className="page" role="dialog" aria-label="プロフィール">
+    <div className="page profile-page" role="dialog" aria-label="プロフィール">
       <header className="page-bar">
         <button onClick={onClose} aria-label="戻る">
           <Icon name="back" size={26} />
         </button>
-        <strong>{me.username}</strong>
-        <button onClick={() => setShowSettings(true)} aria-label="設定">
-          <Icon name="settings" size={24} />
+        <strong>プロフィール</strong>
+        <button className="bar-action" onClick={() => setEditing((v) => !v)}>
+          {editing ? "閉じる" : "編集"}
         </button>
       </header>
 
-      <div className="page-hero">
-        <label className="avatar-edit" aria-label="プロフィール画像を変更">
-          <Avatar userId={me.id} hasAvatar={me.hasAvatar} name={displayName} size={86} />
+      <div className="profile-top">
+        <Cover theme={me.coverTheme}>
+          <button className="cover-edit" onClick={() => setShowCovers((v) => !v)} aria-label="背景を変更">
+            <Icon name="camera" size={18} />
+          </button>
+        </Cover>
+        <label className="profile-avatar" aria-label="プロフィール画像を変更">
+          <Avatar userId={me.id} hasAvatar={me.hasAvatar} name={displayName} size={104} />
+          <span className="avatar-badge" aria-hidden="true">
+            <Icon name="camera" size={14} />
+          </span>
           <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={uploadAvatar} />
         </label>
-        <strong className="hero-name">{displayName}</strong>
-        {bio && <p className="bio">{bio}</p>}
+        <strong className="profile-name">{displayName}</strong>
+        <p className={`profile-status ${bio ? "" : "muted"}`}>{bio || "ステータスメッセージを入力"}</p>
         {me.sennin && <p className="muted small">仙人アカウント連携中</p>}
       </div>
 
-      <div className="action-row">
-        <button className="btn-secondary" onClick={() => setEditing((v) => !v)}>
+      {showCovers && (
+        <div className="cover-picker" role="radiogroup" aria-label="背景">
+          {COVER_THEMES.map((t, i) => (
+            <button
+              key={t.id}
+              role="radio"
+              aria-checked={me.coverTheme === t.id}
+              aria-label={t.label}
+              className={`swatch ${me.coverTheme === t.id ? "on" : ""}`}
+              style={{ background: `linear-gradient(135deg, ${t.from}, ${t.to})`, animationDelay: `${i * 40}ms` }}
+              disabled={busy}
+              onClick={() => void chooseCover(t.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="profile-actions">
+        <button className="pill" onClick={() => setEditing(true)}>
           プロフィールを編集
         </button>
-        <button className="btn-secondary" onClick={() => setShowQr((v) => !v)}>
+        <button className="pill" onClick={() => setShowQr((v) => !v)}>
           <Icon name="qr" size={18} /> QRコード
+        </button>
+        <button className="pill" onClick={() => setShowSettings(true)}>
+          <Icon name="settings" size={18} /> 設定
         </button>
       </div>
 
       {showQr && (
         <div className="qr-card">
           {qrImage && <img src={qrImage} alt={`${me.username} のQRコード`} />}
-          <span className="muted">{me.username}</span>
-          <p className="muted small">相手がこのQRコードを読み取ると、トークを始められます。</p>
+          <span className="muted">@{me.username}</span>
+          <p className="muted small">相手がこのQRコードを読み取ると、友だちに追加できます。</p>
         </div>
       )}
 
@@ -152,7 +190,7 @@ export function ProfileSheet({
         <div className="note editing">
           <span className="note-tag">ノート</span>
           <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} maxLength={60} autoFocus />
-          <button className="btn-small" disabled={busy} onClick={saveNote}>
+          <button className="btn-small accent" disabled={busy} onClick={saveNote}>
             保存
           </button>
         </div>
@@ -160,32 +198,33 @@ export function ProfileSheet({
         <button className="note" onClick={() => setNoteDraft(note?.body ?? "")}>
           <span className="note-tag">ノート</span>
           <span className={note ? "" : "muted"}>{note ? note.body : "書く（24時間で消えます）"}</span>
+          <Icon name="edit" size={16} className="chev" />
         </button>
       )}
 
       {editing && (
-        <div className="page-form">
-          <label className="field">
+        <div className="page-card form-card">
+          <label className="form-row">
             <span>名前</span>
             <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={40} />
           </label>
-          <label className="field">
+          <label className="form-row">
             <span>ユーザー名</span>
             <input value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" maxLength={20} />
           </label>
-          <label className="field">
-            <span>自己紹介</span>
-            <textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={200} rows={2} />
+          <label className="form-row">
+            <span>ステータス</span>
+            <input value={bio} onChange={(e) => setBio(e.target.value)} maxLength={200} placeholder="ひとこと" />
           </label>
-          <label className="field">
+          <label className="form-row">
             <span>連絡先</span>
             <input value={contact} onChange={(e) => setContact(e.target.value)} maxLength={120} />
           </label>
-          <label className="field">
+          <label className="form-row">
             <span>リンク</span>
             <input value={profileUrl} onChange={(e) => setProfileUrl(e.target.value)} maxLength={200} inputMode="url" placeholder="https://" />
           </label>
-          <div className="btn-inline">
+          <div className="btn-inline form-foot">
             <button className="btn-text" onClick={() => setEditing(false)}>
               キャンセル
             </button>

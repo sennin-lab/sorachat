@@ -1,22 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "./api";
-import { Avatar } from "./Avatar";
+import { api, post } from "./api";
 import { calls } from "./call";
 import { CallOverlay } from "./CallOverlay";
 import { ChatView } from "./ChatView";
 import { cachedConversations, saveConversations } from "./cache";
 import { ConversationList } from "./ConversationList";
+import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
+import { AddFriendSheet } from "./AddFriendSheet";
+import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
 import { NewChatSheet } from "./NewChatSheet";
-import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { ProfileSheet } from "./ProfileSheet";
+import { SettingsSheet } from "./SettingsSheet";
+import { UserProfileSheet } from "./UserProfileSheet";
+import { Avatar } from "./Avatar";
 import type { Conversation, Me } from "./types";
+
+type Tab = "talk" | "friends" | "more";
+
+const TABS: { id: Tab; label: string; icon: "chat" | "users" | "menu" }[] = [
+  { id: "talk", label: "トーク", icon: "chat" },
+  { id: "friends", label: "友だち", icon: "users" },
+  { id: "more", label: "その他", icon: "menu" }
+];
 
 export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me) => void; onLogout: () => void }) {
   const [list, setList] = useState<Conversation[]>(cachedConversations);
   const [selectedId, setSelectedId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("dm"));
+  const [tab, setTab] = useState<Tab>("talk");
   const [showProfile, setShowProfile] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [viewUser, setViewUser] = useState<string | null>(null);
+  // 友だちが増えた・減ったときに友だち一覧を取り直すための番号
+  const [friendsVersion, setFriendsVersion] = useState(0);
+  const bumpFriends = () => setFriendsVersion((v) => v + 1);
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     localStorage.getItem("sorachat-theme") === "dark" ? "dark" : "light"
   );
@@ -63,19 +82,97 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     setList((current) => current.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
   };
 
+  // 名前（ユーザー名）からトークを開く。友だちの画面から「トーク」を押したとき
+  const openDmWith = async (username: string) => {
+    try {
+      const result = await api<{ id: string }>("/api/dm/open", post({ username }));
+      setViewUser(null);
+      setTab("talk");
+      select(result.id);
+      refresh();
+    } catch {
+      return;
+    }
+  };
+
+  const totalUnread = list.reduce((sum, c) => sum + c.unread, 0);
+
   return (
     <div className={`app ${selectedId ? "has-chat" : ""}`}>
       <aside className="sidebar">
-        <header className="inbox-head">
-          <button className="avatar-btn" onClick={() => setShowProfile(true)} aria-label="プロフィール">
-            <Avatar userId={me.id} hasAvatar={me.hasAvatar} name={me.displayName} size={30} />
-          </button>
-          <strong>{me.username}</strong>
-          <button className="icon-btn" onClick={() => setShowNew(true)} aria-label="新規メッセージ">
-            <Icon name="compose" size={24} />
-          </button>
-        </header>
-        <ConversationList list={list} selectedId={selectedId} onSelect={select} />
+        <div className="sidebar-body" key={tab}>
+          {tab === "talk" && (
+            <ConversationList list={list} selectedId={selectedId} onSelect={select} onCompose={() => setShowNew(true)} />
+          )}
+          {tab === "friends" && (
+            <FriendsTab
+              me={me}
+              onOpenMe={() => setShowProfile(true)}
+              onOpenUser={(id) => setViewUser(id)}
+              version={friendsVersion}
+              onAdd={() => setShowAdd(true)}
+            />
+          )}
+          {tab === "more" && (
+            <div className="tab-panel" key="more">
+              <header className="tab-head">
+                <strong className="tab-title">その他</strong>
+                <button className="icon-btn" onClick={() => setShowSettings(true)} aria-label="設定">
+                  <Icon name="settings" size={23} />
+                </button>
+              </header>
+              <button className="profile-card" onClick={() => setShowProfile(true)}>
+                <Avatar userId={me.id} hasAvatar={me.hasAvatar} name={me.displayName} size={64} />
+                <span className="row-text">
+                  <strong>{me.displayName}</strong>
+                  <small>{me.bio || "ステータスメッセージを設定しよう"}</small>
+                </span>
+                <Icon name="chevron" size={18} className="chev" />
+              </button>
+              <ul className="more-list">
+                <li>
+                  <button onClick={() => setShowProfile(true)}>
+                    <span className="option-icon">
+                      <Icon name="user" size={20} />
+                    </span>
+                    プロフィール
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
+                  <button onClick={() => setShowSettings(true)}>
+                    <span className="option-icon">
+                      <Icon name="settings" size={20} />
+                    </span>
+                    設定
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <nav className="tabbar" aria-label="メニュー">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`tab-btn ${tab === t.id ? "on" : ""}`}
+              aria-current={tab === t.id ? "page" : undefined}
+              onClick={() => setTab(t.id)}
+            >
+              <span className="tab-icon">
+                <Icon name={t.icon} size={24} />
+                {t.id === "talk" && totalUnread > 0 && (
+                  <span className="tab-badge" key={totalUnread}>
+                    {totalUnread > 99 ? "99+" : totalUnread}
+                  </span>
+                )}
+              </span>
+              <span className="tab-label">{t.label}</span>
+            </button>
+          ))}
+        </nav>
       </aside>
 
       <main className="chat-pane">
@@ -91,11 +188,13 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           />
         ) : (
           <div className="empty">
-            <Icon name="chat" size={96} className="empty-icon" />
-            <p className="empty-title">メッセージを送信しよう</p>
-            <p className="muted">友達とのトークを選ぶか、新規メッセージを作成します。</p>
+            <div className="empty-mark" aria-hidden="true">
+              <Icon name="chat" size={56} />
+            </div>
+            <p className="empty-title">トークを選んでください</p>
+            <p className="muted">友だちとのトークを選ぶか、新規トークを始めましょう。</p>
             <button className="btn-primary" onClick={() => setShowNew(true)}>
-              新規メッセージ
+              新規トーク
             </button>
           </div>
         )}
@@ -111,14 +210,34 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           onLogout={onLogout}
         />
       )}
+      {showSettings && (
+        <SettingsSheet
+          me={me}
+          theme={theme}
+          onThemeChange={setTheme}
+          onChange={onMeChange}
+          onClose={() => setShowSettings(false)}
+          onLogout={onLogout}
+        />
+      )}
       {showNew && (
         <NewChatSheet
           onClose={() => setShowNew(false)}
           onOpen={(id) => {
             setShowNew(false);
+            setTab("talk");
             select(id);
             refresh();
           }}
+        />
+      )}
+      {showAdd && <AddFriendSheet onClose={() => setShowAdd(false)} onAdded={bumpFriends} />}
+      {viewUser && (
+        <UserProfileSheet
+          userId={viewUser}
+          onClose={() => setViewUser(null)}
+          onMessage={(username) => void openDmWith(username)}
+          onFriendsChanged={bumpFriends}
         />
       )}
       <CallOverlay />

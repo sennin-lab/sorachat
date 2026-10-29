@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
+import { friendIdsOf } from "./friends.js";
 import { fileNameOf, FILE_LIMIT, isAllowedImage, readImage, saveFile, saveImage, upload, uploadFile } from "./media.js";
 import {
   COLUMNS,
@@ -133,6 +134,12 @@ async function findUsers(usernames: string[]) {
   return { found, missing };
 }
 
+// グループに入れられるのは友だちだけ（自分以外で友だちでないユーザーがいたら拒否する）
+async function strangersAmong(found: { id: string; username: string }[], me: string) {
+  const friendIds = await friendIdsOf(me);
+  return found.filter((u) => u.id !== me && !friendIds.has(u.id)).map((u) => u.username);
+}
+
 dm.post("/dm/group", async (req, res) => {
   const parsed = groupSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -143,6 +150,11 @@ dm.post("/dm/group", async (req, res) => {
   const { found, missing } = await findUsers(parsed.data.usernames);
   if (missing.length) {
     res.status(404).json({ error: `見つからないユーザー: ${missing.join(", ")}` });
+    return;
+  }
+  const strangers = await strangersAmong(found, me);
+  if (strangers.length) {
+    res.status(400).json({ error: `友だちではないユーザーは追加できません: ${strangers.join(", ")}` });
     return;
   }
   const ids = found.map((u) => u.id).filter((id) => id !== me);
@@ -227,6 +239,11 @@ dm.post("/dm/:id/members", async (req, res) => {
   const { found, missing } = await findUsers(parsed.data.usernames);
   if (missing.length) {
     res.status(404).json({ error: `見つからないユーザー: ${missing.join(", ")}` });
+    return;
+  }
+  const strangers = await strangersAmong(found, currentUserId(res));
+  if (strangers.length) {
+    res.status(400).json({ error: `友だちではないユーザーは追加できません: ${strangers.join(", ")}` });
     return;
   }
   const { error } = await sb.from("sc_members").upsert(

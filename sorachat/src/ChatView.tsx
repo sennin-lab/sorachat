@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type CSSProperties,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -90,6 +91,10 @@ function dividerText(iso: string) {
 }
 
 // 直前・直後と比べて「区切り線を出すか」「同じ人の連続として束ねるか」を判定する
+function clockOf(iso: string) {
+  return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+}
+
 function threadInfo(messages: Message[], index: number) {
   const m = messages[index];
   const prev = messages[index - 1];
@@ -137,6 +142,12 @@ export function ChatView({
   const [menuFor, setMenuFor] = useState<Message | null>(null);
   // 相手が既読にした時刻（1対1は1人分、グループは全員分）
   const [readers, setReaders] = useState<Reader[]>([]);
+  // メンバーの名前（グループで送った人の名前を表示する）
+  const [people, setPeople] = useState<Map<string, { name: string; hasAvatar: boolean }>>(new Map());
+  // 新しく届いた・送った吹き出しだけ、出現アニメーションを付ける
+  const enterIds = useRef(new Set<string>());
+  // ハートを送ったときに浮かぶハートの一覧
+  const [hearts, setHearts] = useState<number[]>([]);
   const [editing, setEditing] = useState<Message | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [viewing, setViewing] = useState<Message | null>(null);
@@ -169,6 +180,9 @@ export function ChatView({
 
   // 受信したメッセージを追加（同じ clientId の送信中表示は差し替える）
   const upsert = (incoming: Message[], dropClientId?: string | null) => {
+    for (const m of incoming) {
+      if (!messagesRef.current.some((x) => x.id === m.id)) enterIds.current.add(m.id);
+    }
     const base = messagesRef.current.filter((m) => !(dropClientId && m.clientId === dropClientId));
     commit(mergeById(base, incoming));
   };
@@ -184,11 +198,14 @@ export function ChatView({
 
   const markRead = () => api(`/api/dm/${conversationId}/read`, post()).catch(() => undefined);
 
-  // 既読状況（相手がどこまで読んだか）を取得する
+  // 既読状況（相手がどこまで読んだか）とメンバーの名前を取得する
   const loadReaders = async () => {
     try {
-      const info = await api<{ readBy: Reader[] }>(`/api/dm/${conversationId}`);
+      const info = await api<{ readBy: Reader[]; members: { id: string; displayName: string; hasAvatar: boolean }[] }>(
+        `/api/dm/${conversationId}`
+      );
       setReaders(info.readBy);
+      setPeople(new Map(info.members.map((m) => [m.id, { name: m.displayName, hasAvatar: m.hasAvatar }])));
     } catch {
       return;
     }
@@ -322,7 +339,11 @@ export function ChatView({
   };
 
   const sendHeart = () => {
-    if (!editing) enqueue("❤️");
+    if (editing) return;
+    enqueue("❤️");
+    const id = Date.now() + Math.random();
+    setHearts((list) => [...list, id]);
+    window.setTimeout(() => setHearts((list) => list.filter((x) => x !== id)), 1200);
   };
 
   const enqueue = (body: string) => {
@@ -512,17 +533,9 @@ export function ChatView({
           onClick={() => (isGroup ? setShowInfo(true) : setShowProfile(true))}
           aria-label={isGroup ? "グループ情報" : "プロフィール"}
         >
-          <Avatar
-            userId={isGroup ? "" : conversation?.otherId ?? ""}
-            hasAvatar={conversation?.hasAvatar ?? false}
-            name={conversation?.name ?? ""}
-            size={34}
-          />
           <span>
             <strong>{conversation?.name ?? ""}</strong>
-            {conversation && (
-              <span className="muted small">{isGroup ? `${conversation.memberCount}人のグループ` : `@${conversation.otherUsername}`}</span>
-            )}
+            {conversation && isGroup && <span className="muted small">{conversation.memberCount}人</span>}
           </span>
         </button>
         {conversation && !isGroup && conversation.otherId && (
@@ -563,102 +576,122 @@ export function ChatView({
           const mine = m.senderId === meId;
           const showImage = m.kind === "image" && !m.deleted && m.imageUrl;
           const hasStatus = Boolean(m.status) || (m.edited && !m.deleted);
+          const sender = people.get(m.senderId);
+          const avatarName = isGroup ? sender?.name ?? "" : conversation?.name ?? "";
+          const avatarId = isGroup ? m.senderId : conversation?.otherId ?? "";
+          const avatarHas = isGroup ? sender?.hasAvatar ?? false : conversation?.hasAvatar ?? false;
           const rowClass = [
             "row",
             mine ? "mine" : "",
             info.joinPrev ? "join-prev" : "group-start",
-            info.joinNext ? "join-next" : ""
+            info.joinNext ? "join-next" : "",
+            enterIds.current.has(m.id) ? "enter" : ""
           ].join(" ");
+          const meta = (
+            <span className="msg-meta">
+              {readLabelFor(m) && <span className="read-label">{readLabelFor(m)}</span>}
+              {!info.joinNext && !m.status && !m.deleted && <time className="msg-time">{clockOf(m.createdAt)}</time>}
+            </span>
+          );
           return (
-            <Fragment key={m.id}>
-              {info.divider && <div className="dm-divider">{info.divider}</div>}
+            <Fragment key={m.clientId ?? m.id}>
+              {info.divider && (
+                <div className="dm-divider">
+                  <span>{info.divider}</span>
+                </div>
+              )}
               <div className={rowClass}>
-                {!mine && !isGroup && (
+                {!mine && (
                   <div className="msg-avatar">
-                    {!info.joinNext && conversation?.otherId && (
-                      <Avatar userId={conversation.otherId} hasAvatar={conversation.hasAvatar} name={conversation.name} size={26} />
-                    )}
+                    {!info.joinPrev && avatarId && <Avatar userId={avatarId} hasAvatar={avatarHas} name={avatarName} size={36} />}
                   </div>
                 )}
                 <div className="msg-wrap">
+                  {!mine && isGroup && !info.joinPrev && sender && <span className="sender-name">{sender.name}</span>}
                   {m.forwarded && !m.deleted && (
                     <span className="fwd-label">
                       <Icon name="forward" size={13} /> 転送
                     </span>
                   )}
-                  <div
-                    className={`bubble ${showImage ? "image" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
-                    onPointerDown={startPress(m)}
-                    onPointerUp={endPress}
-                    onPointerMove={movePress}
-                    onPointerCancel={endPress}
-                    onContextMenu={(e) => e.preventDefault()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (pressed.current) {
-                        pressed.current = false;
-                        return;
-                      }
-                      if (m.deleted || m.status) return;
-                      if (showImage) {
-                        setViewing(m);
-                        return;
-                      }
-                      const now = Date.now();
-                      if (lastTap.current.id === m.id && now - lastTap.current.at < DOUBLE_TAP_MS) {
-                        lastTap.current = { id: "", at: 0 };
-                        void react(m.id, "❤️");
-                        return;
-                      }
-                      lastTap.current = { id: m.id, at: now };
-                    }}
-                  >
-                    {m.deleted ? (
-                      <p className="unsent">送信を取り消しました</p>
-                    ) : showImage ? (
-                      <img src={m.imageUrl!} alt="送信された画像" loading="lazy" draggable={false} />
-                    ) : m.kind === "file" && m.fileUrl ? (
-                      <a
-                        className="file-card"
-                        href={m.fileUrl}
-                        download={m.fileName ?? undefined}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (pressed.current) e.preventDefault();
-                        }}
-                      >
-                        <Icon name="file" size={28} />
-                        <span className="file-text">
-                          <strong>{m.fileName}</strong>
-                          <small>{formatSize(m.fileSize)}</small>
-                        </span>
-                      </a>
-                    ) : m.kind === "contact" && m.contact ? (
-                      <button
-                        className="contact-card"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!pressed.current) setContactUser(m.contact ?? null);
-                        }}
-                      >
-                        <Avatar userId={m.contact.id} hasAvatar={m.contact.hasAvatar} name={m.contact.displayName} size={40} />
-                        <span className="file-text">
-                          <strong>{m.contact.displayName}</strong>
-                          <small>@{m.contact.username}</small>
-                        </span>
-                      </button>
-                    ) : (
-                      <p>{m.body}</p>
-                    )}
-                    <time>
-                      {m.status === "sending"
-                        ? "送信中…"
-                        : m.status === "failed"
-                          ? "送信できませんでした"
-                          : m.edited && !m.deleted
-                            ? "編集済み"
-                            : ""}
-                    </time>
+                  <div className="bubble-line">
+                    {mine && meta}
+                    <div
+                      className={`bubble ${showImage ? "image" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
+                      onPointerDown={startPress(m)}
+                      onPointerUp={endPress}
+                      onPointerMove={movePress}
+                      onPointerCancel={endPress}
+                      onContextMenu={(e) => e.preventDefault()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (pressed.current) {
+                          pressed.current = false;
+                          return;
+                        }
+                        if (m.deleted || m.status) return;
+                        if (showImage) {
+                          setViewing(m);
+                          return;
+                        }
+                        const now = Date.now();
+                        if (lastTap.current.id === m.id && now - lastTap.current.at < DOUBLE_TAP_MS) {
+                          lastTap.current = { id: "", at: 0 };
+                          void react(m.id, "❤️");
+                          return;
+                        }
+                        lastTap.current = { id: m.id, at: now };
+                      }}
+                    >
+                      {m.deleted ? (
+                        <p className="unsent">送信を取り消しました</p>
+                      ) : showImage ? (
+                        <img src={m.imageUrl!} alt="送信された画像" loading="lazy" draggable={false} />
+                      ) : m.kind === "file" && m.fileUrl ? (
+                        <a
+                          className="file-card"
+                          href={m.fileUrl}
+                          download={m.fileName ?? undefined}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (pressed.current) e.preventDefault();
+                          }}
+                        >
+                          <Icon name="file" size={28} />
+                          <span className="file-text">
+                            <strong>{m.fileName}</strong>
+                            <small>{formatSize(m.fileSize)}</small>
+                          </span>
+                        </a>
+                      ) : m.kind === "contact" && m.contact ? (
+                        <button
+                          className="contact-card"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!pressed.current) setContactUser(m.contact ?? null);
+                          }}
+                        >
+                          <Avatar userId={m.contact.id} hasAvatar={m.contact.hasAvatar} name={m.contact.displayName} size={40} />
+                          <span className="file-text">
+                            <strong>{m.contact.displayName}</strong>
+                            <small>@{m.contact.username}</small>
+                          </span>
+                        </button>
+                      ) : (
+                        <p>{m.body}</p>
+                      )}
+                      {hasStatus && (
+                        <time>
+                          {m.status === "sending"
+                            ? "送信中…"
+                            : m.status === "failed"
+                              ? "送信できませんでした"
+                              : m.edited && !m.deleted
+                                ? "編集済み"
+                                : ""}
+                        </time>
+                      )}
+                    </div>
+                    {!mine && meta}
                   </div>
                   {m.status === "failed" && (
                     <div className="retry-row">
@@ -686,7 +719,6 @@ export function ChatView({
                       ))}
                     </div>
                   )}
-                  {readLabelFor(m) && <div className="read-label">{readLabelFor(m)}</div>}
                 </div>
               </div>
             </Fragment>
@@ -709,6 +741,13 @@ export function ChatView({
       )}
 
       <form className="composer" ref={formRef} onSubmit={onSubmit}>
+        <span className="float-hearts" aria-hidden="true">
+          {hearts.map((id, i) => (
+            <span key={id} className="float-heart" style={{ "--dx": `${(i % 3) * 14 - 14}px` } as CSSProperties}>
+              ❤️
+            </span>
+          ))}
+        </span>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={pickImage} />
         <input ref={anyFileRef} type="file" hidden onChange={pickAnyFile} />
         <button
@@ -798,7 +837,6 @@ export function ChatView({
       )}
       {contactOpen && (
         <ContactSheet
-          conversations={conversations}
           meId={meId}
           onPick={(username) => void shareContact(username)}
           onClose={() => setContactOpen(false)}

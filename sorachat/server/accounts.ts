@@ -4,6 +4,7 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { cookieBase, currentUserId, endSession, randomToken, requireAuth, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
 import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
+import { friendIdsOf } from "./friends.js";
 import { sb } from "./supabase.js";
 
 export const accounts = Router();
@@ -44,19 +45,22 @@ const loginSchema = z.object({
   password: z.string().min(1).max(72)
 });
 
+export const COVER_THEMES = ["green", "sky", "sunset", "lavender", "sand", "graphite"] as const;
+
 const patchSchema = z.object({
   displayName: nameSchema.optional(),
   username: usernameSchema.optional(),
   bio: z.string().max(200).optional(),
   contact: z.string().max(120).optional(),
   profileUrl: z.string().max(200).refine((value) => !value || /^https?:\/\//i.test(value), "URLはhttps:// または http:// から入力してください。").optional(),
-  notifyDm: z.boolean().optional()
+  notifyDm: z.boolean().optional(),
+  coverTheme: z.enum(COVER_THEMES).optional()
 });
 
 async function loadMe(userId: string) {
   const { data, error } = await sb
     .from("sc_users")
-    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id")
+    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme")
     .eq("id", userId)
     .maybeSingle();
   if (error) throw error;
@@ -70,7 +74,8 @@ async function loadMe(userId: string) {
     profileUrl: (data.profile_url ?? "") as string,
     hasAvatar: Boolean(data.avatar_path),
     notifyDm: data.notify_dm as boolean,
-    sennin: Boolean(data.sennin_id)
+    sennin: Boolean(data.sennin_id),
+    coverTheme: (data.cover_theme ?? "green") as string
   };
 }
 
@@ -238,6 +243,7 @@ accounts.patch("/me", requireAuth, async (req, res) => {
   if (body.contact !== undefined) update.contact = body.contact;
   if (body.profileUrl !== undefined) update.profile_url = body.profileUrl;
   if (body.notifyDm !== undefined) update.notify_dm = body.notifyDm;
+  if (body.coverTheme !== undefined) update.cover_theme = body.coverTheme;
   const userId = currentUserId(res);
   const { error } = await sb.from("sc_users").update(update).eq("id", userId);
   if (error) {
@@ -278,11 +284,13 @@ accounts.get("/users/suggest", requireAuth, async (req, res) => {
     .order("username")
     .limit(8);
   if (error) throw error;
+  const friendIds = await friendIdsOf(currentUserId(res));
   res.json((data ?? []).map((user) => ({
     id: user.id,
     username: user.username,
     displayName: user.display_name,
-    hasAvatar: Boolean(user.avatar_path)
+    hasAvatar: Boolean(user.avatar_path),
+    isFriend: friendIds.has(user.id)
   })));
 });
 
@@ -374,7 +382,7 @@ accounts.get("/users/:id/profile", requireAuth, async (req, res) => {
   }
   const { data, error } = await sb
     .from("sc_users")
-    .select("id, username, display_name, bio, contact, profile_url, avatar_path")
+    .select("id, username, display_name, bio, contact, profile_url, avatar_path, cover_theme")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
@@ -382,6 +390,7 @@ accounts.get("/users/:id/profile", requireAuth, async (req, res) => {
     res.status(404).json({ error: "ユーザーが見つかりません。" });
     return;
   }
+  const isFriend = (await friendIdsOf(currentUserId(res))).has(id);
   const { data: note } = await sb
     .from("sc_notes")
     .select("body, expires_at")
@@ -396,6 +405,8 @@ accounts.get("/users/:id/profile", requireAuth, async (req, res) => {
     contact: data.contact ?? "",
     profileUrl: data.profile_url ?? "",
     hasAvatar: Boolean(data.avatar_path),
+    coverTheme: data.cover_theme ?? "green",
+    isFriend,
     note: activeNote
   });
 });

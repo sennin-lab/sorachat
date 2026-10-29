@@ -1,9 +1,10 @@
+import { useState } from "react";
 import { ApiError, api, patch } from "./api";
 import { Icon } from "./Icon";
 import { disablePush, enablePush } from "./push";
-import { useState } from "react";
 import type { Me } from "./types";
 
+// 設定（LINE の設定画面のように、項目をグループ分けして表示する）
 export function SettingsSheet({
   me,
   theme,
@@ -54,9 +55,17 @@ export function SettingsSheet({
         <span />
       </header>
 
+      <div className="section-label flush">
+        <span>表示</span>
+      </div>
       <div className="page-card">
         <label className="page-row">
-          <span>ダークモード</span>
+          <span className="row-label">
+            <span className="option-icon">
+              <Icon name="moon" size={18} />
+            </span>
+            ダークモード
+          </span>
           <input
             type="checkbox"
             className="switch"
@@ -64,8 +73,19 @@ export function SettingsSheet({
             onChange={(e) => onThemeChange(e.target.checked ? "dark" : "light")}
           />
         </label>
+      </div>
+
+      <div className="section-label flush">
+        <span>通知</span>
+      </div>
+      <div className="page-card">
         <label className="page-row">
-          <span>新着メッセージの通知</span>
+          <span className="row-label">
+            <span className="option-icon">
+              <Icon name="bell" size={18} />
+            </span>
+            新着メッセージの通知
+          </span>
           <input
             type="checkbox"
             className="switch"
@@ -76,13 +96,16 @@ export function SettingsSheet({
         </label>
       </div>
 
+      <div className="section-label flush">
+        <span>アカウント</span>
+      </div>
       <div className="page-card">
         <button className="page-row danger" onClick={() => void logout()}>
           <span>ログアウト</span>
         </button>
       </div>
 
-      {status && <p className="notice center error">{status}</p>}
+      {status && <p className="notice center error shake">{status}</p>}
     </div>
   );
 }
