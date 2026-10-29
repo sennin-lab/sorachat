@@ -1,4 +1,5 @@
-import { api, post } from "./api";
+import { ApiError, api, post } from "./api";
+import { setPushEndpoint } from "./realtime";
 
 const toBytes = (base64Url: string) => {
   const padded = base64Url.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (base64Url.length % 4)) % 4);
@@ -33,6 +34,7 @@ async function subscribeWith(publicKey: string) {
   }
   subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
   await api("/api/push/subscribe", post(subscription.toJSON()));
+  setPushEndpoint(subscription.endpoint);
 }
 
 export async function enablePush(): Promise<PushResult> {
@@ -66,4 +68,18 @@ export async function disablePush() {
   if (!subscription) return;
   await api("/api/push/unsubscribe", post({ endpoint: subscription.endpoint }));
   await subscription.unsubscribe();
+  setPushEndpoint(null);
+}
+
+// 「テスト通知」: 登録済みの端末すべてに送り、結果を文字で返す
+export async function testPush(): Promise<string> {
+  try {
+    const result = await api<{ registered: number; delivered: number; failedStatuses: (number | null)[] }>("/api/push/test", post());
+    if (result.delivered > 0) {
+      return `テスト通知を送りました（${result.delivered}台の端末）。届かない場合は端末の通知の設定（集中モードなど）を確認してください。`;
+    }
+    return `送れませんでした（登録${result.registered}件・理由: ${result.failedStatuses.join(", ") || "不明"}）。`;
+  } catch (err) {
+    return err instanceof ApiError ? err.message : "テスト通知を送れませんでした。";
+  }
 }

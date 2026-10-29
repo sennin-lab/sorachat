@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ApiError, api, patch } from "./api";
 import { Icon } from "./Icon";
-import { disablePush, enablePush } from "./push";
+import { disablePush, enablePush, testPush } from "./push";
 import type { Me } from "./types";
 
 // 設定（LINE の設定画面のように、項目をグループ分けして表示する）
@@ -22,6 +22,7 @@ export function SettingsSheet({
 }) {
   const [notify, setNotify] = useState(me.notifyDm);
   const [status, setStatus] = useState("");
+  const [testMessage, setTestMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
   const toggleNotify = async (on: boolean) => {
@@ -105,6 +106,22 @@ export function SettingsSheet({
           />
         </label>
       </div>
+
+      {notify && (
+        <div className="page-card">
+          <button
+            className="page-row"
+            disabled={busy}
+            onClick={async () => {
+              setTestMessage("送信しています…");
+              setTestMessage(await testPush());
+            }}
+          >
+            <span>テスト通知を送る</span>
+          </button>
+        </div>
+      )}
+      {testMessage && <p className="notice center">{testMessage}</p>}
 
       <div className="section-label flush">
         <span>アカウント</span>

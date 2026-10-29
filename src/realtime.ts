@@ -95,11 +95,18 @@ function rejectAll(reason: string) {
   }
 }
 
+// この端末のWeb Pushの宛先。画面を開いている端末には、同じ通知を重ねて送らないようにサーバーへ伝える
+let pushEndpoint: string | null = null;
+export function setPushEndpoint(endpoint: string | null) {
+  pushEndpoint = endpoint;
+  sendPresence();
+}
+
 // 画面を見ているかをサーバーに知らせる。裏に回しているときは通知を送ってもらうため
-const sendPresence = () => {
+function sendPresence() {
   if (socket?.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({ type: "presence", visible: !document.hidden }));
-};
+  socket.send(JSON.stringify({ type: "presence", visible: !document.hidden, endpoint: pushEndpoint }));
+}
 
 function openSocket() {
   const scheme = location.protocol === "https:" ? "wss" : "ws";

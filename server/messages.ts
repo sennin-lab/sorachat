@@ -1,4 +1,4 @@
-import { isActive, sendToUser } from "./hub.js";
+import { activeEndpoints, sendToUser } from "./hub.js";
 import { removeImage } from "./media.js";
 import { notifyRecipient } from "./push.js";
 import { sb } from "./supabase.js";
@@ -125,9 +125,9 @@ export async function replyTargetOk(conversationId: string, replyToId: string | 
 }
 
 async function notifyOffline(conversationId: string, senderId: string, members: string[], preview: string) {
-  // 画面を見ている人には通知を出さない（見ていない人にはWeb Pushで届ける）
-  const offline = members.filter((uid) => uid !== senderId && !isActive(uid));
-  if (!offline.length) return;
+  // 送った本人以外の全員へ。画面を開いている端末だけは、その端末への通知を省く
+  const others = members.filter((uid) => uid !== senderId);
+  if (!others.length) return;
   const [{ data: sender }, { data: conv }] = await Promise.all([
     sb.from("sc_users").select("display_name").eq("id", senderId).maybeSingle(),
     sb.from("sc_conversations").select("is_group, title").eq("id", conversationId).maybeSingle()
@@ -135,8 +135,8 @@ async function notifyOffline(conversationId: string, senderId: string, members: 
   const senderName = conv?.is_group
     ? `${sender?.display_name ?? "メンバー"}（${conv.title ?? "グループ"}）`
     : sender?.display_name ?? "新着メッセージ";
-  for (const uid of offline) {
-    void notifyRecipient({ recipientId: uid, senderName, preview, conversationId });
+  for (const uid of others) {
+    void notifyRecipient({ recipientId: uid, senderName, preview, conversationId, skipEndpoints: activeEndpoints(uid) });
   }
 }
 

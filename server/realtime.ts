@@ -18,7 +18,7 @@ const sendSchema = z.object({
 });
 
 // 画面を見ているかどうかの通知（アプリを裏に回したら false になる）
-const presenceSchema = z.object({ type: z.literal("presence"), visible: z.boolean() });
+const presenceSchema = z.object({ type: z.literal("presence"), visible: z.boolean(), endpoint: z.string().max(2048).nullish() });
 
 async function userFromRequest(req: IncomingMessage): Promise<string | null> {
   const match = req.headers.cookie?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
@@ -102,7 +102,7 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
   }
   if (data?.type === "presence") {
     const presence = presenceSchema.safeParse(data);
-    if (presence.success) setViewing(ws, presence.data.visible);
+    if (presence.success) setViewing(ws, presence.data.visible, presence.data.endpoint ?? null);
     return;
   }
   if (data?.type !== "send") return;
