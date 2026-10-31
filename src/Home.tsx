@@ -107,15 +107,18 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   };
 
   // 名前（ユーザー名）からトークを開く。友だちの画面から「トーク」を押したとき
-  const openDmWith = async (username: string) => {
+  // 成功したら true を返す（失敗時は呼び出し側で案内を出せるようにする）
+  const openDmWith = async (username: string): Promise<boolean> => {
     try {
       const result = await api<{ id: string }>("/api/dm/open", post({ username }));
       setViewUser(null);
+      setShowAdd(false);
       setTab("talk");
       select(result.id);
       refresh();
+      return true;
     } catch {
-      return;
+      return false;
     }
   };
 
@@ -264,7 +267,13 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           }}
         />
       )}
-      {showAdd && <AddFriendSheet onClose={() => setShowAdd(false)} onAdded={bumpFriends} />}
+      {showAdd && (
+        <AddFriendSheet
+          onClose={() => setShowAdd(false)}
+          onAdded={bumpFriends}
+          onOpenDm={(username) => openDmWith(username)}
+        />
+      )}
       {viewUser && (
         <UserProfileSheet
           userId={viewUser}

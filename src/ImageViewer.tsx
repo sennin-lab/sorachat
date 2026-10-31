@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 
 export function ImageViewer({ src, id, onClose }: { src: string; id: string; onClose: () => void }) {
@@ -34,7 +35,8 @@ export function ImageViewer({ src, id, onClose }: { src: string; id: string; onC
     }
   };
 
-  return (
+  // body 直下に描画し、×と保存ボタンは画像の大きさに関係なく常に右上に固定する
+  return createPortal(
     <div className="viewer" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} aria-label="閉じる">
@@ -44,7 +46,10 @@ export function ImageViewer({ src, id, onClose }: { src: string; id: string; onC
           <Icon name="download" size={24} />
         </button>
       </div>
-      <img src={src} alt="画像" onClick={(e) => e.stopPropagation()} />
-    </div>
+      <div className="viewer-stage" onClick={onClose}>
+        <img src={src} alt="画像" onClick={(e) => e.stopPropagation()} />
+      </div>
+    </div>,
+    document.body
   );
 }

@@ -12,7 +12,15 @@ type Found = { id: string; username: string; displayName: string; hasAvatar: boo
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
 
 // 「友だち追加」画面：ユーザー名で検索、またはQRコードを読み取って友だちに追加する
-export function AddFriendSheet({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+export function AddFriendSheet({
+  onClose,
+  onAdded,
+  onOpenDm,
+}: {
+  onClose: () => void;
+  onAdded: () => void;
+  onOpenDm: (username: string) => Promise<boolean>;
+}) {
   const [mode, setMode] = useState<Mode>("search");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Found[]>([]);
@@ -40,6 +48,7 @@ export function AddFriendSheet({ onClose, onAdded }: { onClose: () => void; onAd
     };
   }, [keyword, mode]);
 
+  // 友だちに追加したら、そのままトークを開く（開けなかったときだけ案内を出す）
   const addFriend = async (username: string) => {
     setBusy(username);
     setError("");
@@ -51,9 +60,12 @@ export function AddFriendSheet({ onClose, onAdded }: { onClose: () => void; onAd
       onAdded();
     } catch (err) {
       setError(messageOf(err));
-    } finally {
       setBusy("");
+      return;
     }
+    const opened = await onOpenDm(username);
+    if (!opened) setError("友だちには追加しました。トークは「トーク」タブから開けます。");
+    setBusy("");
   };
 
   // QRを読み取ったら、相手を確認してから友だちに追加する

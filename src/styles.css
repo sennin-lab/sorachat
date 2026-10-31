@@ -50,7 +50,10 @@ html, body, #root { height: 100%; margin: 0; background: var(--bg); color: var(-
    ページ全体を押し上げ、閉じた後に下が空白で残るのを防ぐ（スクロールは各領域の中だけ） */
 body.app-root {
   position: fixed;
-  inset: 0;
+  top: var(--vvt, 0px);
+  left: 0;
+  width: 100%;
+  height: var(--vvh, 100%);
   overflow: hidden;
   overscroll-behavior: none;
   width: 100%;
@@ -444,9 +447,8 @@ a { color: var(--accent); text-decoration: none; }
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  /* 入力欄が持ち上がった分、最新のメッセージが入力欄の裏に隠れないよう下を空ける */
-  padding: 10px 10px calc(14px + var(--kb, 0px));
-  scroll-padding-bottom: calc(14px + var(--kb, 0px));
+  padding: 10px 10px 14px;
+  scroll-padding-bottom: 14px;
   background: var(--chat-bg);
   -webkit-overflow-scrolling: touch;
 }
@@ -590,9 +592,8 @@ a { color: var(--accent); text-decoration: none; }
   gap: 6px;
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
-  /* キーボードの高さ分だけ入力欄を持ち上げる（画面全体は動かさない） */
-  transform: translateY(calc(var(--kb, 0px) * -1));
-  will-change: transform;
+  /* 入力欄は動かさない。キーボードに合わせて領域全体が縮むので、常に最下部にある */
+  flex: none;
   background: var(--panel);
 }
 .composer-field {
@@ -1023,9 +1024,19 @@ a { color: var(--accent); text-decoration: none; }
 .boot { display: grid; place-items: center; height: 100%; color: var(--muted); animation: fade-in 0.4s ease both; }
 
 /* ---- 画像ビューア ---- */
-.viewer { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.94); animation: fade-in 0.22s ease both; }
-.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; animation: pop 0.4s var(--ease-out) both; }
-.viewer-bar { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; display: flex; gap: 8px; }
+.viewer { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.94); animation: fade-in 0.22s ease both; }
+/* 画像は上下に余白を取った領域の中に収める。ボタンの列と重ならないよう、画像の大きさに関係なく位置は変わらない */
+.viewer-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(64px + env(safe-area-inset-top)) 12px calc(24px + env(safe-area-inset-bottom));
+}
+.viewer img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; animation: pop 0.4s var(--ease-out) both; }
+/* 右上に固定（画像のサイズや表示位置の影響を受けない） */
+.viewer-bar { position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 12px; z-index: 2; display: flex; gap: 8px; }
 .viewer-bar button { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: rgba(255, 255, 255, 0.12); }
 .viewer-bar button:disabled { opacity: 0.4; }
 
