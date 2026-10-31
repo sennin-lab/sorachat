@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
+import { decryptText, encryptText } from "./crypto.js";
 import { fileNameOf, FILE_LIMIT, isAllowedImage, readImage, removeImage, saveFile, saveImage, upload, uploadFile } from "./media.js";
 import {
   COLUMNS,
@@ -95,7 +96,7 @@ dm.get("/dm/conversations", async (_req, res) => {
       otherUsername: row.other_username,
       hasAvatar: row.has_avatar,
       lastMessageAt: row.last_message_at,
-      lastPreview: row.last_preview,
+      lastPreview: decryptText(row.last_preview),
       lastFromMe: row.last_sender_id === me,
       unread: Number(row.unread),
       myRole: row.my_role,
@@ -550,12 +551,12 @@ dm.post("/dm/messages/:messageId", async (req, res) => {
   }
   const body = parsed.data.body;
   const editedAt = new Date().toISOString();
-  const { error } = await sb.from("sc_messages").update({ body, edited_at: editedAt }).eq("id", messageId);
+  const { error } = await sb.from("sc_messages").update({ body: encryptText(body), edited_at: editedAt }).eq("id", messageId);
   if (error) throw error;
   // 最新のメッセージなら一覧のプレビューも更新
   await sb
     .from("sc_conversations")
-    .update({ last_preview: body.slice(0, 80) })
+    .update({ last_preview: encryptText(body.slice(0, 80)) })
     .eq("id", msg.conversation_id)
     .eq("last_message_at", msg.created_at);
   await broadcastToConversation(msg.conversation_id, {
@@ -592,7 +593,7 @@ dm.delete("/dm/messages/:messageId", async (req, res) => {
   if (msg.file_path) await removeImageIfUnused(msg.file_path);
   await sb
     .from("sc_conversations")
-    .update({ last_preview: "送信を取り消しました" })
+    .update({ last_preview: encryptText("送信を取り消しました") })
     .eq("id", msg.conversation_id)
     .eq("last_message_at", msg.created_at);
   await broadcastToConversation(msg.conversation_id, {
@@ -624,7 +625,8 @@ dm.post("/dm/messages/:messageId/forward", async (req, res) => {
     res.status(404).json({ error: "送信先が見つかりません。" });
     return;
   }
-  let content: Content = { kind: "text", body: source.body ?? "" };
+  // 元のメッセージは暗号化されているので、転送する前に復号する
+  let content: Content = { kind: "text", body: decryptText(source.body) ?? "" };
   if (source.kind === "image" && source.image_path) {
     content = { kind: "image", imagePath: source.image_path };
   } else if (source.kind === "file" && source.file_path) {

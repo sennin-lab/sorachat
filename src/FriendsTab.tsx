@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api, delete_, post } from "./api";
+import { cachedFriends, saveFriends, syncFriendAvatars } from "./avatarCache";
 import { Avatar } from "./Avatar";
 import { Icon } from "./Icon";
 import { UserRow } from "./UserRow";
@@ -21,7 +22,11 @@ export function FriendsTab({
   onAdd: () => void;
   version?: number;
 }) {
-  const [items, setItems] = useState<Friend[] | null>(null);
+  // 保存済みの一覧があれば、データベースを待たずにすぐ表示する
+  const [items, setItems] = useState<Friend[] | null>(() => {
+    const saved = cachedFriends();
+    return saved.length ? saved : null;
+  });
   const [requests, setRequests] = useState<Requests>({ incoming: [], outgoing: [] });
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -33,6 +38,8 @@ export function FriendsTab({
       .then((next) => {
         setItems(next);
         setError("");
+        saveFriends(next);
+        void syncFriendAvatars(next);
       })
       .catch(() => setError("友だちを読み込めませんでした。"));
     api<Requests>("/api/friends/requests")

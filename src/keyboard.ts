@@ -16,6 +16,9 @@ export function trackKeyboard(): () => void {
     // 高さが変わる前に「一番下を見ていたか」を覚えておく
     const wasAtBottom = !!thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
 
+    // キーボードが出ているかどうか（出ている間はタブバーを隠す）
+    root.dataset.kb = vv.height < window.innerHeight - 120 ? "open" : "closed";
+
     root.style.setProperty("--vvt", `${Math.round(vv.offsetTop)}px`);
     root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
 

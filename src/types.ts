@@ -82,6 +82,7 @@ export type Friend = {
   displayName: string;
   bio: string;
   hasAvatar: boolean;
+  avatarVersion: string | null;
   coverTheme: CoverTheme;
 };
 

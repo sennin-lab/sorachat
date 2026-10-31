@@ -9,7 +9,8 @@
     "dev:client": "vite --host 0.0.0.0",
     "build": "vite build",
     "start": "tsx server/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "encrypt:backfill": "tsx server/scripts/encrypt-existing.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",

@@ -16,7 +16,8 @@ import { ProfileSheet } from "./ProfileSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { Avatar } from "./Avatar";
-import type { Conversation, Me } from "./types";
+import type { Conversation, Friend, Me } from "./types";
+import { saveFriends, syncFriendAvatars } from "./avatarCache";
 
 type Tab = "talk" | "friends" | "more";
 
@@ -134,6 +135,16 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   }, [me.id]);
 
   // トークを開く（URL も切り替える。プロフィールから開いたときは履歴に残さず置き換える）
+  // 友だちの一覧と画像を先に保存しておく（トーク一覧や新規作成でも、すぐ画像を出せるように）
+  useEffect(() => {
+    api<Friend[]>("/api/friends")
+      .then((next) => {
+        saveFriends(next);
+        void syncFriendAvatars(next);
+      })
+      .catch(() => undefined);
+  }, [me.id, friendsVersion]);
+
   const select = (id: string, options?: { replace?: boolean }) => {
     const isGroup = list.find((c) => c.id === id)?.isGroup ?? false;
     setSelectedId(id);

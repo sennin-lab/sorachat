@@ -7,6 +7,7 @@ import { disconnectUser } from "./hub.js";
 import { readImage } from "./media.js";
 import { UUID } from "./messages.js";
 import { sb } from "./supabase.js";
+import { decryptText } from "./crypto.js";
 
 // 管理者パネル専用のAPI。一般の画面からはこの入口を使わない（管理者パスワードでだけ入れる）
 export const admin = Router();
@@ -281,7 +282,7 @@ async function summarize(rows: ConvRow[]) {
       name: r.is_group ? r.title ?? "グループ" : members.map((m) => m.displayName).join(" と ") || "トーク",
       memberCount: members.length,
       lastMessageAt: r.last_message_at,
-      lastPreview: r.last_preview,
+      lastPreview: decryptText(r.last_preview),
       members
     };
   });
@@ -342,7 +343,7 @@ admin.get("/admin/conversations/:id/messages", async (req, res) => {
         senderId: r.sender_id,
         senderName: names.get(r.sender_id) ?? "不明",
         kind: r.kind,
-        body: deleted ? null : r.body,
+        body: deleted ? null : decryptText(r.body),
         deleted,
         edited: r.edited_at !== null,
         forwarded: r.forwarded,

@@ -1,3 +1,4 @@
+import { decryptText, encryptText } from "./crypto.js";
 import { activeEndpoints, sendToUser } from "./hub.js";
 import { removeImage } from "./media.js";
 import { notifyRecipient } from "./push.js";
@@ -43,7 +44,7 @@ export function toMessage(
     conversationId: row.conversation_id,
     senderId: row.sender_id,
     kind: row.kind,
-    body: deleted ? null : row.body,
+    body: deleted ? null : decryptText(row.body),
     imageUrl: row.kind === "image" && !deleted ? `/api/dm/messages/${row.id}/image` : null,
     fileName: row.kind === "file" && !deleted ? row.file_name : null,
     fileSize: row.kind === "file" && !deleted ? row.file_size : null,
@@ -124,7 +125,7 @@ export async function replyTargetOk(conversationId: string, replyToId: string | 
   return Boolean(data);
 }
 
-async function notifyOffline(conversationId: string, senderId: string, members: string[], preview: string) {
+async function notifyOffline(conversationId: string, senderId: string, members: string[], _preview: string) {
   // 送った本人以外の全員へ。画面を開いている端末だけは、その端末への通知を省く
   const others = members.filter((uid) => uid !== senderId);
   if (!others.length) return;
@@ -136,7 +137,14 @@ async function notifyOffline(conversationId: string, senderId: string, members: 
     ? `${sender?.display_name ?? "メンバー"}（${conv.title ?? "グループ"}）`
     : sender?.display_name ?? "新着メッセージ";
   for (const uid of others) {
-    void notifyRecipient({ recipientId: uid, senderName, preview, conversationId, skipEndpoints: activeEndpoints(uid) });
+    // 本文は通知（Apple/Google のプッシュサービス経由）に載せない
+    void notifyRecipient({
+      recipientId: uid,
+      senderName,
+      preview: "新しいメッセージがあります",
+      conversationId,
+      skipEndpoints: activeEndpoints(uid)
+    });
   }
 }
 
@@ -180,7 +188,7 @@ export async function insertMessage(
   };
   const fields =
     content.kind === "text"
-      ? { ...none, kind: "text", body: content.body }
+      ? { ...none, kind: "text", body: encryptText(content.body) }
       : content.kind === "image"
         ? { ...none, kind: "image", body: null, image_path: content.imagePath }
         : content.kind === "file"
@@ -213,7 +221,7 @@ export async function insertMessage(
     memberIds(conversationId),
     sb
       .from("sc_conversations")
-      .update({ last_message_at: now, last_preview: shortPreview, last_sender_id: senderId })
+      .update({ last_message_at: now, last_preview: encryptText(shortPreview), last_sender_id: senderId })
       .eq("id", conversationId),
     sb.from("sc_members").update({ last_read_at: now }).eq("conversation_id", conversationId).eq("user_id", senderId)
   ]);

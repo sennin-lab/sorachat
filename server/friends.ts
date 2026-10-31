@@ -15,6 +15,8 @@ export type FriendInfo = {
   displayName: string;
   bio: string;
   hasAvatar: boolean;
+  // 画像の版（画像のパス）。変わったら画像を取り直すための目印
+  avatarVersion: string | null;
   coverTheme: string;
 };
 
@@ -37,6 +39,7 @@ const toInfo = (u: UserRow): FriendInfo => ({
   displayName: u.display_name,
   bio: u.bio ?? "",
   hasAvatar: Boolean(u.avatar_path),
+  avatarVersion: u.avatar_path ?? null,
   coverTheme: u.cover_theme ?? "green"
 });
 
