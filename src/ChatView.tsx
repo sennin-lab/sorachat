@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, api, delete_, patch, post } from "./api";
 import { Avatar } from "./Avatar";
 import { cachedMessages, saveMessages } from "./cache";
+import { clipLongWords } from "./clip";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
 import { Icon } from "./Icon";
@@ -45,7 +46,7 @@ const messagePreview = (m: Message) => {
   if (m.kind === "image") return "写真";
   if (m.kind === "file") return m.fileName ?? "ファイル";
   if (m.kind === "contact") return `連絡先 ${m.contact?.displayName ?? ""}`.trim();
-  return m.body ?? "";
+  return clipLongWords(m.body ?? "");
 };
 
 const downloadFile = (url: string, name?: string | null) => {
@@ -745,7 +746,7 @@ export function ChatView({
                           </span>
                         </button>
                       ) : (
-                        <p>{m.body}</p>
+                        <p>{clipLongWords(m.body ?? "")}</p>
                       )}
                       {hasStatus && (
                         <time>

@@ -116,11 +116,12 @@ a { color: var(--accent); text-decoration: none; }
 .app {
   height: 100%;
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   background: var(--bg);
   overflow: hidden;
 }
 .sidebar {
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -128,13 +129,13 @@ a { color: var(--accent); text-decoration: none; }
   background: var(--panel);
 }
 .sidebar-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.chat-pane { min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.chat-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 .app:not(.has-chat) .chat-pane { display: none; }
 /* スマホでトークを開いているときも、下のタブバーは残す（タブの一覧は隠す） */
 @media (max-width: 759px) {
-  .app.has-chat { grid-template-rows: minmax(0, 1fr) auto; }
-  .app.has-chat .chat-pane { grid-row: 1; }
-  .app.has-chat .sidebar { display: flex; grid-row: 2; }
+  .app.has-chat { display: flex; flex-direction: column; }
+  .app.has-chat .chat-pane { flex: 1; min-height: 0; }
+  .app.has-chat .sidebar { display: flex; flex: none; }
   .app.has-chat .sidebar-body { display: none; }
 }
 @media (min-width: 760px) {
@@ -339,7 +340,7 @@ a { color: var(--accent); text-decoration: none; }
 .user-row:disabled { opacity: 0.5; }
 .user-row.checked { background: transparent; }
 .me-row { min-height: 72px; }
-.row-text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
+.row-text { min-width: 0; display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
 .row-text strong { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-text small { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-text { display: flex; flex-direction: column; min-width: 0; }
@@ -512,7 +513,7 @@ a { color: var(--accent); text-decoration: none; }
   transition: transform 0.15s ease;
 }
 .bubble:active { transform: scale(0.98); }
-.bubble p { margin: 0; font-size: 15px; line-height: 1.42; white-space: pre-wrap; word-break: break-word; }
+.bubble p { margin: 0; font-size: 15px; line-height: 1.42; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .bubble time { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
 .row.mine .bubble { background: var(--mine); color: var(--mine-text); }
 .row.mine .bubble time { color: rgba(0, 0, 0, 0.55); text-align: right; }
