@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { api, post } from "./api";
 import { ChatView } from "./ChatView";
 import { cachedConversations, saveConversations } from "./cache";
@@ -36,6 +37,16 @@ const shouldAskNotify = (me: Me) => {
   return true;
 };
 
+// URL とタブの対応。プロフィールなどの重ねて表示する画面では null（直前のタブを保つ）
+const tabOfPath = (path: string): Tab | null => {
+  if (path.startsWith("/friends")) return "friends";
+  if (path.startsWith("/more")) return "more";
+  if (path === "/" || path.startsWith("/home") || path.startsWith("/dm/") || path.startsWith("/groupchat/")) return "talk";
+  return null;
+};
+
+const TAB_PATH: Record<Tab, string> = { talk: "/home", friends: "/friends", more: "/more" };
+
 const TABS: { id: Tab; label: string; icon: "chat" | "users" | "menu" }[] = [
   { id: "talk", label: "トーク", icon: "chat" },
   { id: "friends", label: "友だち", icon: "users" },
@@ -44,15 +55,21 @@ const TABS: { id: Tab; label: string; icon: "chat" | "users" | "menu" }[] = [
 
 export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me) => void; onLogout: () => void }) {
   const [list, setList] = useState<Conversation[]>(cachedConversations);
-  const [selectedId, setSelectedId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("dm"));
-  const [tab, setTab] = useState<Tab>("talk");
+  // 画面の状態は URL から決める（/home, /friends, /more, /dm/:id, /groupchat/:id, /profile/:id）
+  const navigate = useNavigate();
+  const location = useLocation();
+  const path = location.pathname;
+  const chatId = (matchPath("/dm/:id", path) ?? matchPath("/groupchat/:id", path))?.params.id ?? null;
+  const viewUser = matchPath("/profile/:id", path)?.params.id ?? null;
+
+  const [selectedId, setSelectedId] = useState<string | null>(chatId);
+  const [tab, setTab] = useState<Tab>(() => tabOfPath(path) ?? "talk");
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showOpenChats, setShowOpenChats] = useState(false);
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(() => shouldAskNotify(me));
   const [showAdd, setShowAdd] = useState(false);
-  const [viewUser, setViewUser] = useState<string | null>(null);
   // 友だちが増えた・減ったときに友だち一覧を取り直すための番号
   const [friendsVersion, setFriendsVersion] = useState(0);
   const bumpFriends = () => setFriendsVersion((v) => v + 1);
@@ -65,6 +82,21 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("sorachat-theme", theme);
   }, [theme]);
+
+  // URL に合わせてタブと選択中のトークを更新する
+  useEffect(() => {
+    const next = tabOfPath(path);
+    if (next) setTab(next);
+    if (chatId) setSelectedId(chatId);
+    else if (path === "/home") setSelectedId(null);
+  }, [path, chatId]);
+
+  // 「/」は /home へ。通知の旧リンク（/?dm=ID）は /dm/ID へ移す
+  useEffect(() => {
+    if (path !== "/") return;
+    const legacy = new URLSearchParams(location.search).get("dm");
+    navigate(legacy ? `/dm/${legacy}` : "/home", { replace: true });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -101,9 +133,18 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     };
   }, [me.id]);
 
-  const select = (id: string) => {
+  // トークを開く（URL も切り替える。プロフィールから開いたときは履歴に残さず置き換える）
+  const select = (id: string, options?: { replace?: boolean }) => {
+    const isGroup = list.find((c) => c.id === id)?.isGroup ?? false;
     setSelectedId(id);
     setList((current) => current.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
+    navigate(`/${isGroup ? "groupchat" : "dm"}/${id}`, { replace: options?.replace ?? false });
+  };
+
+  // プロフィールを閉じる（開いた元の画面へ戻る）
+  const closeProfile = () => {
+    if ((window.history.state?.idx ?? 0) > 0) navigate(-1);
+    else navigate(TAB_PATH[tab], { replace: true });
   };
 
   // 名前（ユーザー名）からトークを開く。友だちの画面から「トーク」を押したとき
@@ -111,15 +152,21 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const openDmWith = async (username: string): Promise<boolean> => {
     try {
       const result = await api<{ id: string }>("/api/dm/open", post({ username }));
-      setViewUser(null);
       setShowAdd(false);
       setTab("talk");
-      select(result.id);
+      select(result.id, { replace: Boolean(viewUser) });
       refresh();
       return true;
     } catch {
       return false;
     }
+  };
+
+  // タブを押したら、スマホではトークを閉じて選んだタブの画面に戻る（PCは会話を開いたままにする）
+  const pickTab = (next: Tab) => {
+    setTab(next);
+    if (selectedId && window.matchMedia("(max-width: 759px)").matches) setSelectedId(null);
+    navigate(TAB_PATH[next]);
   };
 
   const totalUnread = list.reduce((sum, c) => sum + c.unread, 0);
@@ -135,7 +182,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
             <FriendsTab
               me={me}
               onOpenMe={() => setShowProfile(true)}
-              onOpenUser={(id) => setViewUser(id)}
+              onOpenUser={(id) => navigate(`/profile/${id}`)}
               version={friendsVersion}
               onAdd={() => setShowAdd(true)}
             />
@@ -195,7 +242,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
               key={t.id}
               className={`tab-btn ${tab === t.id ? "on" : ""}`}
               aria-current={tab === t.id ? "page" : undefined}
-              onClick={() => setTab(t.id)}
+              onClick={() => pickTab(t.id)}
             >
               <span className="tab-icon">
                 <Icon name={t.icon} size={24} />
@@ -219,7 +266,10 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
             meId={me.id}
             conversation={list.find((c) => c.id === selectedId) ?? null}
             conversations={list}
-            onBack={() => setSelectedId(null)}
+            onBack={() => {
+              setSelectedId(null);
+              navigate("/home");
+            }}
             onActivity={scheduleRefresh}
           />
         ) : (
@@ -277,7 +327,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       {viewUser && (
         <UserProfileSheet
           userId={viewUser}
-          onClose={() => setViewUser(null)}
+          onClose={closeProfile}
           onMessage={(username) => void openDmWith(username)}
           onFriendsChanged={bumpFriends}
         />

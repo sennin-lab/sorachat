@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
-import { friendIdsOf } from "./friends.js";
+import { friendIdsOf, friendshipOf } from "./friends.js";
 import { fileNameOf, FILE_LIMIT, isAllowedImage, readImage, removeImage, saveFile, saveImage, upload, uploadFile } from "./media.js";
 import {
   COLUMNS,
@@ -106,6 +106,59 @@ dm.get("/dm/conversations", async (_req, res) => {
 
 const openSchema = z.object({ username: z.string().trim().toLowerCase().regex(USERNAME) });
 
+// 2人だけの「グループでない」会話を探す。なければ新しく作る。
+// グループ（is_group = true）は絶対に返さない。旧DMは is_group が null のことがあるので null は1対1扱い。
+async function findOrCreateDm(me: string, other: string): Promise<string> {
+  const { data: mine, error: mineError } = await sb.from("sc_members").select("conversation_id").eq("user_id", me);
+  if (mineError) throw mineError;
+  const myIds = (mine ?? []).map((row: { conversation_id: string }) => row.conversation_id);
+
+  if (myIds.length) {
+    const { data: shared, error: sharedError } = await sb
+      .from("sc_members")
+      .select("conversation_id")
+      .eq("user_id", other)
+      .in("conversation_id", myIds);
+    if (sharedError) throw sharedError;
+    const sharedIds = (shared ?? []).map((row: { conversation_id: string }) => row.conversation_id);
+
+    if (sharedIds.length) {
+      const { data: convs, error: convsError } = await sb
+        .from("sc_conversations")
+        .select("id, is_group")
+        .in("id", sharedIds);
+      if (convsError) throw convsError;
+      const candidates = (convs ?? []).filter((c: { is_group: boolean | null }) => c.is_group !== true).map((c: { id: string }) => c.id);
+
+      if (candidates.length) {
+        const { data: members, error: membersError } = await sb
+          .from("sc_members")
+          .select("conversation_id, user_id")
+          .in("conversation_id", candidates);
+        if (membersError) throw membersError;
+        for (const id of candidates) {
+          const people = (members ?? []).filter((m: { conversation_id: string }) => m.conversation_id === id);
+          const ids = people.map((m: { user_id: string }) => m.user_id);
+          if (ids.length === 2 && ids.includes(me) && ids.includes(other)) return id;
+        }
+      }
+    }
+  }
+
+  const { data: created, error: createError } = await sb
+    .from("sc_conversations")
+    .insert({ is_group: false })
+    .select("id")
+    .single();
+  if (createError) throw createError;
+  const { error: memberError } = await sb.from("sc_members").insert([
+    { conversation_id: created.id, user_id: me },
+    { conversation_id: created.id, user_id: other },
+  ]);
+  if (memberError) throw memberError;
+  return created.id as string;
+}
+
 dm.post("/dm/open", async (req, res) => {
   const parsed = openSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -123,8 +176,7 @@ dm.post("/dm/open", async (req, res) => {
     res.status(400).json({ error: "自分とのDMは作成できません。" });
     return;
   }
-  const { data: id, error: rpcError } = await sb.rpc("sc_open_dm", { p_me: me, p_other: other.id });
-  if (rpcError) throw rpcError;
+  const id = await findOrCreateDm(me, other.id);
   res.json({ id });
 });
 
@@ -202,7 +254,10 @@ dm.get("/dm/:id", async (req, res) => {
   const readBy = (rows ?? [])
     .filter((row: any) => row.sc_users.id !== viewer)
     .map((row: any) => ({ id: row.sc_users.id, lastReadAt: row.last_read_at as string }));
-  res.json({ id, isGroup: conv.is_group, title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, members, readBy });
+  // 1対1の会話では、相手とのフレンド状態も返す（申請の許可・拒否バナーに使う）
+  const other = members.find((m) => m.id !== viewer);
+  const friendship = conv.is_group || !other ? null : await friendshipOf(viewer, other.id);
+  res.json({ id, isGroup: conv.is_group, title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, members, readBy, friendship });
 });
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(40) });

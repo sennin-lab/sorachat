@@ -1,31 +1,13 @@
--- DMを開く関数を修正：1対1の会話だけを探す（グループを誤って開かないようにする）
--- 何度実行しても問題ありません。
-create or replace function public.sc_open_dm(p_me uuid, p_other uuid)
-returns uuid
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  cid uuid;
-begin
-  select m1.conversation_id into cid
-  from public.sc_members m1
-  join public.sc_members m2 on m2.conversation_id = m1.conversation_id
-  join public.sc_conversations c on c.id = m1.conversation_id
-  where m1.user_id = p_me
-    and m2.user_id = p_other
-    and not coalesce(c.is_group, false)
-  limit 1;
+-- フレンド申請（承認されるまでは sc_friends に入れない）
+-- 申請を送ると sc_friend_requests に1行入る。許可すると sc_friends に相互に保存され、申請は消える。
+create table if not exists public.sc_friend_requests (
+  from_id uuid not null references public.sc_users(id) on delete cascade,
+  to_id uuid not null references public.sc_users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (from_id, to_id),
+  check (from_id <> to_id)
+);
 
-  if cid is null then
-    insert into public.sc_conversations (is_group) values (false) returning id into cid;
-    insert into public.sc_members (conversation_id, user_id) values (cid, p_me), (cid, p_other);
-  end if;
+create index if not exists sc_friend_requests_to_idx on public.sc_friend_requests (to_id);
 
-  return cid;
-end;
-$$;
-
-revoke execute on function public.sc_open_dm(uuid, uuid) from public, anon, authenticated;
-grant execute on function public.sc_open_dm(uuid, uuid) to service_role;
+alter table public.sc_friend_requests enable row level security;

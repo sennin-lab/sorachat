@@ -9,6 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { ApiError, api, delete_, patch, post } from "./api";
 import { Avatar } from "./Avatar";
 import { cachedMessages, saveMessages } from "./cache";
@@ -21,7 +22,7 @@ import { isSocketOpen, onChatEvent, sendChat } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { AttachSheet } from "./AttachSheet";
 import { ContactSheet } from "./ContactSheet";
-import type { Conversation, Message } from "./types";
+import type { Conversation, FriendshipState, Message } from "./types";
 
 type ContactInfo = NonNullable<Message["contact"]>;
 
@@ -163,6 +164,9 @@ export function ChatView({
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [viewing, setViewing] = useState<Message | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const navigate = useNavigate();
+  // 1対1の相手とのフレンド状態（申請の許可・拒否バナーに使う）
+  const [friendship, setFriendship] = useState<FriendshipState | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
@@ -212,10 +216,13 @@ export function ChatView({
   // 既読状況（相手がどこまで読んだか）とメンバーの名前を取得する
   const loadReaders = async () => {
     try {
-      const info = await api<{ readBy: Reader[]; members: { id: string; displayName: string; hasAvatar: boolean }[] }>(
-        `/api/dm/${conversationId}`
-      );
+      const info = await api<{
+        readBy: Reader[];
+        members: { id: string; displayName: string; hasAvatar: boolean }[];
+        friendship: FriendshipState | null;
+      }>(`/api/dm/${conversationId}`);
       setReaders(info.readBy);
+      setFriendship(info.friendship);
       setPeople(new Map(info.members.map((m) => [m.id, { name: m.displayName, hasAvatar: m.hasAvatar }])));
     } catch {
       return;
@@ -550,6 +557,20 @@ export function ChatView({
   };
 
   const isGroup = conversation?.isGroup ?? false;
+  const otherId = isGroup ? null : conversation?.otherId ?? null;
+
+  // 届いたフレンドリクエストを許可・拒否する
+  const answerRequest = async (accept: boolean) => {
+    if (!otherId) return;
+    try {
+      await api(`/api/friends/requests/${otherId}/${accept ? "accept" : "decline"}`, post());
+      setFriendship(accept ? "friend" : "none");
+      flash(accept ? "友だちになりました" : "リクエストを拒否しました");
+    } catch (err) {
+      flash(err instanceof ApiError ? err.message : "通信に失敗しました。");
+    }
+  };
+
   const menu = menuFor;
   const hasText = text.trim().length > 0;
   const byId = new Map(messages.map((m): [string, Message] => [m.id, m]));
@@ -590,6 +611,25 @@ export function ChatView({
           </button>
         )}
       </header>
+
+      {friendship === "incoming" && otherId && (
+        <div className="friend-request" role="region" aria-label="フレンドリクエスト">
+          <p>
+            <strong>{conversation?.name ?? "相手"}</strong> さんからフレンドリクエストが届いています。友だちを許可しますか？
+          </p>
+          <div className="friend-request-actions">
+            <button className="btn-small" onClick={() => void answerRequest(false)}>
+              拒否
+            </button>
+            <button className="btn-small accent" onClick={() => void answerRequest(true)}>
+              許可
+            </button>
+          </div>
+        </div>
+      )}
+      {friendship === "outgoing" && (
+        <p className="friend-request-note">フレンドリクエストを送信しました。相手が許可するまで友だちにはなりません。</p>
+      )}
 
       <div className="thread" ref={threadRef}>
         {hasOlder && messages.length > 0 && (
@@ -639,7 +679,21 @@ export function ChatView({
               <div className={rowClass} id={`msg-${m.id}`}>
                 {!mine && (
                   <div className="msg-avatar">
-                    {!info.joinPrev && avatarId && <Avatar userId={avatarId} hasAvatar={avatarHas} name={avatarName} size={36} />}
+                    {!info.joinPrev && avatarId && (
+                      isGroup ? (
+                        // グループでは相手のアイコンを押すと、その人のプロフィールを開く
+                        <button
+                          type="button"
+                          className="avatar-tap"
+                          aria-label={`${avatarName}のプロフィールを開く`}
+                          onClick={() => navigate(`/profile/${avatarId}`)}
+                        >
+                          <Avatar userId={avatarId} hasAvatar={avatarHas} name={avatarName} size={36} />
+                        </button>
+                      ) : (
+                        <Avatar userId={avatarId} hasAvatar={avatarHas} name={avatarName} size={36} />
+                      )
+                    )}
                   </div>
                 )}
                 <div className="msg-wrap">

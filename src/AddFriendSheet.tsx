@@ -28,6 +28,8 @@ export function AddFriendSheet({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [justAdded, setJustAdded] = useState<string | null>(null);
+  // 申請を送ったが、まだ相手が許可していないユーザー名
+  const [requested, setRequested] = useState<string[]>([]);
 
   const keyword = query.trim().toLowerCase();
 
@@ -48,23 +50,33 @@ export function AddFriendSheet({
     };
   }, [keyword, mode]);
 
-  // 友だちに追加したら、そのままトークを開く（開けなかったときだけ案内を出す）
+  // フレンド申請を送る。相手が許可するまでは申請中のまま（申請中でもDMは送れる）。
+  // 送ったらそのままトークを開く。開けなかったときだけ案内を出す。
   const addFriend = async (username: string) => {
     setBusy(username);
     setError("");
+    let result: { status: "friend" | "outgoing"; id: string };
     try {
-      const friend = await api<{ id: string }>("/api/friends", post({ username }));
-      setResults((list) => list.map((u) => (u.username === username ? { ...u, isFriend: true } : u)));
-      setScanned((s) => (s && s.username === username ? { ...s, isFriend: true } : s));
-      setJustAdded(friend.id);
-      onAdded();
+      result = await api<{ status: "friend" | "outgoing"; id: string }>("/api/friends", post({ username }));
     } catch (err) {
       setError(messageOf(err));
       setBusy("");
       return;
     }
+    const isFriend = result.status === "friend";
+    setResults((list) => list.map((u) => (u.username === username ? { ...u, isFriend } : u)));
+    setScanned((s) => (s && s.username === username ? { ...s, isFriend } : s));
+    if (!isFriend) setRequested((list) => [...list, username]);
+    setJustAdded(result.id);
+    onAdded();
     const opened = await onOpenDm(username);
-    if (!opened) setError("友だちには追加しました。トークは「トーク」タブから開けます。");
+    if (!opened) {
+      setError(
+        isFriend
+          ? "友だちに追加しました。トークは「トーク」タブから開けます。"
+          : "フレンドリクエストを送りました。トークは「トーク」タブから開けます。"
+      );
+    }
     setBusy("");
   };
 
@@ -132,9 +144,11 @@ export function AddFriendSheet({
                     <span className={`added-tag ${justAdded === user.id ? "pop" : ""}`}>
                       <Icon name="check" size={16} /> 追加済み
                     </span>
+                  ) : requested.includes(user.username) ? (
+                    <span className="added-tag">申請中</span>
                   ) : (
                     <button className="btn-small accent" disabled={busy === user.username} onClick={() => void addFriend(user.username)}>
-                      {busy === user.username ? "追加中…" : "追加"}
+                      {busy === user.username ? "送信中…" : "追加"}
                     </button>
                   )
                 }
@@ -167,9 +181,11 @@ export function AddFriendSheet({
                 <span className="added-tag pop big">
                   <Icon name="check" size={18} /> 友だち追加済み
                 </span>
+              ) : requested.includes(scanned.username) ? (
+                <span className="added-tag big">申請中</span>
               ) : (
                 <button className="btn-primary wide" disabled={busy === scanned.username} onClick={() => void addFriend(scanned.username)}>
-                  {busy === scanned.username ? "追加中…" : "友だちに追加"}
+                  {busy === scanned.username ? "送信中…" : "フレンド申請を送る"}
                 </button>
               )}
               <button className="btn-text" onClick={() => setScanned(null)}>

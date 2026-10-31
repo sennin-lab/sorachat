@@ -35,7 +35,7 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
    - `supabase/schema_v8.sql`（返信機能）
    - `supabase/schema_v9.sql`（グループのアイコン画像）
    - `supabase/schema_v10.sql`（オープンチャット・利用停止）
-   - `supabase/schema_v11.sql`（DMを開く関数の修正：グループを誤って開かないように）
+   - `supabase/schema_v11.sql`（フレンド申請テーブル）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。

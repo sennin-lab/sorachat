@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { ApiError, api, post } from "./api";
+import { ApiError, api, delete_, post } from "./api";
 import { Avatar } from "./Avatar";
 import { Cover } from "./Cover";
 import { Icon } from "./Icon";
-import type { UserProfile } from "./types";
+import type { FriendshipState, UserProfile } from "./types";
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
 
@@ -29,14 +29,17 @@ export function UserProfileSheet({
     api<UserProfile>(`/api/users/${userId}/profile`).then(setProfile).catch(() => setFailed(true));
   }, [userId]);
 
-  const addFriend = async () => {
-    if (!profile) return;
+  // 相手の状態を更新する（申請・許可・拒否・取り消し・削除のあと）
+  const applied = (next: FriendshipState) => {
+    setProfile((p) => (p ? { ...p, friendship: next, isFriend: next === "friend" } : p));
+    onFriendsChanged?.();
+  };
+
+  const run = async (request: () => Promise<FriendshipState>) => {
     setBusy(true);
     setError("");
     try {
-      await api("/api/friends", post({ username: profile.username }));
-      setProfile({ ...profile, isFriend: true });
-      onFriendsChanged?.();
+      applied(await request());
     } catch (err) {
       setError(messageOf(err));
     } finally {
@@ -44,20 +47,32 @@ export function UserProfileSheet({
     }
   };
 
-  const removeFriend = async () => {
+  // フレンド申請を送る（相手がすでに申請していれば友だちになる）
+  const sendRequest = () =>
+    run(async () => {
+      const result = await api<{ status: FriendshipState }>("/api/friends", post({ username: profile?.username }));
+      return result.status;
+    });
+
+  const answer = (accept: boolean) =>
+    run(async () => {
+      await api(`/api/friends/requests/${userId}/${accept ? "accept" : "decline"}`, post());
+      return accept ? "friend" : "none";
+    });
+
+  const cancelRequest = () =>
+    run(async () => {
+      await api(`/api/friends/requests/${userId}`, delete_());
+      return "none";
+    });
+
+  const removeFriend = () => {
     if (!profile) return;
     if (!window.confirm(`${profile.displayName} さんを友だちから削除しますか？`)) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api(`/api/friends/${profile.id}`, { method: "DELETE" });
-      setProfile({ ...profile, isFriend: false });
-      onFriendsChanged?.();
-    } catch (err) {
-      setError(messageOf(err));
-    } finally {
-      setBusy(false);
-    }
+    void run(async () => {
+      await api(`/api/friends/${profile.id}`, delete_());
+      return "none";
+    });
   };
 
   return (
@@ -119,13 +134,29 @@ export function UserProfileSheet({
           )}
 
           <div className="page-card">
-            {profile.isFriend ? (
-              <button className="page-row danger" disabled={busy} onClick={() => void removeFriend()}>
+            {profile.friendship === "friend" && (
+              <button className="page-row danger" disabled={busy} onClick={removeFriend}>
                 <Icon name="trash" size={18} /> 友だちから削除
               </button>
-            ) : (
-              <button className="page-row accent" disabled={busy} onClick={() => void addFriend()}>
-                <Icon name="userPlus" size={18} /> {busy ? "追加中…" : "友だちに追加"}
+            )}
+            {profile.friendship === "incoming" && (
+              <>
+                <button className="page-row accent" disabled={busy} onClick={() => void answer(true)}>
+                  <Icon name="userPlus" size={18} /> 申請を許可する
+                </button>
+                <button className="page-row danger" disabled={busy} onClick={() => void answer(false)}>
+                  申請を拒否する
+                </button>
+              </>
+            )}
+            {profile.friendship === "outgoing" && (
+              <button className="page-row danger" disabled={busy} onClick={() => void cancelRequest()}>
+                申請を取り消す（申請中）
+              </button>
+            )}
+            {profile.friendship === "none" && (
+              <button className="page-row accent" disabled={busy} onClick={() => void sendRequest()}>
+                <Icon name="userPlus" size={18} /> {busy ? "送信中…" : "フレンド申請を送る"}
               </button>
             )}
           </div>

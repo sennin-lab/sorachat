@@ -130,7 +130,13 @@ a { color: var(--accent); text-decoration: none; }
 .sidebar-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .chat-pane { min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 .app:not(.has-chat) .chat-pane { display: none; }
-.app.has-chat .sidebar { display: none; }
+/* スマホでトークを開いているときも、下のタブバーは残す（タブの一覧は隠す） */
+@media (max-width: 759px) {
+  .app.has-chat { grid-template-rows: minmax(0, 1fr) auto; }
+  .app.has-chat .chat-pane { grid-row: 1; }
+  .app.has-chat .sidebar { display: flex; grid-row: 2; }
+  .app.has-chat .sidebar-body { display: none; }
+}
 @media (min-width: 760px) {
   .app { grid-template-columns: 370px minmax(0, 1fr); }
   .app .sidebar, .app .chat-pane { display: flex !important; }
@@ -1209,3 +1215,24 @@ img.avatar { animation: fade-in 0.35s ease both; }
 .admin-msg img { display: block; max-width: 240px; max-height: 240px; border-radius: 10px; }
 .btn-danger { height: 40px; padding: 0 16px; border-radius: 12px; background: var(--danger); color: #fff; font-weight: 600; }
 .btn-danger:disabled, .btn-secondary:disabled { opacity: 0.5; }
+
+/* ---- フレンドリクエスト ---- */
+.friend-request {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 10px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.friend-request p { margin: 0; font-size: 0.9rem; line-height: 1.5; }
+.friend-request-actions { display: flex; gap: 8px; flex: none; }
+.friend-request-note { margin: 8px 12px 0; font-size: 0.8rem; color: var(--muted); text-align: center; }
+.request-actions { display: flex; gap: 6px; }
+
+/* グループのメッセージで、アイコンを押すとプロフィールを開く */
+.avatar-tap { display: inline-grid; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+.avatar-tap:active { opacity: 0.7; }

@@ -71,6 +71,7 @@ export type UserProfile = {
   hasAvatar: boolean;
   coverTheme: CoverTheme;
   isFriend: boolean;
+  friendship: FriendshipState;
   note: string | null;
 };
 
@@ -83,3 +84,6 @@ export type Friend = {
   hasAvatar: boolean;
   coverTheme: CoverTheme;
 };
+
+// 1対1の相手とのフレンド関係（自分から見た状態）
+export type FriendshipState = "friend" | "incoming" | "outgoing" | "none";

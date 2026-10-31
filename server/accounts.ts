@@ -4,7 +4,7 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { BANNED_MESSAGE, cookieBase, currentUserId, endSession, isBanned, randomToken, requireAuth, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
 import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
-import { friendIdsOf } from "./friends.js";
+import { friendIdsOf, friendshipOf } from "./friends.js";
 import { sb } from "./supabase.js";
 
 export const accounts = Router();
@@ -395,7 +395,8 @@ accounts.get("/users/:id/profile", requireAuth, async (req, res) => {
     res.status(404).json({ error: "ユーザーが見つかりません。" });
     return;
   }
-  const isFriend = (await friendIdsOf(currentUserId(res))).has(id);
+  const friendship = await friendshipOf(currentUserId(res), id);
+  const isFriend = friendship === "friend";
   const { data: note } = await sb
     .from("sc_notes")
     .select("body, expires_at")
@@ -412,6 +413,7 @@ accounts.get("/users/:id/profile", requireAuth, async (req, res) => {
     hasAvatar: Boolean(data.avatar_path),
     coverTheme: data.cover_theme ?? "green",
     isFriend,
+    friendship,
     note: activeNote
   });
 });
