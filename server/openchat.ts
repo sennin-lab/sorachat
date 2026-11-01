@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
-import { broadcastList, UUID } from "./messages.js";
+import { broadcastList, displayNameOf, membership, postNotice, UUID } from "./messages.js";
 import { sb } from "./supabase.js";
 
 // オープンチャット: 誰でも一覧から参加できるグループ（友だちでなくても入れる）
@@ -86,11 +86,14 @@ openChats.post("/open-chats/:id/join", async (req, res) => {
     res.status(404).json({ error: "オープンチャットが見つかりません。" });
     return;
   }
+  const me = currentUserId(res);
+  const wasMember = Boolean(await membership(id, me));
   const { error: joinError } = await sb.from("sc_members").upsert(
-    { conversation_id: id, user_id: currentUserId(res), role: "member" },
+    { conversation_id: id, user_id: me, role: "member" },
     { onConflict: "conversation_id,user_id", ignoreDuplicates: true }
   );
   if (joinError) throw joinError;
+  if (!wasMember) await postNotice(id, me, `${await displayNameOf(me)}が参加しました`);
   await broadcastList(id);
   res.json({ ok: true });
 });

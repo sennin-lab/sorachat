@@ -14,8 +14,10 @@ import {
   blockedBetween,
   blockedByMe,
   broadcastToConversation,
+  displayNameOf,
   findOrCreateDm,
   leaveConversation,
+  postNotice,
   purgeConversation,
   insertMessage,
   membership,
@@ -154,9 +156,9 @@ const groupSchema = z.object({
 
 async function findUsers(usernames: string[]) {
   const names = [...new Set(usernames)];
-  const { data, error } = await sb.from("sc_users").select("id, username").in("username", names);
+  const { data, error } = await sb.from("sc_users").select("id, username, display_name").in("username", names);
   if (error) throw error;
-  const found = (data ?? []) as { id: string; username: string }[];
+  const found = (data ?? []) as { id: string; username: string; display_name: string }[];
   const missing = names.filter((n) => !found.some((u) => u.username === n));
   return { found, missing };
 }
@@ -191,6 +193,9 @@ dm.post("/dm/group", async (req, res) => {
   }
   const { data: id, error } = await sb.rpc("sc_create_group", { p_me: me, p_title: parsed.data.title, p_members: ids });
   if (error) throw error;
+  for (const u of found) {
+    if (u.id !== me) await postNotice(String(id), u.id, `${u.display_name}が参加しました`);
+  }
   res.status(201).json({ id });
 });
 
@@ -205,7 +210,7 @@ dm.get("/dm/:id", async (req, res) => {
   if (error) throw error;
   const { data: rows, error: membersError } = await sb
     .from("sc_members")
-    .select("role, joined_at, last_read_at, sc_users(id, username, display_name, avatar_path)")
+    .select("role, joined_at, last_read_at, muted, sc_users(id, username, display_name, avatar_path)")
     .eq("conversation_id", id)
     .order("joined_at", { ascending: true });
   if (membersError) throw membersError;
@@ -224,7 +229,8 @@ dm.get("/dm/:id", async (req, res) => {
   // 1対1の会話では、相手とのフレンド状態も返す（申請の許可・拒否バナーに使う）
   const other = members.find((m) => m.id !== viewer);
   const friendship = conv.is_group || !other ? null : await friendshipOf(viewer, other.id);
-  res.json({ id, isGroup: conv.is_group, title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, members, readBy, friendship });
+  const muted = Boolean((rows ?? []).find((row: any) => row.sc_users.id === viewer)?.muted);
+  res.json({ id, isGroup: conv.is_group, title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, muted, members, readBy, friendship });
 });
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(40) });
@@ -243,6 +249,7 @@ dm.post("/dm/:id", async (req, res) => {
   }
   const { error } = await sb.from("sc_conversations").update({ title: parsed.data.title }).eq("id", id).eq("is_group", true);
   if (error) throw error;
+  await postNotice(id, currentUserId(res), `ルーム名が「${parsed.data.title}」に変わりました`);
   await broadcastList(id);
   res.json({ ok: true });
 });
@@ -323,11 +330,16 @@ dm.post("/dm/:id/members", async (req, res) => {
     res.status(400).json({ error: `友だちではないユーザーは追加できません: ${strangers.join(", ")}` });
     return;
   }
+  const { data: already, error: alreadyError } = await sb.from("sc_members").select("user_id").eq("conversation_id", id).in("user_id", found.map((u) => u.id));
+  if (alreadyError) throw alreadyError;
+  const existing = new Set(((already ?? []) as { user_id: string }[]).map((r) => r.user_id));
+  const joining = found.filter((u) => !existing.has(u.id));
   const { error } = await sb.from("sc_members").upsert(
     found.map((u) => ({ conversation_id: id, user_id: u.id, role: "member" })),
     { onConflict: "conversation_id,user_id", ignoreDuplicates: true }
   );
   if (error) throw error;
+  for (const u of joining) await postNotice(id, u.id, `${u.display_name}が参加しました`);
   await broadcastList(id);
   res.json({ ok: true });
 });
@@ -340,8 +352,10 @@ dm.delete("/dm/:id/members/:userId", async (req, res) => {
     res.status(403).json({ error: "このメンバーは削除できません。" });
     return;
   }
+  const targetName = await displayNameOf(target);
   const { error } = await sb.from("sc_members").delete().eq("conversation_id", id).eq("user_id", target);
   if (error) throw error;
+  await postNotice(id, currentUserId(res), `${targetName}が削除されました`);
   await broadcastList(id);
   res.json({ ok: true });
 });
@@ -359,6 +373,7 @@ dm.post("/dm/:id/leave", async (req, res) => {
     res.status(400).json({ error: "1対1のDMは退出できません。" });
     return;
   }
+  const leaverName = await displayNameOf(userId);
   const { error } = await sb.from("sc_members").delete().eq("conversation_id", id).eq("user_id", userId);
   if (error) throw error;
   if (me.role === "owner") {
@@ -375,8 +390,27 @@ dm.post("/dm/:id/leave", async (req, res) => {
   if (!count) {
     await purgeConversation(id);
   } else {
+    await postNotice(id, userId, `${leaverName}が抜けました`);
     await broadcastList(id);
   }
+  res.json({ ok: true });
+});
+
+// グループを削除する（管理者だけ。オープンチャットも同じ）。全員の画面から消え、メッセージ・画像・ファイルも完全に消える
+dm.post("/dm/:id/disband", async (req, res) => {
+  const id = String(req.params.id);
+  const me = await membership(id, currentUserId(res));
+  if (!me || me.role !== "owner") {
+    res.status(403).json({ error: "グループを削除できるのは管理者だけです。" });
+    return;
+  }
+  const { data: conv, error } = await sb.from("sc_conversations").select("is_group").eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (conv?.is_group !== true) {
+    res.status(400).json({ error: "グループ以外は削除できません。" });
+    return;
+  }
+  await purgeConversation(id);
   res.json({ ok: true });
 });
 

@@ -1253,3 +1253,6 @@ img.avatar { animation: fade-in 0.35s ease both; }
 /* トークごとの通知オフ・確認ダイアログの題 */
 .mute-mark { margin-left: 4px; vertical-align: -2px; opacity: 0.55; }
 .confirm-title { display: block; font-size: 17px; margin-top: 4px; }
+
+/* グループのお知らせ（参加・退出・削除・名前の変更）：中央に小さく出す */
+.system-notice { text-align: center; color: var(--muted); font-size: 12px; margin: 10px 16px; line-height: 1.5; }

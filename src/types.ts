@@ -38,7 +38,8 @@ export type Message = {
   id: string;
   conversationId: string;
   senderId: string;
-  kind: "text" | "image" | "file" | "contact";
+  // system はグループのお知らせ（参加・退出・削除・名前の変更）
+  kind: "text" | "image" | "file" | "contact" | "system";
   body: string | null;
   imageUrl: string | null;
   fileName?: string | null;

@@ -13,13 +13,16 @@ export function UserProfileSheet({
   userId,
   onClose,
   onMessage,
-  onFriendsChanged
+  onFriendsChanged,
+  onRoomSettings
 }: {
   userId: string;
   onClose: () => void;
   // 指定があれば「メッセージ」でそのトークを開く（なければ閉じるだけ）
   onMessage?: (username: string) => void;
   onFriendsChanged?: () => void;
+  // 指定があれば「トークの設定」（通知・ブロック・削除）を開く（個人チャットから）
+  onRoomSettings?: () => void;
 }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [failed, setFailed] = useState(false);
@@ -171,6 +174,14 @@ export function UserProfileSheet({
                   <span className="link">{profile.profileUrl}</span>
                 </a>
               )}
+            </div>
+          )}
+
+          {onRoomSettings && (
+            <div className="page-card">
+              <button className="page-row" onClick={onRoomSettings}>
+                トークの設定
+              </button>
             </div>
           )}
 

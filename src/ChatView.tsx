@@ -632,11 +632,6 @@ export function ChatView({
             <Icon name="info" size={22} />
           </button>
         )}
-        {conversation && (
-          <button className="icon-btn" aria-label="トークの設定" onClick={() => setShowRoom(true)}>
-            <Icon name="settings" size={22} />
-          </button>
-        )}
       </header>
 
       {friendship === "incoming" && otherId && (
@@ -675,6 +670,21 @@ export function ChatView({
 
         {messages.map((m, index) => {
           const info = threadInfo(messages, index);
+          // グループのお知らせ（参加・退出・削除・名前の変更）は中央に小さく出す
+          if (m.kind === "system") {
+            return (
+              <Fragment key={m.id}>
+                {info.divider && (
+                  <div className="dm-divider">
+                    <span>{info.divider}</span>
+                  </div>
+                )}
+                <div className="system-notice" id={`msg-${m.id}`}>
+                  {m.body}
+                </div>
+              </Fragment>
+            );
+          }
           const mine = m.senderId === meId;
           const replyTarget = m.replyToId ? byId.get(m.replyToId) : undefined;
           const showImage = m.kind === "image" && !m.deleted && m.imageUrl;
@@ -930,7 +940,7 @@ export function ChatView({
           onChanged={onActivity}
         />
       )}
-      {showRoom && conversation && (
+      {showRoom && conversation && !isGroup && (
         <RoomSettingsSheet
           conversation={conversation}
           onClose={() => setShowRoom(false)}
@@ -968,7 +978,14 @@ export function ChatView({
       )}
       {contactUser && <UserProfileSheet userId={contactUser.id} onClose={() => setContactUser(null)} />}
       {showProfile && conversation?.otherId && (
-        <UserProfileSheet userId={conversation.otherId} onClose={() => setShowProfile(false)} />
+        <UserProfileSheet
+          userId={conversation.otherId}
+          onClose={() => setShowProfile(false)}
+          onRoomSettings={() => {
+            setShowProfile(false);
+            setShowRoom(true);
+          }}
+        />
       )}
       {botDm && confirmSummary && <SenninaiConfirm summary={confirmSummary} onDone={() => setConfirmSummary(null)} />}
     </section>

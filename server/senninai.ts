@@ -209,17 +209,58 @@ export async function disableAi(userId: string): Promise<void> {
 
 // UserLocal（senninai API）に問い合わせる。messages は直近の会話（履歴は5件まで）
 export async function askAi(messages: { role: "user" | "assistant"; content: string }[]): Promise<string> {
+  // API仕様：履歴は直近5件まで、content は文字列、先頭は user にそろえる（AIの案内文から始まると受け付けない場合がある）
+  const recent = messages.slice(-5).filter((m) => typeof m.content === "string" && m.content.length > 0);
+  const start = recent.findIndex((m) => m.role === "user");
+  const sent = start === -1 ? recent : recent.slice(start);
   const response = await fetch(`${config.senninAi.baseUrl}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages: sent }),
     signal: AbortSignal.timeout(30_000)
   });
-  const data = (await response.json().catch(() => ({}))) as any;
-  if (!response.ok || data?.error) throw new Error(`senninai API がエラーを返しました（HTTP ${response.status}）`);
-  const answer = String(data?.choices?.[0]?.message?.content ?? data?.answer ?? "").trim();
-  if (!answer) throw new Error("senninai API の回答が空でした");
+  const raw = await response.text();
+  let data: any = null;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    data = null;
+  }
+  if (!response.ok || data?.error) {
+    throw new Error(`senninai API がエラーを返しました（HTTP ${response.status}）: ${raw.slice(0, 200)}`);
+  }
+  // 応答の形（OpenAI互換・answer・text など）のどれでも回答を読む
+  const answer = (data ? pickAnswer(data) : raw).trim();
+  if (!answer) throw new Error(`senninai API の回答を読めませんでした: ${raw.slice(0, 200)}`);
   return answer.length > MAX_REPLY ? `${answer.slice(0, MAX_REPLY)}…` : answer;
+}
+
+// 応答 JSON から本文を探す。見つからなければ空文字
+function pickAnswer(data: any): string {
+  const candidates: unknown[] = [
+    data?.choices?.[0]?.message?.content,
+    data?.choices?.[0]?.text,
+    data?.message?.content,
+    data?.message,
+    data?.answer,
+    data?.response,
+    data?.result,
+    data?.output,
+    data?.content,
+    data?.text
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value;
+    // コンテンツが部品の配列（[{type:"text", text:"…"}]）で返る形
+    if (Array.isArray(value)) {
+      const joined = value
+        .map((part: any) => (typeof part === "string" ? part : typeof part?.text === "string" ? part.text : ""))
+        .join("")
+        .trim();
+      if (joined) return joined;
+    }
+  }
+  return "";
 }
 
 async function say(conversationId: string, body: string, replyToId: string | null = null) {
@@ -229,7 +270,7 @@ async function say(conversationId: string, body: string, replyToId: string | nul
 
 function textOf(row: MessageRow): string | null {
   if (row.deleted_at) return null;
-  if (row.kind === "text") return decryptText(row.body) ?? "";
+  if (row.kind === "text" || row.kind === "system") return decryptText(row.body) ?? "";
   if (row.kind === "image") return "[写真]";
   if (row.kind === "file") return `[ファイル: ${row.file_name ?? "ファイル"}]`;
   return "[連絡先]";

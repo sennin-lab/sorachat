@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { ApiError, api, patch, post } from "./api";
 import { Avatar } from "./Avatar";
 import { AvatarCropper } from "./AvatarCropper";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { FriendSelectPage } from "./FriendSelectPage";
 import { Icon } from "./Icon";
 import { UserRow } from "./UserRow";
@@ -13,6 +14,8 @@ type Detail = {
   title: string;
   hasAvatar: boolean;
   myRole: "owner" | "member";
+  // このグループの通知をオフにしているか（自分だけ）
+  muted: boolean;
   members: Member[];
 };
 
@@ -40,11 +43,44 @@ export function GroupSheet({
   // 切り抜き中の画像と、アイコンを差し替えたあとの再読み込み用の番号
   const [cropSource, setCropSource] = useState<string | null>(null);
   const [avatarKey, setAvatarKey] = useState(0);
+  // 通知のオン・オフ（自分だけ）と、管理者のグループ削除の確認
+  const [muted, setMuted] = useState(false);
+  const [askDisband, setAskDisband] = useState(false);
 
   const load = async () => {
     const next = await api<Detail>(`/api/dm/${conversationId}`);
     setDetail(next);
     setTitle(next.title);
+    setMuted(next.muted);
+  };
+
+  const toggleNotify = async (on: boolean) => {
+    setStatus("");
+    setMuted(!on);
+    try {
+      await api(`/api/dm/${conversationId}/mute`, post({ muted: !on }));
+      onChanged();
+    } catch (err) {
+      setMuted(on);
+      setStatus(messageOf(err));
+    }
+  };
+
+  // 管理者だけ。全員の画面から消え、メッセージ・画像・ファイルも完全に消える（オープンチャットも同じ）
+  const disband = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      await api(`/api/dm/${conversationId}/disband`, post());
+      setAskDisband(false);
+      onChanged();
+      onLeft();
+    } catch (err) {
+      setStatus(messageOf(err));
+      setAskDisband(false);
+    } finally {
+      setBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -238,10 +274,39 @@ export function GroupSheet({
         ))}
       </ul>
 
+      <div className="section-label flush">
+        <span>通知</span>
+      </div>
+      <div className="page-card">
+        <label className="page-row">
+          <span className="row-label">
+            <span className="option-icon">
+              <Icon name="bell" size={18} />
+            </span>
+            このグループの通知
+          </span>
+          <input type="checkbox" className="switch" checked={!muted} onChange={(e) => void toggleNotify(e.target.checked)} />
+        </label>
+      </div>
+      <p className="notice center small">オフにしても、未読の数は残ります。通知だけ届かなくなります。</p>
+
       {cropSource && (
         <AvatarCropper source={cropSource} onCancel={() => setCropSource(null)} onSave={(blob) => void saveAvatar(blob)} />
       )}
       {status && <p className="notice center">{status}</p>}
+
+      {isOwner && (
+        <>
+          <div className="page-card leave-card">
+            <button className="page-row danger" disabled={busy} onClick={() => setAskDisband(true)}>
+              <Icon name="trash" size={18} /> グループを削除
+            </button>
+          </div>
+          <p className="notice center small">
+            削除すると、メンバー全員の画面から消えます。メッセージ・画像・ファイルも完全に消えます。
+          </p>
+        </>
+      )}
 
       <div className="page-card leave-card">
         <button
@@ -259,6 +324,18 @@ export function GroupSheet({
           グループを退出
         </button>
       </div>
+
+      {askDisband && (
+        <ConfirmDialog
+          title="グループを削除しますか？"
+          message={`${detail.title} を削除します。全員の画面から消え、元に戻せません。`}
+          confirmLabel="削除する"
+          danger
+          busy={busy}
+          onConfirm={() => void disband()}
+          onCancel={() => setAskDisband(false)}
+        />
+      )}
     </div>
   );
 }

@@ -14,7 +14,7 @@ export type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  kind: "text" | "image" | "file" | "contact";
+  kind: "text" | "image" | "file" | "contact" | "system";
   body: string | null;
   created_at: string;
   edited_at: string | null;
@@ -27,6 +27,7 @@ export type MessageRow = {
 };
 export type ContactInfo = { id: string; username: string; displayName: string; hasAvatar: boolean };
 export type Content =
+  | { kind: "system"; body: string }
   | { kind: "text"; body: string }
   | { kind: "image"; imagePath: string }
   | { kind: "file"; filePath: string; fileName: string; fileSize: number }
@@ -337,7 +338,9 @@ export async function insertMessage(
         ? { ...none, kind: "image", body: null, image_path: content.imagePath }
         : content.kind === "file"
           ? { ...none, kind: "file", body: null, file_path: content.filePath, file_name: content.fileName, file_size: content.fileSize }
-          : { ...none, kind: "contact", body: null, contact_user_id: content.contactUserId };
+          : content.kind === "contact"
+            ? { ...none, kind: "contact", body: null, contact_user_id: content.contactUserId }
+            : { ...none, kind: "system", body: encryptText(content.body) };
 
   const { data, error } = await sb
     .from("sc_messages")
@@ -380,8 +383,24 @@ export async function insertMessage(
     sendToUser(uid, { type: "message", message: wire });
     sendToUser(uid, { type: "list" });
   }
-  void notifyOffline(conversationId, senderId, members, shortPreview, skip);
+  // 参加・退出などのお知らせは、通知（プッシュ）を送らない
+  if (content.kind !== "system") void notifyOffline(conversationId, senderId, members, shortPreview, skip);
   return row;
+}
+
+// グループの出来事（参加・退出・削除・名前の変更）をトークに残す。失敗しても本来の操作は止めない
+export async function postNotice(conversationId: string, actorId: string, text: string): Promise<void> {
+  try {
+    await insertMessage(conversationId, actorId, { kind: "system", body: text }, text);
+  } catch (error) {
+    console.error("notice:", error);
+  }
+}
+
+// 表示名（お知らせの文に使う）
+export async function displayNameOf(userId: string): Promise<string> {
+  const { data } = await sb.from("sc_users").select("display_name").eq("id", userId).maybeSingle();
+  return (data?.display_name as string | undefined) ?? "メンバー";
 }
 
 // 画像・ファイルの実体は、どのメッセージからも参照されなくなったときに消す（転送で共有するため）
