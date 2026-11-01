@@ -16,6 +16,7 @@ import { ProfileSheet } from "./ProfileSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { Avatar } from "./Avatar";
+import { SENNIN_BOT_ID } from "./robot";
 import type { Conversation, Friend, Me } from "./types";
 import { saveFriends, syncFriendAvatars } from "./avatarCache";
 
@@ -114,6 +115,21 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     timer.current = window.setTimeout(refresh, 400);
   }, [refresh]);
 
+  // AI機能の設定が変わったら一覧を取り直す
+  useEffect(() => {
+    void refresh();
+  }, [me.aiEnabled, refresh]);
+
+  // AI機能がオフになったら、一覧に出さないだけでなく、開いていたsenninaiのトークも閉じる
+  const visibleList = list.filter((c) => me.aiEnabled || c.otherId !== SENNIN_BOT_ID);
+  useEffect(() => {
+    if (me.aiEnabled || !selectedId) return;
+    if (list.find((c) => c.id === selectedId)?.otherId === SENNIN_BOT_ID) {
+      setSelectedId(null);
+      navigate("/home", { replace: true });
+    }
+  }, [me.aiEnabled, selectedId, list]);
+
   // 通知を許可済みなら、起動のたびに購読を確かめ直す（端末側の購読が切れていても届くように）
   useEffect(() => {
     if (me.notifyDm) void refreshPush();
@@ -187,7 +203,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       <aside className="sidebar">
         <div className="sidebar-body" key={tab}>
           {tab === "talk" && (
-            <ConversationList list={list} selectedId={selectedId} onSelect={select} onCompose={() => setShowNew(true)} />
+            <ConversationList list={visibleList} selectedId={selectedId} onSelect={select} onCompose={() => setShowNew(true)} />
           )}
           {tab === "friends" && (
             <FriendsTab

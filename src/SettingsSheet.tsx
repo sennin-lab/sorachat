@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ApiError, api, patch } from "./api";
+import { useEffect, useState } from "react";
+import { ApiError, api, delete_, patch } from "./api";
 import { Icon } from "./Icon";
 import { disablePush, enablePush, testPush } from "./push";
 import type { Me } from "./types";
@@ -25,6 +25,20 @@ export function SettingsSheet({
   const [status, setStatus] = useState("");
   const [testMessage, setTestMessage] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // ブロックしている人の一覧（ここから解除できる）
+  const [blockedList, setBlockedList] = useState<{ id: string; displayName: string }[]>([]);
+  useEffect(() => {
+    api<{ id: string; displayName: string }[]>("/api/blocks").then(setBlockedList).catch(() => undefined);
+  }, []);
+  const unblock = async (id: string) => {
+    try {
+      await api(`/api/blocks/${id}`, delete_());
+      setBlockedList((list) => list.filter((u) => u.id !== id));
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "解除できませんでした。");
+    }
+  };
 
   // senninai（AIチャット）のオン・オフ。オンにするとトーク一覧に「senninai」が出る
   const toggleAi = async (on: boolean) => {
@@ -123,8 +137,9 @@ export function SettingsSheet({
         </label>
       </div>
       <p className="notice center small">
-        オンにすると、トーク一覧に「senninai」が出ます。グループでは「/senninai add」で参加、「/senninai ask 質問」で質問できます。
-        話しかけた内容は、AIの応答のために外部サービス（UserLocal）へ送られます。
+        オンにすると、トーク一覧に「senninai」が出ます。トークでは「太郎とのチャットを読んで要点を教えて」「太郎への返信を考えて」「太郎に『明日遅れます』と送って」（送る前に確認）などができます。
+        グループでは「/senninai add」で参加し、「/senninai ask 質問」で質問できます（「太郎のことどう思う？」のように人について聞くことも）。
+        話しかけた内容は、AIの応答のために外部サービス（UserLocal）へ送られます。オフにすると一覧から消えます。
       </p>
 
       <div className="section-label flush">
@@ -163,6 +178,25 @@ export function SettingsSheet({
         </div>
       )}
       {testMessage && <p className="notice center">{testMessage}</p>}
+
+      <div className="section-label flush">
+        <span>ブロック</span>
+      </div>
+      <div className="page-card">
+        {blockedList.length === 0 && (
+          <div className="page-row static">
+            <span className="muted">ブロックしている人はいません</span>
+          </div>
+        )}
+        {blockedList.map((u) => (
+          <div key={u.id} className="page-row static">
+            <span>{u.displayName}</span>
+            <button className="btn-small" onClick={() => void unblock(u.id)}>
+              解除
+            </button>
+          </div>
+        ))}
+      </div>
 
       <div className="section-label flush">
         <span>アカウント</span>

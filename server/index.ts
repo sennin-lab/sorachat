@@ -13,6 +13,9 @@ import { dm } from "./dm.js";
 import { friends } from "./friends.js";
 import { openChats } from "./openchat.js";
 import { push } from "./push.js";
+import { senninai } from "./senninai.js";
+import { blocks } from "./blocks.js";
+import { BlockedError } from "./messages.js";
 import { attachRealtime } from "./realtime.js";
 
 const app = express();
@@ -32,6 +35,8 @@ app.use("/api", dm);
 app.use("/api", friends);
 app.use("/api", push);
 app.use("/api", openChats);
+app.use("/api", senninai);
+app.use("/api", blocks);
 app.use("/api", admin);
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "見つかりません。" });
@@ -49,6 +54,10 @@ if (existsSync(path.join(dist, "index.html"))) {
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
     res.status(413).json({ error: "ファイルが大きすぎます。" });
+    return;
+  }
+  if (error instanceof BlockedError) {
+    res.status(403).json({ error: error.message });
     return;
   }
   console.error(error);

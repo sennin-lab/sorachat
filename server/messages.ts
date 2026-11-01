@@ -178,9 +178,9 @@ export async function replyTargetOk(conversationId: string, replyToId: string | 
   return Boolean(data);
 }
 
-async function notifyOffline(conversationId: string, senderId: string, members: string[], _preview: string) {
-  // 送った本人以外の全員へ。画面を開いている端末だけは、その端末への通知を省く
-  const others = members.filter((uid) => uid !== senderId);
+async function notifyOffline(conversationId: string, senderId: string, members: string[], _preview: string, skip: Set<string>) {
+  // 送った本人以外の全員へ（通知オフ・ブロックしている人は除く）。画面を開いている端末だけは、その端末への通知を省く
+  const others = recipientsToNotify(members, senderId, skip);
   if (!others.length) return;
   const [{ data: sender }, { data: conv }] = await Promise.all([
     sb.from("sc_users").select("display_name").eq("id", senderId).maybeSingle(),
@@ -199,6 +199,94 @@ async function notifyOffline(conversationId: string, senderId: string, members: 
       skipEndpoints: activeEndpoints(uid)
     });
   }
+}
+
+// ---------- ブロック・通知オフ・トークの削除 ----------
+
+export class BlockedError extends Error {
+  constructor() {
+    super("このユーザーとはトークできません。");
+    this.name = "BlockedError";
+  }
+}
+
+// どちらかがもう一方をブロックしているか
+export async function blockedBetween(a: string, b: string): Promise<boolean> {
+  const { data, error } = await sb
+    .from("sc_blocks")
+    .select("blocker_id")
+    .or(`and(blocker_id.eq.${a},blocked_id.eq.${b}),and(blocker_id.eq.${b},blocked_id.eq.${a})`)
+    .limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+// 1対1のトークでは、相手とどちらかがブロックしていれば送れない（グループは対象外）
+export async function assertNotBlocked(conversationId: string, senderId: string): Promise<void> {
+  const { data: conv, error } = await sb.from("sc_conversations").select("is_group").eq("id", conversationId).maybeSingle();
+  if (error) throw error;
+  if (conv?.is_group === true) return;
+  const others = (await memberIds(conversationId)).filter((id) => id !== senderId);
+  for (const other of others) {
+    if (await blockedBetween(senderId, other)) throw new BlockedError();
+  }
+}
+
+// 自分がブロックしている人のID
+export async function blockedByMe(userId: string): Promise<Set<string>> {
+  const { data, error } = await sb.from("sc_blocks").select("blocked_id").eq("blocker_id", userId);
+  if (error) throw error;
+  return new Set(((data ?? []) as { blocked_id: string }[]).map((r) => r.blocked_id));
+}
+
+// その人をブロックしている人のID
+export async function blockersOf(userId: string): Promise<Set<string>> {
+  const { data, error } = await sb.from("sc_blocks").select("blocker_id").eq("blocked_id", userId);
+  if (error) throw error;
+  return new Set(((data ?? []) as { blocker_id: string }[]).map((r) => r.blocker_id));
+}
+
+// 通知をオフにしているメンバーのID
+export async function mutedIds(conversationId: string): Promise<Set<string>> {
+  const { data, error } = await sb.from("sc_members").select("user_id").eq("conversation_id", conversationId).eq("muted", true);
+  if (error) throw error;
+  return new Set(((data ?? []) as { user_id: string }[]).map((r) => r.user_id));
+}
+
+// 通知を送る相手。送った本人・通知オフ・ブロックしている人を除く
+export function recipientsToNotify(members: string[], senderId: string, skip: Set<string>): string[] {
+  return members.filter((uid) => uid !== senderId && !skip.has(uid));
+}
+
+// 自分のメンバーシップを外す。最後の1人が抜けたら、トークと画像・ファイルを完全に消す
+export async function leaveConversation(conversationId: string, userId: string): Promise<void> {
+  const { error } = await sb.from("sc_members").delete().eq("conversation_id", conversationId).eq("user_id", userId);
+  if (error) throw error;
+  const { data, error: remainError } = await sb.from("sc_members").select("user_id").eq("conversation_id", conversationId);
+  if (remainError) throw remainError;
+  if (!(data ?? []).length) await purgeConversation(conversationId);
+  else await broadcastList(conversationId);
+}
+
+// トークを完全に消す（メッセージ・リアクション・画像・ファイル・アイコン）
+export async function purgeConversation(conversationId: string): Promise<void> {
+  const { data: rows, error } = await sb.from("sc_messages").select("image_path, file_path").eq("conversation_id", conversationId);
+  if (error) throw error;
+  const { data: conv } = await sb.from("sc_conversations").select("avatar_path").eq("id", conversationId).maybeSingle();
+  const paths = new Set(
+    ((rows ?? []) as { image_path: string | null; file_path: string | null }[])
+      .flatMap((r) => [r.image_path, r.file_path])
+      .filter((p): p is string => Boolean(p))
+  );
+  // 先に行を消してから、画像・ファイルがほかの会話（転送先）で使われていなければ消す
+  for (const table of ["sc_messages", "sc_members"]) {
+    const { error: deleteError } = await sb.from(table).delete().eq("conversation_id", conversationId);
+    if (deleteError) throw deleteError;
+  }
+  const { error: convError } = await sb.from("sc_conversations").delete().eq("id", conversationId);
+  if (convError) throw convError;
+  for (const path of paths) await removeImageIfUnused(path);
+  if (conv?.avatar_path) await removeImage(conv.avatar_path as string);
 }
 
 // 送信の流れ: 1) DBに保存 → 2) 会話メンバーのうちオンラインの人へWebSocketで即時配信
@@ -228,6 +316,9 @@ export async function insertMessage(
     const existing = await findExisting();
     if (existing) return existing;
   }
+
+  // ブロックされている相手とは、1対1のトークで送れない
+  await assertNotBlocked(conversationId, senderId);
 
   const now = new Date().toISOString();
   const shortPreview = preview.slice(0, 80);
@@ -270,8 +361,10 @@ export async function insertMessage(
   }
   const row = data as MessageRow;
 
-  const [members] = await Promise.all([
+  const [members, muted, blockers] = await Promise.all([
     memberIds(conversationId),
+    mutedIds(conversationId),
+    blockersOf(senderId),
     sb
       .from("sc_conversations")
       .update({ last_message_at: now, last_preview: encryptText(shortPreview), last_sender_id: senderId })
@@ -280,11 +373,14 @@ export async function insertMessage(
   ]);
 
   const wire = toMessage(row, [], options.clientId ?? null);
+  // ブロックした側には、その人の発言を届けない（一覧の更新も送らない）
+  const skip = new Set([...muted, ...blockers]);
   for (const uid of members) {
+    if (blockers.has(uid)) continue;
     sendToUser(uid, { type: "message", message: wire });
     sendToUser(uid, { type: "list" });
   }
-  void notifyOffline(conversationId, senderId, members, shortPreview);
+  void notifyOffline(conversationId, senderId, members, shortPreview, skip);
   return row;
 }
 

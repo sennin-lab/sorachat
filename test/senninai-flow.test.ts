@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { sb } from "../server/supabase.ts";
 import { encryptText, decryptText } from "../server/crypto.ts";
-import { BOT_ID, aiEnabledFor, enableAi, senninaiAfterMessage, senninaiPrecheck } from "../server/senninai.ts";
-import { insertMessage, findOrCreateDm, COLUMNS } from "../server/messages.ts";
+import { BOT_ID, aiEnabledFor, answerPending, disableAi, enableAi, senninaiAfterMessage, senninaiPrecheck } from "../server/senninai.ts";
+import { insertMessage, findOrCreateDm, COLUMNS, BlockedError, leaveConversation, mutedIds, recipientsToNotify } from "../server/messages.ts";
+import { blockUser } from "../server/blocks.ts";
 
 // ---------- メモリ上のテーブル ----------
 type Row = Record<string, any>;
@@ -69,6 +70,15 @@ function builder(table: string) {
     in(col: string, vs: any[]) { filters.push((r) => vs.includes(r[col])); return api; },
     lt(col: string, v: any) { filters.push((r) => r[col] < v); return api; },
     is(col: string, v: any) { filters.push((r) => (r[col] ?? null) === v); return api; },
+    or(expr: string) {
+      // "and(a.eq.1,b.eq.2),and(...)" か "a.eq.1,b.eq.2"（OR）だけを扱う
+      const groups = expr.startsWith("and(")
+        ? [...expr.matchAll(/and\(([^)]*)\)/g)].map((m) => m[1].split(","))
+        : expr.split(",").map((c) => [c]);
+      const parsed = groups.map((g) => g.map((c) => { const [col, , val] = c.split("."); return { col, val }; }));
+      filters.push((r) => parsed.some((g) => g.every(({ col, val }) => String(r[col]) === val)));
+      return api;
+    },
     match(obj: Row) { for (const k of Object.keys(obj)) filters.push((r) => r[k] === obj[k]); return api; },
     order(col: string, o?: { ascending?: boolean }) { order = { col, asc: o?.ascending ?? true }; return api; },
     limit(n: number) { limit = n; return api; },
@@ -129,10 +139,14 @@ function builder(table: string) {
 // ---------- AI（UserLocal）の代わり ----------
 const aiCalls: { messages: { role: string; content: string }[] }[] = [];
 let aiAnswer = "AIの回答です";
+// 意図判定のときだけ返す答え（JSONのつもり）
+let classifierAnswer = "";
 (globalThis as any).fetch = async (_url: string, init: any) => {
   const body = JSON.parse(init.body);
   aiCalls.push(body);
-  return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: aiAnswer } }] }), {
+  const prompt: string = body.messages.at(-1).content;
+  const content = prompt.includes("意図判定") ? classifierAnswer : aiAnswer;
+  return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), {
     status: 200,
     headers: { "content-type": "application/json" }
   });
@@ -289,6 +303,100 @@ async function main() {
   tables.sc_users.find((u) => u.id === ME)!.ai_enabled = true;
   await send(botDm, ME, "さとうに『hi』と送って");
   assert.match(lastBot(botDm)!, /見つかりませんでした/);
+
+  // 16) 確認待ちはDBに保存される。モーダルの「いいえ」で取りやめ、もう一度は「確認待ちなし」
+  tables.sc_users.find((u) => u.id === ME)!.ai_enabled = true;
+  await send(botDm, ME, "太郎に『会議の資料を送ります』と送って");
+  assert.equal(tables.sc_senninai_pending.length, 1, "確認待ちがDBに1件ある");
+  assert.equal(await answerPending(ME, false), "cancelled");
+  assert.match(lastBot(botDm)!, /送信を取りやめました/);
+  assert.equal(await answerPending(ME, true), "none", "確認待ちがなければ何もしない");
+
+  // 17) モーダルの「はい」で送信される
+  await send(botDm, ME, "太郎に『資料を送りました』と送って");
+  assert.equal(await answerPending(ME, true), "sent");
+  assert.ok(tables.sc_messages.some((m) => m.conversation_id === BOB_DM && decryptText(m.body) === "資料を送りました"));
+
+  // 18) 確認待ちのままAI機能をオフにすると、確認待ちは消える
+  await send(botDm, ME, "太郎に『消えるはず』と送って");
+  assert.equal(tables.sc_senninai_pending.length, 1);
+  await disableAi(ME);
+  assert.equal(tables.sc_senninai_pending.length, 0, "オフにすると確認待ちも消える");
+  tables.sc_users.find((u) => u.id === ME)!.ai_enabled = true;
+
+  // 19) ルールに当たらない言い回しは、AIが意図を判定して読み取りに回す
+  aiCalls.length = 0;
+  classifierAnswer = '{"action":"read","target":"太郎","question":"何を話したか"}';
+  aiAnswer = "会議の日程の話でした。";
+  await send(botDm, ME, "太郎さんと何を話したか見てくれる？");
+  const lastPrompt = aiCalls.at(-1)!.messages[0].content;
+  assert.match(lastPrompt, /以下は「太郎」とのトーク/, "判定の結果、トーク読み取りに回る");
+  assert.match(lastPrompt, /何を話したか/);
+  assert.match(lastBot(botDm)!, /会議の日程の話でした/);
+
+  // 20) 判定が壊れた答えのときは、ふつうの会話として答える（送信はしない）
+  aiCalls.length = 0;
+  classifierAnswer = "うーん、わかりません";
+  aiAnswer = "ふつうの回答";
+  const sendsBefore = tables.sc_senninai_pending.length;
+  await send(botDm, ME, "トークの書き方のコツ、知ってる？");
+  assert.equal(aiCalls.length, 2, "判定の1回と、ふつうの回答の1回");
+  assert.equal(lastBot(botDm), "ふつうの回答");
+  assert.equal(tables.sc_senninai_pending.length, sendsBefore);
+
+  // 21) 返信案
+  aiCalls.length = 0;
+  aiAnswer = "1. 了解です";
+  await send(botDm, ME, "太郎への返信を考えて");
+  assert.match(aiCalls.at(-1)!.messages[0].content, /返信案を、短い文で3つ/);
+  assert.match(lastBot(botDm)!, /「太郎」への返信案です/);
+
+  // 22) グループ：人について聞くと、その人の発言をもとに答える
+  aiCalls.length = 0;
+  aiAnswer = "会議の連絡をしてくれる人だと思います。";
+  await send(GROUP, ME, "/senninai ask 太郎のことどう思う？");
+  const opinion = aiCalls.at(-1)!.messages[0].content;
+  assert.match(opinion, /太郎さんの発言（直近）/);
+  assert.match(opinion, /明日の会議は14時です/);
+  assert.match(opinion, /個人攻撃はしないで/);
+
+  // 23) グループ：要約系の質問はもう少し広く読む（失敗しないことを確かめる）
+  aiCalls.length = 0;
+  await send(GROUP, ME, "/senninai ask ここまでの話をまとめて");
+  assert.equal(aiCalls.length, 1);
+
+  // 24) 人について聞く → 質問文に名前がなければ、人のための注意書きは付かない
+  assert.doesNotMatch(aiCalls.at(-1)!.messages[0].content, /個人攻撃/);
+
+  // 25) ブロック：友だちと申請が消え、1対1のトークは両方向とも送れない
+  await blockUser(ME, BOB);
+  assert.equal(tables.sc_friends.some((f) => (f.user_id === ME && f.friend_id === BOB) || (f.user_id === BOB && f.friend_id === ME)), false, "友だちが消えた");
+  await assert.rejects(insertMessage(BOB_DM, ME, { kind: "text", body: "やあ" }, "やあ"), BlockedError);
+  await assert.rejects(insertMessage(BOB_DM, BOB, { kind: "text", body: "返事" }, "返事"), BlockedError, "相手からも送れない");
+
+  // 26) グループでは、ブロックしていても送れる（届き先で除外する）
+  await insertMessage(GROUP, BOB, { kind: "text", body: "グループの発言" }, "グループの発言");
+  assert.ok(tables.sc_messages.some((m) => decryptText(m.body) === "グループの発言"), "グループの発言は保存される");
+
+  // 27) 通知の除外：通知オフの人とブロックしている人は、通知の相手から外れる
+  tables.sc_members.find((m) => m.conversation_id === GROUP && m.user_id === BOB)!.muted = true;
+  assert.ok((await mutedIds(GROUP)).has(BOB));
+  assert.deepEqual(recipientsToNotify([ME, BOB, CAROL], CAROL, new Set([BOB])), [ME], "送った人・通知オフ・ブロックは除く");
+
+  // 28) ブロックを解除すると、また送れる
+  tables.sc_blocks.length = 0;
+  await insertMessage(BOB_DM, ME, { kind: "text", body: "解除後" }, "解除後");
+
+  // 29) 1対1のトークを削除：自分の画面からだけ消え、相手には残る
+  await leaveConversation(BOB_DM, ME);
+  assert.equal(tables.sc_members.some((m) => m.conversation_id === BOB_DM && m.user_id === ME), false, "自分は外れた");
+  assert.equal(tables.sc_members.some((m) => m.conversation_id === BOB_DM && m.user_id === BOB), true, "相手は残る");
+  assert.ok(tables.sc_messages.some((m) => m.conversation_id === BOB_DM), "メッセージは相手のために残る");
+
+  // 30) 相手も削除すると、最後の1人なので完全に消える
+  await leaveConversation(BOB_DM, BOB);
+  assert.equal(tables.sc_conversations.some((c) => c.id === BOB_DM), false, "トークが消えた");
+  assert.equal(tables.sc_messages.some((m) => m.conversation_id === BOB_DM), false, "メッセージも完全に消えた");
 
   console.log("flow checks passed");
 }

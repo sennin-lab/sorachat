@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api, delete_, post } from "./api";
 import { Avatar } from "./Avatar";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { Cover } from "./Cover";
 import { Icon } from "./Icon";
 import type { FriendshipState, UserProfile } from "./types";
@@ -24,10 +25,50 @@ export function UserProfileSheet({
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // ブロック中かどうか（null は確認中）
+  const [blocked, setBlocked] = useState<boolean | null>(null);
+  const [askBlock, setAskBlock] = useState(false);
 
   useEffect(() => {
     api<UserProfile>(`/api/users/${userId}/profile`).then(setProfile).catch(() => setFailed(true));
   }, [userId]);
+
+  useEffect(() => {
+    api<{ id: string }[]>("/api/blocks")
+      .then((list) => setBlocked(list.some((b) => b.id === userId)))
+      .catch(() => setBlocked(false));
+  }, [userId]);
+
+  // ブロックすると友だちと申請は消え、トークは送れなくなる（サーバー側で同じことをする）
+  const block = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/blocks/${userId}`, post());
+      setBlocked(true);
+      setAskBlock(false);
+      applied("none");
+    } catch (err) {
+      setError(messageOf(err));
+      setAskBlock(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unblock = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/blocks/${userId}`, delete_());
+      setBlocked(false);
+      onFriendsChanged?.();
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // 相手の状態を更新する（申請・許可・拒否・取り消し・削除のあと）
   const applied = (next: FriendshipState) => {
@@ -133,6 +174,7 @@ export function UserProfileSheet({
             </div>
           )}
 
+          {blocked !== true && (
           <div className="page-card">
             {profile.friendship === "friend" && (
               <button className="page-row danger" disabled={busy} onClick={removeFriend}>
@@ -160,8 +202,36 @@ export function UserProfileSheet({
               </button>
             )}
           </div>
+          )}
+
+          {blocked === true && (
+            <div className="page-card">
+              <p className="page-row static muted">この人をブロックしています。トークは送れず、発言も表示されません。</p>
+              <button className="page-row accent" disabled={busy} onClick={() => void unblock()}>
+                ブロックを解除
+              </button>
+            </div>
+          )}
+          {blocked === false && (
+            <div className="page-card">
+              <button className="page-row danger" disabled={busy} onClick={() => setAskBlock(true)}>
+                ブロックする
+              </button>
+            </div>
+          )}
 
           {error && <p className="notice center error shake">{error}</p>}
+          {askBlock && (
+            <ConfirmDialog
+              title="ブロックしますか？"
+              message={`${profile.displayName} さんをブロックします。友だちから外れ、トークは送れなくなります。`}
+              confirmLabel="ブロックする"
+              danger
+              busy={busy}
+              onConfirm={() => void block()}
+              onCancel={() => setAskBlock(false)}
+            />
+          )}
         </>
       )}
     </div>

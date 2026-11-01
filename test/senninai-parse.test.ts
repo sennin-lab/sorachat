@@ -1,6 +1,7 @@
 import "./env.ts";
+import { recipientsToNotify } from "../server/messages.ts";
 import assert from "node:assert/strict";
-import { fitTranscript, normalizeName, parseDmIntent, parseGroupCommand, PREVIOUS } from "../server/senninai.ts";
+import { fitTranscript, mentionedMembers, normalizeName, parseClassifierJson, parseDmIntent, parseGroupCommand, PREVIOUS } from "../server/senninai.ts";
 
 let passed = 0;
 const check = (name: string, fn: () => void) => {
@@ -61,5 +62,33 @@ check("fitTranscript keeps newest within budget", () => {
   // 1行だけでも予算を超えるなら、その1行は残す（空にしない）
   assert.deepEqual(fitTranscript(["x".repeat(50)], 10), ["x".repeat(50)]);
 });
+
+// 返信案・読み取りの言い回し
+check("reply", () => assert.deepEqual(parseDmIntent("太郎への返信を考えて"), { kind: "reply", target: "太郎" }));
+check("read with 見て after との", () =>
+  assert.deepEqual(parseDmIntent("太郎とのやり取りを見て、要点は？"), { kind: "read", target: "太郎", question: "要点は？" }));
+
+// AIの判定結果（JSON）の読み取り
+check("classifier read", () =>
+  assert.deepEqual(parseClassifierJson('はい。{"action":"read","target":"太郎","question":"予定"}'), { kind: "read", target: "太郎", question: "予定" }));
+check("classifier send needs target and body", () => {
+  assert.deepEqual(parseClassifierJson('{"action":"send","target":"太郎","body":"了解"}'), { kind: "send", target: "太郎", body: "了解" });
+  assert.equal(parseClassifierJson('{"action":"send","target":"太郎"}'), null);
+});
+check("classifier rejects garbage and unknown actions", () => {
+  assert.equal(parseClassifierJson("わかりません"), null);
+  assert.equal(parseClassifierJson('{"action":"delete_all"}'), null);
+  assert.equal(parseClassifierJson("{not json}"), null);
+  assert.equal(parseClassifierJson('{"action":"read","target":""}'), null);
+});
+check("classifier chat", () => assert.deepEqual(parseClassifierJson('{"action":"chat"}'), { kind: "chat" }));
+
+// 人の名前の検出
+check("mentioned member by name", () =>
+  assert.deepEqual(mentionedMembers("太郎のことどう思う？", [{ id: "a", name: "太郎" }, { id: "b", name: "アリス" }]), [{ id: "a", name: "太郎" }]));
+check("no member mentioned", () => assert.deepEqual(mentionedMembers("今日は晴れ？", [{ id: "a", name: "太郎" }]), []));
+
+check("recipientsToNotify skips sender, muted and blocked", () =>
+  assert.deepEqual(recipientsToNotify(["a", "b", "c", "d"], "a", new Set(["c"])), ["b", "d"]));
 
 console.log(`all ${passed} parser checks passed`);

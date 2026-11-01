@@ -28,6 +28,8 @@ export type Conversation = {
   unread: number;
   myRole: "owner" | "member";
   memberCount: number;
+  // このトークの通知をオフにしているか（自分だけ）
+  muted: boolean;
 };
 
 export type Reaction = { emoji: string; count: number; mine: boolean };

@@ -5,7 +5,7 @@ import { config } from "./config.js";
 import { BANNED_MESSAGE, cookieBase, currentUserId, endSession, isBanned, randomToken, requireAuth, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
 import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
-import { enableAi } from "./senninai.js";
+import { disableAi, enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
 
 export const accounts = Router();
@@ -264,6 +264,7 @@ accounts.post("/me", requireAuth, async (req, res) => {
   }
   // AI機能をオンにしたら、senninaiとのトークを用意する（一覧に出すため）
   if (body.aiEnabled === true) await enableAi(userId);
+  if (body.aiEnabled === false) await disableAi(userId);
   res.json(await loadMe(userId));
 });
 

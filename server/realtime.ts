@@ -4,7 +4,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { z } from "zod";
 import { SESSION_COOKIE, sha256 } from "./auth.js";
 import { addSocket, removeSocket, setViewing } from "./hub.js";
-import { UUID, insertMessage, membership, replyTargetOk, toMessage } from "./messages.js";
+import { BlockedError, UUID, insertMessage, membership, replyTargetOk, toMessage } from "./messages.js";
 import { senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { sb } from "./supabase.js";
 
@@ -133,7 +133,7 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
     });
     reply(ws, { type: "ack", clientId, message: toMessage(row, [], clientId) });
     void senninaiAfterMessage(conversationId, userId, body, row);
-  } catch {
-    reply(ws, { type: "error", clientId, error: "送信できませんでした。" });
+  } catch (error) {
+    reply(ws, { type: "error", clientId, error: error instanceof BlockedError ? error.message : "送信できませんでした。" });
   }
 }

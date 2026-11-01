@@ -12,6 +12,9 @@ import {
 import { useNavigate } from "react-router-dom";
 import { ApiError, api, delete_, patch, post } from "./api";
 import { Avatar } from "./Avatar";
+import { SenninaiConfirm } from "./SenninaiConfirm";
+import { RoomSettingsSheet } from "./RoomSettingsSheet";
+import { SENNIN_BOT_ID } from "./robot";
 import { cachedMessages, saveMessages } from "./cache";
 import { clipLongWords } from "./clip";
 import { ForwardSheet } from "./ForwardSheet";
@@ -165,6 +168,7 @@ export function ChatView({
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [viewing, setViewing] = useState<Message | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [showRoom, setShowRoom] = useState(false);
   const navigate = useNavigate();
   // 1対1の相手とのフレンド状態（申請の許可・拒否バナーに使う）
   const [friendship, setFriendship] = useState<FriendshipState | null>(null);
@@ -312,6 +316,22 @@ export function ChatView({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [lastId]);
+
+  // senninai とのトークでは、送信の確認待ちがあればモーダルで聞く（新しい発言のたびに確かめる）
+  const botDm = !conversation?.isGroup && conversation?.otherId === SENNIN_BOT_ID;
+  const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
+  useEffect(() => {
+    if (!botDm) return;
+    let alive = true;
+    api<{ pending: { summary: string } | null }>("/api/senninai/pending")
+      .then((r) => {
+        if (alive) setConfirmSummary(r.pending?.summary ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [botDm, lastId]);
 
   // 過去分を上に足したあと、読んでいた位置がずれないように補正する
   useLayoutEffect(() => {
@@ -612,6 +632,11 @@ export function ChatView({
             <Icon name="info" size={22} />
           </button>
         )}
+        {conversation && (
+          <button className="icon-btn" aria-label="トークの設定" onClick={() => setShowRoom(true)}>
+            <Icon name="settings" size={22} />
+          </button>
+        )}
       </header>
 
       {friendship === "incoming" && otherId && (
@@ -905,6 +930,18 @@ export function ChatView({
           onChanged={onActivity}
         />
       )}
+      {showRoom && conversation && (
+        <RoomSettingsSheet
+          conversation={conversation}
+          onClose={() => setShowRoom(false)}
+          onChanged={onActivity}
+          onRemoved={() => {
+            setShowRoom(false);
+            onActivity();
+            onBack();
+          }}
+        />
+      )}
       {attachOpen && (
         <AttachSheet
           onClose={() => setAttachOpen(false)}
@@ -933,6 +970,7 @@ export function ChatView({
       {showProfile && conversation?.otherId && (
         <UserProfileSheet userId={conversation.otherId} onClose={() => setShowProfile(false)} />
       )}
+      {botDm && confirmSummary && <SenninaiConfirm summary={confirmSummary} onDone={() => setConfirmSummary(null)} />}
     </section>
   );
 }

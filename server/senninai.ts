@@ -1,6 +1,9 @@
+import { Router } from "express";
 import { config } from "./config.js";
+import { currentUserId, requireAuth } from "./auth.js";
 import { decryptText } from "./crypto.js";
-import { COLUMNS, broadcastList, findOrCreateDm, insertMessage, membership, type MessageRow } from "./messages.js";
+import { sendToUser } from "./hub.js";
+import { BlockedError, COLUMNS, broadcastList, findOrCreateDm, insertMessage, membership, type MessageRow } from "./messages.js";
 import { sb } from "./supabase.js";
 
 // senninai（AIチャット）
@@ -14,16 +17,18 @@ export const BOT_NAME = "senninai";
 const PERSONA = "あなたは「senninai」というチャットアプリのAIです。日本語で、簡潔に答えてください。";
 const MAX_REPLY = 900;
 const MAX_CONTEXT_CHARS = 1000;
+const MAX_MEMBER_CHARS = 300;
 const MAX_QUESTION_CHARS = 300;
 const PENDING_MS = 5 * 60_000;
 export const PREVIOUS = "__PREVIOUS__";
 
 export const GREETING = [
-  "はじめまして、senninai（AIチャット）です。",
+  "はじめまして、senninai（AIチャット）です。できることは次の通りです。",
   "・このトークに話しかけると、AIが答えます",
-  "・「太郎に『明日遅れます』と送って」→ 送る前に確認します",
   "・「太郎とのチャットを読んで要点を教えて」→ そのトークの内容をもとに答えます",
-  "・グループでは「/senninai add」で参加、「/senninai ask 質問」で質問できます",
+  "・「太郎への返信を考えて」→ 返信案を3つ出します",
+  "・「太郎に『明日遅れます』と送って」→ 送る前に確認の画面を出します",
+  "・グループでは「/senninai add」で参加、「/senninai ask 質問」で質問できます（「太郎のことどう思う？」のように人について聞くこともできます）",
   "",
   "※ 話しかけた内容や読んだトークの内容は、AIの応答のために外部サービス（UserLocal）へ送られます。"
 ].join("\n");
@@ -32,10 +37,15 @@ const BOT_COMMAND = /^\/senninai(\s|$)/i;
 const CONFIRM_YES = /^(はい|うん|ok|おk|オーケー|お願い|yes|送信して)$/i;
 const CONFIRM_NO = /^(いいえ|いや|やめ|キャンセル|no|取り消し)/i;
 const SEND_VERB = /(送ってくれ|送ってほしい|送って欲しい|送ってください|送っといて|送ってや|送って|送信して|伝えて)/;
-const READ_RE = /^(.+?)との(?:チャット|トーク|会話|やり取り|メッセージ|履歴)(?:の内容)?(?:を|の)?\s*([\s\S]*)$/;
+const READ_RE = /^(.+?)との(?:チャット|トーク|会話|やり取り|メッセージ|履歴|話)(?:の内容|の履歴)?(?:を|の)?\s*([\s\S]*)$/;
+const READ_VERBS = /^(?:読んで|読み取って|見て|確認して|チェックして|見てくれ|チェックしてくれ)[、,\s]*/;
+const REPLY_RE = /^(.+?)(?:さん|くん|ちゃん)?(?:への|に対する)返信/;
 const SEND_RE = /^(.+?)(?:さん|くん|ちゃん)?[にへ]\s*([\s\S]+)$/;
 const QUOTED = /^[「『"“'‘]([\s\S]+?)[」』"”'’]/;
 const PREVIOUS_RE = /^(?:この|その|さっきの|今の|前の)?(?:内容|メッセージ|文章|文|これ|それ)$/;
+// ルールで読み取れなかった発言のうち、会話の操作に関係しそうなものだけAIに意図を判定させる
+const TASK_HINT = /チャット|トーク|会話|やり取り|メッセージ|履歴|送って|送信|伝えて|返信|返事|まとめ|要約|話した|話題|言った|どう思|確認して|チェック|見て/;
+const SUMMARY_HINT = /まとめ|要約|話し合|決ま|議論|振り返|やること|ToDo|todo|決定|結論/i;
 
 // ---------- 純粋な解析（テストしやすいように外に出している） ----------
 
@@ -55,17 +65,20 @@ export function parseGroupCommand(text: string): GroupCommand | null {
 export type DmIntent =
   | { kind: "send"; target: string; body: string }
   | { kind: "read"; target: string; question: string }
+  | { kind: "reply"; target: string }
   | { kind: "chat" };
 
-// トークでの話しかけを読む。
-// 例: 「太郎に『明日遅れます』と送って」「太郎にこの内容を送ってや」「太郎とのチャットを読んで要点を教えて」
+// トークでの話しかけを、決まった言い回しから読む。
+// 例: 「太郎に『明日遅れます』と送って」「太郎とのチャットを読んで要点を教えて」「太郎への返信を考えて」
 export function parseDmIntent(text: string): DmIntent {
   const trimmed = text.trim();
   const read = trimmed.match(READ_RE);
   if (read && read[1].trim()) {
-    const question = read[2].replace(/^(?:読んで|読み取って|見て|確認して|チェックして)[、,\s]*/, "").trim();
+    const question = read[2].replace(/^[、,\s]*/, "").replace(READ_VERBS, "").trim();
     return { kind: "read", target: read[1].trim(), question: question || "要点をまとめてください" };
   }
+  const reply = trimmed.match(REPLY_RE);
+  if (reply && reply[1].trim()) return { kind: "reply", target: reply[1].trim() };
   const send = trimmed.match(SEND_RE);
   if (send && SEND_VERB.test(send[2])) {
     const rest = send[2];
@@ -78,9 +91,54 @@ export function parseDmIntent(text: string): DmIntent {
   return { kind: "chat" };
 }
 
+// ルールで読めなかった発言が、AIに意図を判定させる価値のあるものか
+export const looksLikeTask = (text: string) => TASK_HINT.test(text);
+
+// AIの判定結果（JSON）を読む。形が正しくなければ null（その場合はふつうの会話として扱う）
+export function parseClassifierJson(raw: string): DmIntent | null {
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  let data: any;
+  try {
+    data = JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+  switch (data?.action) {
+    case "read": {
+      const target = text(data.target);
+      if (!target) return null;
+      return { kind: "read", target, question: text(data.question).slice(0, MAX_QUESTION_CHARS) || "要点をまとめてください" };
+    }
+    case "reply": {
+      const target = text(data.target);
+      return target ? { kind: "reply", target } : null;
+    }
+    case "send": {
+      const target = text(data.target);
+      const body = text(data.body);
+      return target && body ? { kind: "send", target, body } : null;
+    }
+    case "chat":
+      return { kind: "chat" };
+    default:
+      return null;
+  }
+}
+
 // 表記のゆれ（全角・大文字小文字・空白・敬称）を吸収して名前を比べる
 export const normalizeName = (s: string) =>
   s.normalize("NFKC").toLowerCase().replace(/\s+/g, "").replace(/(さん|くん|ちゃん|様)$/u, "");
+
+// 質問文の中に名前が出てくるグループのメンバー（人について聞かれているかの判定に使う）
+export function mentionedMembers(question: string, members: { id: string; name: string }[]): { id: string; name: string }[] {
+  const q = normalizeName(question);
+  return members.filter((m) => {
+    const n = normalizeName(m.name);
+    return n.length >= 2 && q.includes(n);
+  }).slice(0, 2);
+}
 
 // 新しい順に足していき、上限を超えたら古いものから捨てる（時系列の順で返す）
 export function fitTranscript(lines: string[], budget: number): string[] {
@@ -142,6 +200,13 @@ export async function enableAi(userId: string): Promise<void> {
   await broadcastList(id);
 }
 
+// AI機能をオフにしたとき：確認待ちを消し、一覧を取り直させる（senninaiは一覧から消える）
+export async function disableAi(userId: string): Promise<void> {
+  const { error } = await sb.from("sc_senninai_pending").delete().eq("user_id", userId);
+  if (error) throw error;
+  sendToUser(userId, { type: "list" });
+}
+
 // UserLocal（senninai API）に問い合わせる。messages は直近の会話（履歴は5件まで）
 export async function askAi(messages: { role: "user" | "assistant"; content: string }[]): Promise<string> {
   const response = await fetch(`${config.senninAi.baseUrl}/api/chat`, {
@@ -170,10 +235,13 @@ function textOf(row: MessageRow): string | null {
   return "[連絡先]";
 }
 
-// 会話の直近のメッセージを「名前: 本文」の行にする
-async function loadLines(conversationId: string, limit: number, before?: string): Promise<string[]> {
+const clock = (iso: string) => new Date(iso).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
+
+// 会話の直近のメッセージを「時刻 名前: 本文」の行にする
+async function loadLines(conversationId: string, limit: number, before?: string, senderId?: string): Promise<string[]> {
   let query = sb.from("sc_messages").select(COLUMNS).eq("conversation_id", conversationId);
   if (before) query = query.lt("created_at", before);
+  if (senderId) query = query.eq("sender_id", senderId).eq("kind", "text").is("deleted_at", null);
   const { data, error } = await query.order("created_at", { ascending: false }).limit(limit);
   if (error) throw error;
   const rows = ((data ?? []) as MessageRow[]).reverse();
@@ -189,10 +257,20 @@ async function loadLines(conversationId: string, limit: number, before?: string)
     const text = textOf(row);
     if (text === null) continue;
     const name = row.sender_id === BOT_ID ? BOT_NAME : names.get(row.sender_id) ?? "メンバー";
-    const at = new Date(row.created_at).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
-    lines.push(`${at} ${name}: ${text.slice(0, 300)}`);
+    lines.push(`${clock(row.created_at)} ${name}: ${text.slice(0, 300)}`);
   }
   return lines;
+}
+
+// グループのメンバー（senninai以外）
+async function groupMembers(conversationId: string): Promise<{ id: string; name: string }[]> {
+  const { data, error } = await sb.from("sc_members").select("user_id").eq("conversation_id", conversationId);
+  if (error) throw error;
+  const ids = ((data ?? []) as { user_id: string }[]).map((m) => m.user_id).filter((id) => id !== BOT_ID);
+  if (!ids.length) return [];
+  const { data: users, error: usersError } = await sb.from("sc_users").select("id, display_name").in("id", ids);
+  if (usersError) throw usersError;
+  return ((users ?? []) as { id: string; display_name: string }[]).map((u) => ({ id: u.id, name: u.display_name }));
 }
 
 // 直近の自分の文章（「この内容を送って」の「この内容」に使う）
@@ -261,10 +339,73 @@ function matchTargets(targets: Target[], name: string): Target[] {
   );
 }
 
-// ---------- 実際の動き ----------
+// ---------- 確認待ちの送信（DBに保存する。モーダルと「はい」「いいえ」の両方で使う） ----------
 
-type PendingSend = { target: Target; body: string; expires: number };
-const pendingSends = new Map<string, PendingSend>();
+type PendingPayload = {
+  summary: string;
+  label: string;
+  targetConversationId: string | null;
+  friendId: string | null;
+  body: string;
+};
+
+async function savePending(userId: string, botDm: string, payload: PendingPayload) {
+  const { error } = await sb.from("sc_senninai_pending").upsert(
+    { user_id: userId, conversation_id: botDm, payload, expires_at: new Date(Date.now() + PENDING_MS).toISOString() },
+    { onConflict: "user_id" }
+  );
+  if (error) throw error;
+}
+
+// 確認待ちを取り出して消す（期限切れなら消すだけ）
+async function takePending(userId: string): Promise<{ botDm: string; payload: PendingPayload } | null> {
+  const { data, error } = await sb.from("sc_senninai_pending").select("conversation_id, payload, expires_at").eq("user_id", userId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const { error: deleteError } = await sb.from("sc_senninai_pending").delete().eq("user_id", userId);
+  if (deleteError) throw deleteError;
+  if (new Date(data.expires_at as string).getTime() < Date.now()) return null;
+  return { botDm: data.conversation_id as string, payload: data.payload as PendingPayload };
+}
+
+async function peekPending(userId: string): Promise<PendingPayload | null> {
+  const { data, error } = await sb.from("sc_senninai_pending").select("payload, expires_at").eq("user_id", userId).maybeSingle();
+  if (error) throw error;
+  if (!data || new Date(data.expires_at as string).getTime() < Date.now()) return null;
+  return data.payload as PendingPayload;
+}
+
+// モーダルの「はい」「いいえ」から呼ぶ。結果はトークに届く（送信・取りやめの案内）
+export async function answerPending(userId: string, yes: boolean): Promise<"sent" | "cancelled" | "none"> {
+  const pending = await takePending(userId);
+  if (!pending) return "none";
+  if (!yes) {
+    await say(pending.botDm, "送信を取りやめました。");
+    return "cancelled";
+  }
+  await runSend(pending.botDm, userId, pending.payload);
+  return "sent";
+}
+
+// ---------- AIによる意図の判定 ----------
+
+async function classifyIntent(userId: string, text: string): Promise<DmIntent> {
+  const names = (await listTargets(userId)).map((t) => t.label).slice(0, 30);
+  const prompt = [
+    "あなたはチャットアプリのAI「senninai」の意図判定です。次の発言が何をしてほしいかを判定し、JSONだけを1行で出力してください。説明は不要です。",
+    '- "read": 会話（トーク・グループ）の内容を確認・要約・質問したい。target=相手またはグループの名前、question=知りたいこと',
+    '- "reply": 相手への返信案がほしい。target=相手の名前',
+    '- "send": 誰かにメッセージを送ってほしい。target=相手の名前、body=送る本文',
+    '- "chat": それ以外（ふつうの質問・雑談）',
+    `名前の候補: ${names.join("、") || "なし"}`,
+    `発言: ${text}`,
+    '出力例: {"action":"read","target":"太郎","question":"何を話したか"}'
+  ].join("\n");
+  const raw = await askAi([{ role: "user", content: prompt }]);
+  return parseClassifierJson(raw) ?? { kind: "chat" };
+}
+
+// ---------- 実際の動き ----------
 
 export async function senninaiAfterMessage(conversationId: string, userId: string, body: string, row: MessageRow): Promise<void> {
   if (userId === BOT_ID) return;
@@ -285,12 +426,7 @@ export async function senninaiAfterMessage(conversationId: string, userId: strin
         return;
       }
       if (!conv.botMember || !command.question) return;
-      const asker = await askerName(userId);
-      const lines = fitTranscript(await loadLines(conversationId, 15, row.created_at), MAX_CONTEXT_CHARS);
-      const context = lines.length ? lines.join("\n") : "（まだメッセージはありません）";
-      const prompt = `${PERSONA}\n\n以下はグループチャットの直近のやり取りです。\n---\n${context}\n---\n${asker}さんからの質問: ${command.question}`;
-      const answer = await askAi([{ role: "user", content: prompt }]);
-      await say(conversationId, answer, row.id);
+      await answerInGroup(conversationId, userId, command.question, row);
       return;
     }
     if (conv.botMember) await handleDm(conversationId, userId, body, row);
@@ -298,6 +434,28 @@ export async function senninaiAfterMessage(conversationId: string, userId: strin
     console.error("senninai:", error);
     await say(conversationId, "AIが応答できませんでした。時間をおいてもう一度お試しください。", row.id).catch(() => undefined);
   }
+}
+
+// グループでの質問。要約系の質問は広めに、人について聞かれたらその人の発言も添える
+async function answerInGroup(conversationId: string, userId: string, question: string, row: MessageRow) {
+  const asker = await askerName(userId);
+  const wide = SUMMARY_HINT.test(question);
+  const lines = fitTranscript(await loadLines(conversationId, wide ? 40 : 15, row.created_at), MAX_CONTEXT_CHARS);
+  const context = lines.length ? lines.join("\n") : "（まだメッセージはありません）";
+
+  const members = await groupMembers(conversationId);
+  const mentioned = mentionedMembers(question, members);
+  let memberSection = "";
+  for (const member of mentioned) {
+    const memberLines = fitTranscript(await loadLines(conversationId, 25, row.created_at, member.id), MAX_MEMBER_CHARS);
+    if (memberLines.length) memberSection += `\n---\n${member.name}さんの発言（直近）:\n${memberLines.join("\n")}`;
+  }
+  const guard = mentioned.length
+    ? "\n※人についての質問です。上の発言の内容だけを根拠に、中立に短く答えてください。推測で断定したり、個人攻撃はしないでください。"
+    : "";
+  const prompt = `${PERSONA}\n\n以下はグループチャットの直近のやり取りです。\n---\n${context}${memberSection}\n---\n${asker}さんからの質問: ${question.slice(0, MAX_QUESTION_CHARS)}${guard}`;
+  const answer = await askAi([{ role: "user", content: prompt }]);
+  await say(conversationId, answer, row.id);
 }
 
 async function askerName(userId: string): Promise<string> {
@@ -309,28 +467,28 @@ async function handleDm(conversationId: string, userId: string, body: string, ro
   if (!(await aiEnabledFor(userId))) return;
   const text = body.trim();
 
-  // 送信の確認待ちなら、はい／いいえを先に見る（それ以外の発言は確認を取り消して普通に扱う）
-  const waiting = pendingSends.get(userId);
+  // 確認待ちの送信があれば、はい／いいえを先に見る（それ以外の発言は確認を取り消して普通に扱う）
+  const waiting = await takePending(userId);
   if (waiting) {
-    pendingSends.delete(userId);
-    if (waiting.expires > Date.now()) {
-      if (CONFIRM_YES.test(text)) return runSend(conversationId, userId, waiting);
-      if (CONFIRM_NO.test(text)) return say(conversationId, "送信を取りやめました。");
-    }
+    if (CONFIRM_YES.test(text)) return runSend(conversationId, userId, waiting.payload);
+    if (CONFIRM_NO.test(text)) return say(conversationId, "送信を取りやめました。");
   }
 
-  const intent = parseDmIntent(text);
+  let intent = parseDmIntent(text);
+  if (intent.kind === "chat" && looksLikeTask(text)) {
+    // 言い回しがルールに当たらないときは、AIに「何をしてほしいか」を判定させる（失敗したらふつうの会話）
+    intent = await classifyIntent(userId, text).catch((error) => {
+      console.error("senninai classify:", error);
+      return { kind: "chat" } as DmIntent;
+    });
+  }
   if (intent.kind === "send") return handleSendRequest(conversationId, userId, intent, row);
   if (intent.kind === "read") return handleRead(conversationId, userId, intent);
+  if (intent.kind === "reply") return handleReply(conversationId, userId, intent.target);
   return handleChat(conversationId, text, row);
 }
 
-async function handleSendRequest(
-  conversationId: string,
-  userId: string,
-  intent: { target: string; body: string },
-  row: MessageRow
-) {
+async function handleSendRequest(conversationId: string, userId: string, intent: { target: string; body: string }, row: MessageRow) {
   let body = intent.body;
   if (body === PREVIOUS) {
     body = (await previousUserText(conversationId, userId, row.created_at)) ?? "";
@@ -348,36 +506,54 @@ async function handleSendRequest(
     return say(conversationId, `候補が複数あります（${names}）。もう一度、正しい名前で指定してください。`);
   }
   const target = matches[0];
-  pendingSends.set(userId, { target, body, expires: Date.now() + PENDING_MS });
-  return say(conversationId, `「${body}」を${target.label}に送信します。よろしいですか？（はい／いいえ）`);
+  const summary = `「${body}」を${target.label}に送信します。よろしいですか？`;
+  await savePending(userId, conversationId, {
+    summary,
+    label: target.label,
+    targetConversationId: target.conversationId,
+    friendId: target.friendId,
+    body
+  });
+  return say(conversationId, `${summary}（はい／いいえ）`);
 }
 
-async function runSend(conversationId: string, userId: string, pending: PendingSend) {
-  const { target, body } = pending;
-  let targetConversation = target.conversationId;
-  if (!targetConversation && target.friendId) {
+async function runSend(botDm: string, userId: string, pending: PendingPayload) {
+  const { label, body } = pending;
+  let targetConversation = pending.targetConversationId;
+  if (!targetConversation && pending.friendId) {
     // 友だちなら、まだなかったDMを作ってから送る（友だちでなくなっていたら送らない）
-    const { data: friend } = await sb.from("sc_friends").select("friend_id").eq("user_id", userId).eq("friend_id", target.friendId).maybeSingle();
-    if (!friend) return say(conversationId, `${target.label}さんとは友だちではなくなっているため、送信しませんでした。`);
-    targetConversation = (await findOrCreateDm(userId, target.friendId)).id;
+    const { data: friend } = await sb.from("sc_friends").select("friend_id").eq("user_id", userId).eq("friend_id", pending.friendId).maybeSingle();
+    if (!friend) return say(botDm, `${label}さんとは友だちではなくなっているため、送信しませんでした。`);
+    targetConversation = (await findOrCreateDm(userId, pending.friendId)).id;
   }
   if (!targetConversation || !(await membership(targetConversation, userId))) {
-    return say(conversationId, `${target.label}へのトークが見つからないため、送信しませんでした。`);
+    return say(botDm, `${label}へのトークが見つからないため、送信しませんでした。`);
   }
-  await insertMessage(targetConversation, userId, { kind: "text", body }, body);
-  return say(conversationId, `${target.label}に送信しました。`);
+  try {
+    await insertMessage(targetConversation, userId, { kind: "text", body }, body);
+  } catch (error) {
+    if (error instanceof BlockedError) return say(botDm, `${label}さんとはトークできないため、送信しませんでした。`);
+    throw error;
+  }
+  return say(botDm, `${label}に送信しました。`);
+}
+
+async function resolveOne(userId: string, conversationId: string, name: string): Promise<Target | null> {
+  const matches = matchTargets(await listTargets(userId), name);
+  if (matches.length === 0) {
+    await say(conversationId, `「${name}」というトーク相手・グループは見つかりませんでした。名前を確かめてもう一度お願いします。`);
+    return null;
+  }
+  if (matches.length > 1) {
+    await say(conversationId, `候補が複数あります（${matches.map((t) => t.label).join("、")}）。もう一度、正しい名前で指定してください。`);
+    return null;
+  }
+  return matches[0];
 }
 
 async function handleRead(conversationId: string, userId: string, intent: { target: string; question: string }) {
-  const matches = matchTargets(await listTargets(userId), intent.target);
-  if (matches.length === 0) {
-    return say(conversationId, `「${intent.target}」というトーク相手・グループは見つかりませんでした。名前を確かめてもう一度お願いします。`);
-  }
-  if (matches.length > 1) {
-    const names = matches.map((t) => t.label).join("、");
-    return say(conversationId, `候補が複数あります（${names}）。もう一度、正しい名前で指定してください。`);
-  }
-  const target = matches[0];
+  const target = await resolveOne(userId, conversationId, intent.target);
+  if (!target) return;
   if (!target.conversationId) return say(conversationId, `${target.label}さんとのトークはまだありません。`);
 
   const lines = fitTranscript(await loadLines(target.conversationId, 40), MAX_CONTEXT_CHARS);
@@ -386,6 +562,17 @@ async function handleRead(conversationId: string, userId: string, intent: { targ
   const prompt = `${PERSONA}\n\n以下は「${target.label}」とのトーク（直近${lines.length}件）です。\n---\n${lines.join("\n")}\n---\n${question}`;
   const answer = await askAi([{ role: "user", content: prompt }]);
   return say(conversationId, `「${target.label}」の直近${lines.length}件をもとに回答します。\n\n${answer}`);
+}
+
+async function handleReply(conversationId: string, userId: string, name: string) {
+  const target = await resolveOne(userId, conversationId, name);
+  if (!target) return;
+  if (!target.conversationId) return say(conversationId, `${target.label}さんとのトークはまだないので、返信案を作れません。`);
+  const lines = fitTranscript(await loadLines(target.conversationId, 20), 800);
+  if (!lines.length) return say(conversationId, `「${target.label}」にはまだメッセージがありません。`);
+  const prompt = `${PERSONA}\n\n以下は「${target.label}」とのトークです。\n---\n${lines.join("\n")}\n---\n最後の発言への返信案を、短い文で3つ、番号付きで出してください。`;
+  const answer = await askAi([{ role: "user", content: prompt }]);
+  return say(conversationId, `「${target.label}」への返信案です。\n\n${answer}`);
 }
 
 async function handleChat(conversationId: string, text: string, row: MessageRow) {
@@ -407,3 +594,33 @@ async function handleChat(conversationId: string, text: string, row: MessageRow)
   const answer = await askAi([...history, { role: "user", content: `${PERSONA}\n\n${text.slice(0, 1000)}` }]);
   return say(conversationId, answer);
 }
+
+// ---------- HTTP（確認モーダル用） ----------
+
+export const senninai = Router();
+senninai.use("/senninai", requireAuth);
+
+// 確認待ちの送信があれば、その内容（モーダルに出す文）を返す
+senninai.get("/senninai/pending", async (_req, res) => {
+  const pending = await peekPending(currentUserId(res));
+  res.json({ pending: pending ? { summary: pending.summary } : null });
+});
+
+senninai.post("/senninai/pending", async (req, res) => {
+  const me = currentUserId(res);
+  const answer = req.body?.answer;
+  if (answer !== "yes" && answer !== "no") {
+    res.status(400).json({ error: "はい／いいえで答えてください。" });
+    return;
+  }
+  if (!(await aiEnabledFor(me))) {
+    res.status(403).json({ error: AI_OFF_MESSAGE });
+    return;
+  }
+  const result = await answerPending(me, answer === "yes");
+  if (result === "none") {
+    res.status(404).json({ error: "確認待ちの送信はありません。" });
+    return;
+  }
+  res.json({ ok: true, result });
+});

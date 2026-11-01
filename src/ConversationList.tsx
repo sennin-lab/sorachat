@@ -75,6 +75,7 @@ export function ConversationList({
                     <strong>
                       {c.name}
                       {c.isGroup && <span className="group-count"> {c.memberCount}</span>}
+                      {c.muted && <Icon name="bellOff" size={13} className="mute-mark" />}
                     </strong>
                     <time>{formatTime(c.lastMessageAt)}</time>
                   </span>

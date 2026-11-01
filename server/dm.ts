@@ -11,8 +11,12 @@ import {
   type Content,
   broadcastList,
   broadcastReactions,
+  blockedBetween,
+  blockedByMe,
   broadcastToConversation,
   findOrCreateDm,
+  leaveConversation,
+  purgeConversation,
   insertMessage,
   membership,
   removeImageIfUnused,
@@ -106,7 +110,8 @@ dm.get("/dm/conversations", async (_req, res) => {
         lastFromMe: row.last_sender_id === me,
         unread: Number(row.unread),
         myRole: row.my_role,
-        memberCount: Number(row.member_count)
+        memberCount: Number(row.member_count),
+        muted: Boolean(row.muted)
       }))
   );
 });
@@ -128,6 +133,10 @@ dm.post("/dm/open", async (req, res) => {
   }
   if (other.id === me) {
     res.status(400).json({ error: "自分とのDMは作成できません。" });
+    return;
+  }
+  if (await blockedBetween(me, other.id)) {
+    res.status(403).json({ error: "このユーザーとはトークできません。" });
     return;
   }
   if (other.id === BOT_ID && !(await aiEnabledFor(me))) {
@@ -364,10 +373,47 @@ dm.post("/dm/:id/leave", async (req, res) => {
   }
   const { count } = await sb.from("sc_members").select("user_id", { count: "exact", head: true }).eq("conversation_id", id);
   if (!count) {
-    await sb.from("sc_conversations").delete().eq("id", id);
+    await purgeConversation(id);
   } else {
     await broadcastList(id);
   }
+  res.json({ ok: true });
+});
+
+// 通知のオン・オフ（このトークだけ。自分の行だけ変える）
+const muteSchema = z.object({ muted: z.boolean() });
+dm.post("/dm/:id/mute", async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  if (!(await membership(id, me))) {
+    res.status(404).json({ error: "会話が見つかりません。" });
+    return;
+  }
+  const parsed = muteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "通知の設定が正しくありません。" });
+    return;
+  }
+  const { error } = await sb.from("sc_members").update({ muted: parsed.data.muted }).eq("conversation_id", id).eq("user_id", me);
+  if (error) throw error;
+  res.json({ ok: true, muted: parsed.data.muted });
+});
+
+// 1対1のトークを削除する（自分の画面から消す。相手の画面には残る。最後の1人が消すと完全に消える）
+// グループは「退出」（/dm/:id/leave）で、同じく最後の1人が抜けると完全に消える
+dm.post("/dm/:id/delete", async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  if (!(await membership(id, me))) {
+    res.status(404).json({ error: "会話が見つかりません。" });
+    return;
+  }
+  const { data: conv } = await sb.from("sc_conversations").select("is_group").eq("id", id).maybeSingle();
+  if (conv?.is_group === true) {
+    res.status(400).json({ error: "グループは退出してから削除されます。" });
+    return;
+  }
+  await leaveConversation(id, me);
   res.json({ ok: true });
 });
 
@@ -389,7 +435,9 @@ dm.get("/dm/:id/messages", async (req, res) => {
   if (before) query = query.lt("created_at", before.toISOString());
   const { data, error } = await query.order("created_at", { ascending: false }).limit(50);
   if (error) throw error;
-  const rows = ((data ?? []) as MessageRow[]).reverse();
+  // 自分がブロックしている人の発言は表示しない
+  const hidden = await blockedByMe(me);
+  const rows = ((data ?? []) as MessageRow[]).reverse().filter((r) => !hidden.has(r.sender_id));
   res.json(await withReactions(rows, me));
 });
 

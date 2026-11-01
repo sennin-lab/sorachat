@@ -11,3 +11,12 @@ alter table public.sc_users add column if not exists is_bot boolean not null def
 insert into public.sc_users (id, username, display_name, bio, password_hash, is_bot)
 values ('5e11a1ab-0000-4000-8000-000000000001', 'senninai', 'senninai', 'AIチャット', null, true)
 on conflict do nothing;
+
+-- senninai の確認待ちの送信（「太郎に…と送って」の確認。モーダルと「はい」「いいえ」で使う）
+create table if not exists public.sc_senninai_pending (
+  user_id uuid primary key references public.sc_users(id) on delete cascade,
+  conversation_id uuid references public.sc_conversations(id) on delete cascade,
+  payload jsonb not null,
+  expires_at timestamptz not null
+);
+alter table public.sc_senninai_pending enable row level security;

@@ -1239,3 +1239,17 @@ img.avatar { animation: fade-in 0.35s ease both; }
 /* グループのメッセージで、アイコンを押すとプロフィールを開く */
 .avatar-tap { display: inline-grid; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
 .avatar-tap:active { opacity: 0.7; }
+
+/* senninai（AIチャット）: ロボットのアイコンと、はい／いいえの確認モーダル */
+.avatar .robot-face { display: block; border-radius: 50%; }
+.confirm-backdrop { z-index: 60; }
+.confirm-sheet { max-width: 360px; margin: auto; border-radius: 18px; padding: 20px 18px 16px; text-align: center; }
+.confirm-head { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.confirm-robot { width: 56px; height: 56px; display: block; }
+.confirm-text { margin: 14px 4px 16px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.confirm-actions button { padding: 12px 0; border-radius: 12px; }
+
+/* トークごとの通知オフ・確認ダイアログの題 */
+.mute-mark { margin-left: 4px; vertical-align: -2px; opacity: 0.55; }
+.confirm-title { display: block; font-size: 17px; margin-top: 4px; }
