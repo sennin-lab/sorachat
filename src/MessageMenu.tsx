@@ -1,3 +1,4 @@
+import { useExitClose } from "./useExitClose";
 import { REACTION_EMOJIS } from "./emojis";
 import { Icon } from "./Icon";
 import type { Message } from "./types";
@@ -25,9 +26,10 @@ export function MessageMenu({
 }) {
   const isText = message.kind === "text" && !message.deleted;
 
+  const { closing, close } = useExitClose(onClose);
   return (
-    <div className="sheet-backdrop menu-backdrop" onClick={onClose}>
-      <div className="msg-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+    <div className={`sheet-backdrop menu-backdrop${closing ? " is-closing" : ""}`} onClick={() => close()}>
+      <div className={`msg-menu${closing ? " is-closing" : ""}`} role="menu" onClick={(e) => e.stopPropagation()}>
         <div className="menu-reactions">
           {REACTION_EMOJIS.map((emoji) => (
             <button key={emoji} onClick={() => onReact(emoji)} aria-label={`${emoji} を付ける`}>
@@ -60,7 +62,7 @@ export function MessageMenu({
             <Icon name="unsend" size={20} /> 送信を取り消す
           </button>
         )}
-        <button className="cancel" onClick={onClose}>
+        <button className="cancel" onClick={() => close()}>
           キャンセル
         </button>
       </div>

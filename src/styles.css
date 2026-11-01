@@ -1274,3 +1274,14 @@ img.avatar { animation: fade-in 0.35s ease both; }
 .stamp-cell .stamp-btn img { width: 100%; }
 .stamp-del { position: absolute; top: -4px; right: -4px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--danger); color: #fff; font-size: 14px; line-height: 22px; text-align: center; cursor: pointer; }
 .stamp-add { aspect-ratio: 1; border: 1px dashed currentColor; border-radius: 12px; background: none; font-size: 24px; cursor: pointer; opacity: 0.7; }
+
+/* ---- 閉じるときの動き・ダブルタップ対策 ---- */
+.sheet-backdrop.is-closing { animation: fade-out 0.22s ease both; }
+.sheet.is-closing, .msg-menu.is-closing { animation: slide-down 0.22s var(--ease-out) both; }
+.chat.is-leaving { animation: page-out 0.22s var(--ease-out) both; pointer-events: none; }
+.modal-x { width: 44px; height: 44px; display: grid; place-items: center; font-size: 26px; line-height: 1; color: var(--muted); }
+button, .bubble, .send-btn, .composer-icon, .chip { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.bubble { -webkit-user-select: none; user-select: none; }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes slide-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes page-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(28px); } }

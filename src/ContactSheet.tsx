@@ -1,3 +1,4 @@
+import { useExitClose } from "./useExitClose";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { Icon } from "./Icon";
@@ -28,12 +29,13 @@ export function ContactSheet({
     return (friends ?? []).filter((f) => !q || f.displayName.toLowerCase().includes(q) || f.username.includes(q));
   }, [friends, query]);
 
+  const { closing, close } = useExitClose(onClose);
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet contact-sheet" role="dialog" aria-label="連絡先を選択" onClick={(e) => e.stopPropagation()}>
+    <div className={`sheet-backdrop${closing ? " is-closing" : ""}`} onClick={() => close()}>
+      <div className={`sheet contact-sheet${closing ? " is-closing" : ""}`} role="dialog" aria-label="連絡先を選択" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-grip" aria-hidden="true" />
         <div className="sheet-title-row">
-          <button className="icon-btn" onClick={onClose} aria-label="閉じる">
+          <button className="icon-btn" onClick={() => close()} aria-label="閉じる">
             <Icon name="close" size={22} />
           </button>
           <strong>連絡先を送信</strong>

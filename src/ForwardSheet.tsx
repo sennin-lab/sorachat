@@ -1,3 +1,4 @@
+import { useExitClose } from "./useExitClose";
 import { useState } from "react";
 import { Avatar } from "./Avatar";
 import { Icon } from "./Icon";
@@ -16,11 +17,12 @@ export function ForwardSheet({
   const keyword = query.trim().toLowerCase();
   const list = conversations.filter((c) => c.name.toLowerCase().includes(keyword));
 
+  const { closing, close } = useExitClose(onClose);
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-label="送信先" onClick={(e) => e.stopPropagation()}>
+    <div className={`sheet-backdrop${closing ? " is-closing" : ""}`} onClick={() => close()}>
+      <div className={`sheet${closing ? " is-closing" : ""}`} role="dialog" aria-label="送信先" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-title-row">
-          <button className="icon-btn" onClick={onClose} aria-label="閉じる">
+          <button className="icon-btn" onClick={() => close()} aria-label="閉じる">
             <Icon name="close" size={22} />
           </button>
           <strong>送信先</strong>

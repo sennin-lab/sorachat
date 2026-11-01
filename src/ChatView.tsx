@@ -190,6 +190,10 @@ export function ChatView({
   const tapTimer = useRef(0);
   const noticeTimer = useRef(0);
   const lastTap = useRef<{ id: string; at: number }>({ id: "", at: 0 });
+  // 連打による二重送信を防ぐ（同じ内容を短時間に送らない）
+  const lastSend = useRef<{ body: string; at: number }>({ body: "", at: 0 });
+  const lastStamp = useRef<{ ref: string; at: number }>({ ref: "", at: 0 });
+  const [leaving, setLeaving] = useState(false);
   // 返信先（入力欄の上に表示し、次に送るメッセージに付ける）
   const [replyTo, setReplyTo] = useState<Message | null>(null);
 
@@ -388,7 +392,17 @@ export function ChatView({
   };
 
   // スタンプを送る（画像とは別の種類。返信にも使える）
+  // 戻るときは、画面を右へ滑らせてから前の画面へ戻る
+  const leave = () => {
+    if (leaving) return;
+    setLeaving(true);
+    window.setTimeout(onBack, 220);
+  };
+
   const sendStamp = async (stampRef: string) => {
+    const now = Date.now();
+    if (stampRef === lastStamp.current.ref && now - lastStamp.current.at < 600) return;
+    lastStamp.current = { ref: stampRef, at: now };
     setStampOpen(false);
     if (editing) return;
     const replyId = replyTo?.id ?? null;
@@ -404,6 +418,9 @@ export function ChatView({
   };
 
   const enqueue = (body: string) => {
+    const now = Date.now();
+    if (body === lastSend.current.body && now - lastSend.current.at < 600) return;
+    lastSend.current = { body, at: now };
     const clientId = newClientId();
     const temp: Message = {
       id: `tmp-${clientId}`,
@@ -622,9 +639,9 @@ export function ChatView({
   };
 
   return (
-    <section className="chat">
+    <section className={`chat${leaving ? " is-leaving" : ""}`}>
       <header className="chat-head">
-        <button className="icon-btn back-btn" onClick={onBack} aria-label="戻る">
+        <button className="icon-btn back-btn" onClick={leave} aria-label="戻る">
           <Icon name="back" size={26} />
         </button>
         <button
@@ -942,7 +959,7 @@ export function ChatView({
           conversationId={conversationId}
           meId={meId}
           onClose={() => setShowInfo(false)}
-          onLeft={onBack}
+          onLeft={leave}
           onChanged={onActivity}
         />
       )}
@@ -954,7 +971,7 @@ export function ChatView({
           onRemoved={() => {
             setShowRoom(false);
             onActivity();
-            onBack();
+            leave();
           }}
         />
       )}
