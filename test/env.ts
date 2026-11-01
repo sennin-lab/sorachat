@@ -5,4 +5,6 @@ process.env.SUPABASE_URL ??= "https://example.supabase.co";
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "test";
 process.env.SUPABASE_ANON_KEY ??= "test";
 process.env.SUPABASE_JWT_SECRET ??= "test";
+process.env.TURSO_DATABASE_URL ??= "libsql://test.example.turso.io";
+process.env.TURSO_AUTH_TOKEN ??= "test";
 process.env.MESSAGE_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");

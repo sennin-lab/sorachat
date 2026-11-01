@@ -37,6 +37,7 @@ import { stampRefOk } from "./stamps.js";
 import { createGame, gameAction, gameViewsFor } from "./games.js";
 import { GAME_KINDS, GameError } from "./gameLogic.js";
 import { sb } from "./supabase.js";
+import { sendToUser } from "./hub.js";
 
 export const dm = Router();
 dm.use("/dm", requireAuth);
