@@ -26,9 +26,12 @@ import { UserProfileSheet } from "./UserProfileSheet";
 import { AttachSheet } from "./AttachSheet";
 import { StampSheet } from "./StampSheet";
 import { stampUrlOf } from "./stamps";
+import { PREFS_EVENT, getShowUnsent } from "./prefs";
 import { ContactSheet } from "./ContactSheet";
 import { PollCard } from "./PollCard";
 import { PollSheet, type PollDraft } from "./PollSheet";
+import { PollScreen } from "./PollScreen";
+import { FileViewer, viewerKindOf } from "./FileViewer";
 import { GameCard } from "./GameCard";
 import { GameSheet } from "./GameSheet";
 import { MentionText } from "./MentionText";
@@ -186,7 +189,17 @@ export function ChatView({
   const [contactOpen, setContactOpen] = useState(false);
   const [contactUser, setContactUser] = useState<ContactInfo | null>(null);
   const [pollOpen, setPollOpen] = useState(false);
+  // 全画面で開いている投票（メッセージID）と、トーク内で開いているファイル
+  const [pollViewingId, setPollViewingId] = useState<string | null>(null);
+  const [fileViewing, setFileViewing] = useState<Message | null>(null);
   const [gameOpen, setGameOpen] = useState(false);
+  // 「送信取り消しました」を表示するか（設定で切り替える）
+  const [showUnsent, setShowUnsent] = useState(getShowUnsent);
+  useEffect(() => {
+    const sync = () => setShowUnsent(getShowUnsent());
+    window.addEventListener(PREFS_EVENT, sync);
+    return () => window.removeEventListener(PREFS_EVENT, sync);
+  }, []);
   // グループのメンバー一覧（@ で名前を選ぶときと、メンションを強調するときに使う）
   const [memberList, setMemberList] = useState<Member[]>([]);
   const messagesRef = useRef(messages);
@@ -555,6 +568,16 @@ export function ChatView({
     }
   };
 
+  // 投票を締め切る（作った人だけ）。結果は全員に届く
+  const closePoll = async (messageId: string) => {
+    try {
+      await api(`/api/dm/messages/${messageId}/poll/close`, post());
+      if (!isSocketOpen()) void load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
   const sendPoll = async (poll: PollDraft) => {
     const replyId = replyTo?.id ?? null;
     const message = await api<Message>(`/api/dm/${conversationId}/poll`, post({ ...poll, replyToId: replyId }));
@@ -647,7 +670,9 @@ export function ChatView({
   const singleTapAction = (m: Message): (() => void) | null => {
     if (m.kind === "image" && m.imageUrl) return () => setViewing(m);
     if (m.kind === "contact" && m.contact) return () => setContactUser(m.contact ?? null);
-    if (m.kind === "file" && m.fileUrl) return () => downloadFile(m.fileUrl!, m.fileName);
+    // PDF やテキストはトークの中で開く。それ以外のファイルはダウンロード
+    if (m.kind === "file" && m.fileUrl) return () => (viewerKindOf(m.fileName) ? setFileViewing(m) : downloadFile(m.fileUrl!, m.fileName));
+    if (m.kind === "poll" && m.poll) return () => setPollViewingId(m.id);
     return null;
   };
 
@@ -683,6 +708,7 @@ export function ChatView({
   };
 
   const menu = menuFor;
+  const pollViewingMessage = pollViewingId ? messages.find((x) => x.id === pollViewingId) ?? null : null;
   const hasText = text.trim().length > 0;
   const byId = new Map(messages.map((m): [string, Message] => [m.id, m]));
   const nameOf = (senderId: string) =>
@@ -777,6 +803,8 @@ export function ChatView({
         )}
 
         {messages.map((m, index) => {
+          // 設定で非表示にしたときは、取り消されたメッセージを出さない
+          if (m.deleted && !showUnsent) return null;
           const info = threadInfo(messages, index);
           // グループのお知らせ（参加・退出・削除・名前の変更）は中央に小さく出す
           if (m.kind === "system") {
@@ -881,7 +909,10 @@ export function ChatView({
                           <Icon name="file" size={28} />
                           <span className="file-text">
                             <strong>{m.fileName}</strong>
-                            <small>{formatSize(m.fileSize)}</small>
+                            <small>
+                            {formatSize(m.fileSize)}
+                            {viewerKindOf(m.fileName) ? " ・ タップで表示" : ""}
+                          </small>
                           </span>
                         </a>
                       ) : m.kind === "contact" && m.contact ? (
@@ -893,7 +924,7 @@ export function ChatView({
                           </span>
                         </button>
                       ) : m.kind === "poll" && m.poll ? (
-                        <PollCard poll={m.poll} onVote={(index) => void vote(m.id, index)} />
+                        <PollCard poll={m.poll} onVote={(index) => void vote(m.id, index)} onOpen={() => setPollViewingId(m.id)} />
                       ) : m.kind === "game" ? (
                         m.game ? (
                           <GameCard game={m.game} names={memberNames} onAction={(action, extra) => void gameAction(m.id, action, extra)} />
@@ -1117,6 +1148,24 @@ export function ChatView({
         />
       )}
       {pollOpen && <PollSheet onSubmit={sendPoll} onClose={() => setPollOpen(false)} />}
+      {pollViewingMessage?.poll && (
+        <PollScreen
+          poll={pollViewingMessage.poll}
+          meId={meId}
+          onVote={(index) => void vote(pollViewingMessage.id, index)}
+          onClosePoll={() => void closePoll(pollViewingMessage.id)}
+          onClose={() => setPollViewingId(null)}
+        />
+      )}
+      {fileViewing?.fileUrl && (
+        <FileViewer
+          url={`${fileViewing.fileUrl}/view`}
+          name={fileViewing.fileName ?? null}
+          size={formatSize(fileViewing.fileSize)}
+          onClose={() => setFileViewing(null)}
+          onDownload={() => downloadFile(fileViewing.fileUrl!, fileViewing.fileName)}
+        />
+      )}
       {gameOpen && <GameSheet onPick={(kind) => void createGame(kind)} onClose={() => setGameOpen(false)} />}
       {contactOpen && (
         <ContactSheet

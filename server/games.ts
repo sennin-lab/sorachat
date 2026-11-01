@@ -2,7 +2,8 @@
 // 1つのゲームは「game」のメッセージ1件に紐づく（sc_games.message_id）。状態は sc_games.state に保存する。
 import { sendToUser } from "./hub.js";
 import { insertMessage, memberIds, membership, type MessageRow } from "./messages.js";
-import { GameError, reduce, viewOf, type GameAction, type GameKind, type GameStatus, type GameView, type Stored } from "./gameLogic.js";
+import { GAME_CONFIG, GameError, reduce, viewOf, type GameAction, type GameKind, type GameStatus, type GameView, type Stored } from "./gameLogic.js";
+import { generateQuizQuestions } from "./quizgen.js";
 import { sb } from "./supabase.js";
 
 type GameRow = {
@@ -70,7 +71,16 @@ export async function gameAction(messageId: string, me: string, input: GameActio
   await serialize(messageId, async () => {
     const row = await gameRow(messageId);
     if (!row || !(await membership(row.conversation_id, me))) throw new GameError("ゲームが見つかりません。");
-    const next = reduce(row.kind, row.creator_id, row.state, me, input);
+    // クイズは開始するときに senninai が問題を作る（作れなければ固定の問題を使う）
+    const startingQuiz =
+      row.kind === "quiz" &&
+      input.action === "start" &&
+      me === row.creator_id &&
+      !row.state.play &&
+      !row.state.cancelled &&
+      row.state.players.length >= GAME_CONFIG.quiz.min;
+    const quizQuestions = startingQuiz ? await generateQuizQuestions() : null;
+    const next = reduce(row.kind, row.creator_id, row.state, me, input, Math.random, quizQuestions ?? undefined);
     const { error } = await sb
       .from("sc_games")
       .update({ state: next.stored, status: next.status, updated_at: new Date().toISOString() })

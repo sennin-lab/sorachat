@@ -35,12 +35,26 @@ export type Content =
   | { kind: "file"; filePath: string; fileName: string; fileSize: number }
   | { kind: "contact"; contactUserId: string }
   | { kind: "stamp"; stampRef: string }
-  | { kind: "poll"; question: string; options: string[]; multiple: boolean }
+  | { kind: "poll"; question: string; options: string[]; multiple: boolean; anonymous?: boolean }
   | { kind: "game" };
 
 // 投票の中身（body に暗号化して保存する JSON）と、画面に返す形（票数・自分の選択つき）
-export type PollData = { question: string; options: string[]; multiple: boolean };
-export type PollView = PollData & { counts: number[]; mine: number[]; voters: number };
+// closedAt は締め切った時刻（締め切るまでは null）。締め切りも body を書き換えて保存する
+export type PollData = { question: string; options: string[]; multiple: boolean; anonymous?: boolean; closedAt?: string | null };
+export type PollPerson = { id: string; name: string; hasAvatar: boolean };
+export type PollView = {
+  question: string;
+  options: string[];
+  multiple: boolean;
+  anonymous: boolean;
+  closedAt: string | null;
+  creatorId: string;
+  counts: number[];
+  mine: number[];
+  voters: number;
+  // 匿名でないときだけ、選択肢ごとに誰が選んだか（匿名のときは null）
+  voterDetails: PollPerson[][] | null;
+};
 export type PollVote = { user_id: string; option_index: number };
 
 export const pollBodyOf = (poll: PollData) => JSON.stringify(poll);
@@ -50,7 +64,13 @@ export function pollDataOf(row: MessageRow): PollData | null {
   try {
     const data = JSON.parse(decryptText(row.body ?? "") || "null");
     if (data && typeof data.question === "string" && Array.isArray(data.options)) {
-      return { question: data.question, options: data.options.map(String), multiple: Boolean(data.multiple) };
+      return {
+        question: data.question,
+        options: data.options.map(String),
+        multiple: Boolean(data.multiple),
+        anonymous: Boolean(data.anonymous),
+        closedAt: typeof data.closedAt === "string" ? data.closedAt : null
+      };
     }
   } catch {
     // 壊れたデータは表示しない
@@ -58,7 +78,26 @@ export function pollDataOf(row: MessageRow): PollData | null {
   return null;
 }
 
-export function pollView(data: PollData, votes: PollVote[], viewer: string): PollView {
+// 投票した人の名前とアバターの有無（匿名でない投票の一覧に使う）
+export async function pollPeople(userIds: string[]): Promise<Map<string, PollPerson>> {
+  const people = new Map<string, PollPerson>();
+  const unique = [...new Set(userIds)];
+  if (!unique.length) return people;
+  const { data, error } = await sb.from("sc_users").select("id, display_name, avatar_path").in("id", unique);
+  if (error) throw error;
+  for (const u of (data ?? []) as { id: string; display_name: string | null; avatar_path: string | null }[]) {
+    people.set(u.id, { id: u.id, name: u.display_name ?? "メンバー", hasAvatar: Boolean(u.avatar_path) });
+  }
+  return people;
+}
+
+export function pollView(
+  data: PollData,
+  votes: PollVote[],
+  viewer: string,
+  creatorId: string,
+  people: Map<string, PollPerson> = new Map()
+): PollView {
   const counts = data.options.map(() => 0);
   const mine: number[] = [];
   const voters = new Set<string>();
@@ -68,7 +107,26 @@ export function pollView(data: PollData, votes: PollVote[], viewer: string): Pol
     voters.add(v.user_id);
     if (v.user_id === viewer) mine.push(v.option_index);
   }
-  return { ...data, counts, mine, voters: voters.size };
+  const anonymous = Boolean(data.anonymous);
+  const voterDetails = anonymous
+    ? null
+    : data.options.map((_, index) =>
+        votes
+          .filter((v) => v.option_index === index)
+          .map((v) => people.get(v.user_id) ?? { id: v.user_id, name: "メンバー", hasAvatar: false })
+      );
+  return {
+    question: data.question,
+    options: data.options,
+    multiple: data.multiple,
+    anonymous,
+    closedAt: data.closedAt ?? null,
+    creatorId,
+    counts,
+    mine,
+    voters: voters.size,
+    voterDetails
+  };
 }
 
 export function toMessage(
@@ -428,7 +486,7 @@ export async function insertMessage(
   ]);
 
   // 投票は作った直後なので票はまだ空（自分の選択も空）
-  const wirePoll = content.kind === "poll" ? pollView(content, [], senderId) : null;
+  const wirePoll = content.kind === "poll" ? pollView(content, [], senderId, senderId) : null;
   const wire = toMessage(row, [], options.clientId ?? null, null, wirePoll);
   // ブロックした側には、その人の発言を届けない（一覧の更新も送らない）
   const skip = new Set([...muted, ...blockers]);

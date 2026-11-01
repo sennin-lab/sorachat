@@ -17,7 +17,7 @@ export const GAME_CONFIG: Record<GameKind, { min: number; max: number }> = {
 };
 
 export const GUESS_MAX = 100;
-const QUIZ_ROUNDS = 5;
+export const QUIZ_ROUNDS = 5;
 const WIN_LINES: number[][] = [
   [0, 1, 2],
   [3, 4, 5],
@@ -53,7 +53,7 @@ type TttPlay = {
   winner: "X" | "O" | "draw" | null;
   line: number[] | null;
 };
-type QuizQuestion = { q: string; options: string[]; answer: number };
+export type QuizQuestion = { q: string; options: string[]; answer: number };
 type QuizResult = { answer: number; choice: number | null; by: string | null; correct: boolean };
 type QuizPlay = {
   kind: "quiz";
@@ -156,14 +156,18 @@ const shuffle = <T>(list: T[], random: () => number): T[] => {
   return copy;
 };
 
-function startPlay(kind: GameKind, players: string[], random: () => number): Play {
+// quizQuestions は senninai が作った問題（足りないときは固定の問題を使う）
+function startPlay(kind: GameKind, players: string[], random: () => number, quizQuestions?: QuizQuestion[]): Play {
   if (kind === "tictactoe") return { kind, board: Array(9).fill(""), turn: "X", winner: null, line: null };
   if (kind === "quiz") {
     const scores: Record<string, number> = {};
     for (const uid of players) scores[uid] = 0;
     return {
       kind,
-      questions: shuffle(QUIZ_BANK, random).slice(0, QUIZ_ROUNDS),
+      questions:
+        quizQuestions && quizQuestions.length >= QUIZ_ROUNDS
+          ? quizQuestions.slice(0, QUIZ_ROUNDS)
+          : shuffle(QUIZ_BANK, random).slice(0, QUIZ_ROUNDS),
       round: 0,
       phase: "question",
       buzzed: null,
@@ -325,7 +329,8 @@ export function reduce(
   current: Stored,
   me: string,
   input: GameAction,
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  quizQuestions?: QuizQuestion[]
 ): Reduced {
   const stored: Stored = JSON.parse(JSON.stringify(current));
   if (stored.cancelled || isFinished(stored.play)) throw new GameError("このゲームは終わっています。");
@@ -338,7 +343,7 @@ export function reduce(
       stored.players.push(me);
       // 三目並べは2人そろったら、その場で始まる
       if (kind === "tictactoe" && stored.players.length === GAME_CONFIG[kind].max) {
-        stored.play = startPlay(kind, stored.players, random);
+        stored.play = startPlay(kind, stored.players, random, quizQuestions);
       }
       break;
     }
@@ -348,7 +353,7 @@ export function reduce(
       if (stored.players.length < GAME_CONFIG[kind].min) {
         throw new GameError(`${GAME_CONFIG[kind].min}人そろってから始めてください。`);
       }
-      stored.play = startPlay(kind, stored.players, random);
+      stored.play = startPlay(kind, stored.players, random, quizQuestions);
       break;
     }
     case "cancel": {

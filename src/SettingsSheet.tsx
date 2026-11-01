@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, api, delete_, patch } from "./api";
 import { Icon } from "./Icon";
 import { disablePush, enablePush, testPush } from "./push";
+import { getShowUnsent, setShowUnsent } from "./prefs";
 import type { Me } from "./types";
 
 // 設定（LINE の設定画面のように、項目をグループ分けして表示する）
@@ -22,6 +23,7 @@ export function SettingsSheet({
 }) {
   const [notify, setNotify] = useState(me.notifyDm);
   const [ai, setAi] = useState(me.aiEnabled);
+  const [showUnsent, setShowUnsentState] = useState(getShowUnsent);
   const [status, setStatus] = useState("");
   const [testMessage, setTestMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -114,7 +116,25 @@ export function SettingsSheet({
             onChange={(e) => onThemeChange(e.target.checked ? "dark" : "light")}
           />
         </label>
+        <label className="page-row">
+          <span className="row-label">
+            <span className="option-icon">
+              <Icon name="unsend" size={18} />
+            </span>
+            送信取り消しの表示
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={showUnsent}
+            onChange={(e) => {
+              setShowUnsent(e.target.checked);
+              setShowUnsentState(e.target.checked);
+            }}
+          />
+        </label>
       </div>
+      <p className="notice center small">オフにすると、取り消されたメッセージはトークに表示されません（この端末の設定です）。</p>
 
       <div className="section-label flush">
         <span>AI</span>

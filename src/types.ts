@@ -65,13 +65,19 @@ export type Message = {
 };
 
 // 投票の中身と集計（counts は選択肢ごとの票数、mine は自分が選んだ番号）
+// 匿名でないときは voterDetails に選択肢ごとの投票者が入る（匿名のときは null）
+export type PollPerson = { id: string; name: string; hasAvatar: boolean };
 export type PollView = {
   question: string;
   options: string[];
   multiple: boolean;
+  anonymous: boolean;
+  closedAt: string | null;
+  creatorId: string;
   counts: number[];
   mine: number[];
   voters: number;
+  voterDetails: PollPerson[][] | null;
 };
 
 export type GameKind = "tictactoe" | "quiz" | "janken" | "guess";

@@ -18,7 +18,9 @@ import {
   findOrCreateDm,
   leaveConversation,
   memberIds,
+  pollBodyOf,
   pollDataOf,
+  pollPeople,
   pollView,
   postNotice,
   purgeConversation,
@@ -117,7 +119,8 @@ async function pollViewsFor(rows: MessageRow[], viewer: string) {
     list.push({ user_id: v.user_id, option_index: v.option_index });
     votes.set(v.message_id, list);
   }
-  for (const p of polls) views.set(p.row.id, pollView(p.data, votes.get(p.row.id) ?? [], viewer));
+  const people = await pollPeople(((data ?? []) as { user_id: string }[]).map((v) => v.user_id));
+  for (const p of polls) views.set(p.row.id, pollView(p.data, votes.get(p.row.id) ?? [], viewer, p.row.sender_id, people));
   return views;
 }
 
@@ -129,8 +132,9 @@ async function broadcastPoll(conversationId: string, messageId: string) {
   const { data: rows, error } = await sb.from("sc_poll_votes").select("user_id, option_index").eq("message_id", messageId);
   if (error) throw error;
   const votes = (rows ?? []) as PollVote[];
+  const people = await pollPeople(votes.map((v) => v.user_id));
   for (const uid of await memberIds(conversationId)) {
-    sendToUser(uid, { type: "poll", conversationId, messageId, poll: pollView(data, votes, uid) });
+    sendToUser(uid, { type: "poll", conversationId, messageId, poll: pollView(data, votes, uid, row.sender_id, people) });
   }
 }
 
@@ -719,6 +723,7 @@ const pollSchema = z.object({
   question: z.string().trim().min(1).max(100),
   options: z.array(z.string().trim().min(1).max(60)).min(2).max(10),
   multiple: z.boolean().optional(),
+  anonymous: z.boolean().optional(),
   replyToId: z.string().regex(UUID).nullish()
 });
 
@@ -744,7 +749,13 @@ dm.post("/dm/:id/poll", async (req, res) => {
     res.status(400).json({ error: "返信先のメッセージが見つかりません。" });
     return;
   }
-  const content: Content = { kind: "poll", question: parsed.data.question, options: parsed.data.options, multiple: Boolean(parsed.data.multiple) };
+  const content: Content = {
+    kind: "poll",
+    question: parsed.data.question,
+    options: parsed.data.options,
+    multiple: Boolean(parsed.data.multiple),
+    anonymous: Boolean(parsed.data.anonymous)
+  };
   const row = await insertMessage(id, me, content, `投票: ${content.question}`.slice(0, 80), { replyToId });
   res.status(201).json((await withReactions([row], me))[0]);
 });
@@ -820,6 +831,10 @@ dm.post("/dm/messages/:messageId/vote", async (req, res) => {
     res.status(400).json({ error: "選択肢が見つかりません。" });
     return;
   }
+  if (poll.closedAt) {
+    res.status(400).json({ error: "この投票は締め切られています。" });
+    return;
+  }
   const index = parsed.data.optionIndex;
   const { data: mine, error } = await sb.from("sc_poll_votes").select("option_index").eq("message_id", messageId).eq("user_id", me);
   if (error) throw error;
@@ -836,6 +851,29 @@ dm.post("/dm/messages/:messageId/vote", async (req, res) => {
     if (insertError) throw insertError;
   }
   await broadcastPoll(msg.conversation_id, messageId);
+  res.json({ ok: true });
+});
+
+// 投票を締め切る（作った人だけ。締め切ると以後は選べません。結果は残ります）
+dm.post("/dm/messages/:messageId/poll/close", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const me = currentUserId(res);
+  const msg = UUID.test(messageId) ? await messageRow(messageId) : null;
+  const poll = msg ? pollDataOf(msg) : null;
+  if (!msg || !poll || !(await membership(msg.conversation_id, me))) {
+    res.status(404).json({ error: "投票が見つかりません。" });
+    return;
+  }
+  if (msg.sender_id !== me) {
+    res.status(403).json({ error: "締め切れるのは投票を作った人だけです。" });
+    return;
+  }
+  if (!poll.closedAt) {
+    const closed: PollData = { ...poll, closedAt: new Date().toISOString() };
+    const { error } = await sb.from("sc_messages").update({ body: encryptText(pollBodyOf(closed)) }).eq("id", messageId);
+    if (error) throw error;
+    await broadcastPoll(msg.conversation_id, messageId);
+  }
   res.json({ ok: true });
 });
 
@@ -992,6 +1030,46 @@ dm.get("/dm/messages/:messageId/file", async (req, res) => {
   res.setHeader("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
   res.setHeader("x-content-type-options", "nosniff");
   res.send(file.buffer);
+});
+
+// トークの中で表示するためのファイル（PDF と、テキスト系のファイル）。それ以外は 415 を返す
+// 中身も確かめる（PDF は %PDF- で始まる、テキストは NUL を含まない）。ダウンロードは従来の /file を使う
+const TEXT_VIEW_EXTENSIONS = new Set(["txt", "md", "csv", "log", "json"]);
+dm.get("/dm/messages/:messageId/file/view", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  if (!UUID.test(messageId)) {
+    res.status(404).json({ error: "ファイルが見つかりません。" });
+    return;
+  }
+  const { data, error } = await sb
+    .from("sc_messages")
+    .select("conversation_id, file_path, file_name, deleted_at")
+    .eq("id", messageId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.file_path || data.deleted_at || !(await membership(data.conversation_id as string, currentUserId(res)))) {
+    res.status(404).json({ error: "ファイルが見つかりません。" });
+    return;
+  }
+  const file = await readImage(data.file_path as string);
+  if (!file) {
+    res.status(404).json({ error: "ファイルが見つかりません。" });
+    return;
+  }
+  const name = String(data.file_name ?? "file");
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const buffer = file.buffer;
+  const isPdf = ext === "pdf" && buffer.subarray(0, 5).equals(Buffer.from("%PDF-"));
+  const isText = TEXT_VIEW_EXTENSIONS.has(ext) && !buffer.subarray(0, 8000).includes(0) && buffer.length <= 5 * 1024 * 1024;
+  if (!isPdf && !isText) {
+    res.status(415).json({ error: "このファイルはトークの中では表示できません。" });
+    return;
+  }
+  res.setHeader("content-type", isPdf ? "application/pdf" : "text/plain; charset=utf-8");
+  res.setHeader("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(name)}`);
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("cache-control", "private, no-cache");
+  res.send(buffer);
 });
 
 dm.get("/dm/messages/:messageId/image", async (req, res) => {

@@ -213,7 +213,7 @@ export async function disableAi(userId: string): Promise<void> {
 }
 
 // UserLocal（senninai API）に問い合わせる。messages は直近の会話（履歴は5件まで）
-export async function askAi(messages: { role: "user" | "assistant"; content: string }[]): Promise<string> {
+export async function askAi(messages: { role: "user" | "assistant"; content: string }[], maxChars = MAX_REPLY): Promise<string> {
   // API仕様：履歴は直近5件まで、content は文字列、先頭は user にそろえる（AIの案内文から始まると受け付けない場合がある）
   // 送る量も抑える（仕様書に上限の記載はないため、長い会話で 400 になるのを防ぐ）
   const recent = messages.slice(-5).filter((m) => typeof m.content === "string" && m.content.length > 0);
@@ -246,7 +246,7 @@ export async function askAi(messages: { role: "user" | "assistant"; content: str
   // 応答の形（OpenAI互換・answer・text など）のどれでも回答を読む
   const answer = (data ? pickAnswer(data) : raw).trim();
   if (!answer) throw new Error(`senninai API の回答を読めませんでした: ${raw.slice(0, 200)}`);
-  return answer.length > MAX_REPLY ? `${answer.slice(0, MAX_REPLY)}…` : answer;
+  return answer.length > maxChars ? `${answer.slice(0, maxChars)}…` : answer;
 }
 
 function postToAi(messages: { role: "user" | "assistant"; content: string }[]) {
