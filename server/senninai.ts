@@ -19,6 +19,9 @@ const MAX_REPLY = 900;
 const MAX_CONTEXT_CHARS = 1000;
 const MAX_MEMBER_CHARS = 300;
 const MAX_QUESTION_CHARS = 300;
+const MAX_SENT_CHARS = 1000; // 1件あたりの送信量の上限
+const MAX_HISTORY_ITEM_CHARS = 300; // 履歴1件の上限
+const MAX_HISTORY_CHARS = 1000; // 履歴の合計の上限
 const PENDING_MS = 5 * 60_000;
 export const PREVIOUS = "__PREVIOUS__";
 
@@ -210,15 +213,24 @@ export async function disableAi(userId: string): Promise<void> {
 // UserLocal（senninai API）に問い合わせる。messages は直近の会話（履歴は5件まで）
 export async function askAi(messages: { role: "user" | "assistant"; content: string }[]): Promise<string> {
   // API仕様：履歴は直近5件まで、content は文字列、先頭は user にそろえる（AIの案内文から始まると受け付けない場合がある）
+  // 送る量も抑える（仕様書に上限の記載はないため、長い会話で 400 になるのを防ぐ）
   const recent = messages.slice(-5).filter((m) => typeof m.content === "string" && m.content.length > 0);
   const start = recent.findIndex((m) => m.role === "user");
-  const sent = start === -1 ? recent : recent.slice(start);
-  const response = await fetch(`${config.senninAi.baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ messages: sent }),
-    signal: AbortSignal.timeout(30_000)
-  });
+  const sent = (start === -1 ? recent : recent.slice(start)).map((m) => ({ ...m, content: m.content.slice(0, MAX_SENT_CHARS) }));
+  let response: Response;
+  try {
+    response = await postToAi(sent);
+  } catch (error) {
+    // 通信の一時的な失敗は、もう一度だけ試す
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    response = await postToAi(sent).catch(() => {
+      throw error;
+    });
+  }
+  if (response.status >= 500) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    response = await postToAi(sent);
+  }
   const raw = await response.text();
   let data: any = null;
   try {
@@ -233,6 +245,15 @@ export async function askAi(messages: { role: "user" | "assistant"; content: str
   const answer = (data ? pickAnswer(data) : raw).trim();
   if (!answer) throw new Error(`senninai API の回答を読めませんでした: ${raw.slice(0, 200)}`);
   return answer.length > MAX_REPLY ? `${answer.slice(0, MAX_REPLY)}…` : answer;
+}
+
+function postToAi(messages: { role: "user" | "assistant"; content: string }[]) {
+  return fetch(`${config.senninAi.baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ messages }),
+    signal: AbortSignal.timeout(30_000)
+  });
 }
 
 // 応答 JSON から本文を探す。見つからなければ空文字
@@ -630,8 +651,10 @@ async function handleChat(conversationId: string, text: string, row: MessageRow)
   if (error) throw error;
   const history = ((data ?? []) as MessageRow[])
     .reverse()
-    .map((m) => ({ role: (m.sender_id === BOT_ID ? "assistant" : "user") as "user" | "assistant", content: decryptText(m.body) ?? "" }))
+    .map((m) => ({ role: (m.sender_id === BOT_ID ? "assistant" : "user") as "user" | "assistant", content: (decryptText(m.body) ?? "").slice(0, MAX_HISTORY_ITEM_CHARS) }))
     .filter((m) => m.content);
+  // 履歴は合計の文字数も上限まで（古いものから落とす）
+  while (history.reduce((sum, m) => sum + m.content.length, 0) > MAX_HISTORY_CHARS && history.length > 1) history.shift();
   const answer = await askAi([...history, { role: "user", content: `${PERSONA}\n\n${text.slice(0, 1000)}` }]);
   return say(conversationId, answer);
 }
