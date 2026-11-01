@@ -36,11 +36,25 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
    - `supabase/schema_v9.sql`（グループのアイコン画像）
    - `supabase/schema_v10.sql`（オープンチャット・利用停止）
    - `supabase/schema_v11.sql`（フレンド申請テーブル）
+   - `supabase/schema_v12.sql`（senninai（AIチャット）。ボットのアカウントも作ります）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。
    - 仙人アカウントは `SENNIN_*`、通知は VAPID キーを設定します。
 4. `npm install` のあと、開発は `npm run dev`、本番は `npm run build` → `npm start` です。
+
+## senninai（AIチャット）
+
+設定の「AI」で「senninai（AIチャット）」をオンにすると、トーク一覧に「senninai」が出ます（既定はオフ）。回答は UserLocal の senninai API（`SENNIN_AI_URL`、既定は作者の公開エンドポイント）から取ります。
+
+- **1対1のトーク（senninai）**: 普通に話しかけるとAIが答えます。
+  - 「太郎に『明日遅れます』と送って」→ 「〇〇に送信します。よろしいですか？」と確認してから送ります（「はい」で送信）。「この内容を送って」は直前に自分が書いた文章を送ります。
+  - 「太郎とのチャットを読んで丸々について教えて」→ そのトークの直近の内容（最大約1000文字分）をもとに答えます。
+- **グループ**: `/senninai add` でsenninaiが参加し、`/senninai ask 質問` で直近の会話を添えて質問できます（参加していないと使えません）。
+- 送信や読み取りの対象は、自分のトークと友だちの中から名前で探します。候補が複数あるときは確認を求めます。
+- 注意: 話しかけた内容や読んだトークの内容は、AIの応答のために外部サービス（UserLocal）へ送られます。使う人は設定の注意書きを確認してください。
+- 注意: 確認待ちの送信は、サーバーのメモリに5分間だけ保持します（サーバーを再起動すると消えます）。複数インスタンスでは共有されません。
+- 注意: 「senninai」は予約されたユーザー名です。`schema_v12.sql` を実行する前に同じ名前の人がいる場合は、その人の名前を先に変えてください。
 
 ## オープンチャット・管理者パネル
 

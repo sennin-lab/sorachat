@@ -332,9 +332,10 @@ export function ChatView({
       });
       upsert([message], temp.clientId);
       onActivity();
-    } catch {
+    } catch (err) {
       patchMessage(temp.id, (m) => ({ ...m, status: "failed" }));
-      setError("送信できませんでした。通信状態を確認してください。");
+      // サーバーが理由を返したとき（例: senninaiのコマンドの使い方）はその文を見せる
+      setError(err instanceof Error && err.message ? err.message : "送信できませんでした。通信状態を確認してください。");
     }
   };
 

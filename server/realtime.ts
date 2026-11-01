@@ -5,6 +5,7 @@ import { z } from "zod";
 import { SESSION_COOKIE, sha256 } from "./auth.js";
 import { addSocket, removeSocket, setViewing } from "./hub.js";
 import { UUID, insertMessage, membership, replyTargetOk, toMessage } from "./messages.js";
+import { senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { sb } from "./supabase.js";
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
@@ -121,11 +122,17 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
       reply(ws, { type: "error", clientId, error: "返信先のメッセージが見つかりません。" });
       return;
     }
+    const problem = await senninaiPrecheck(conversationId, userId, body);
+    if (problem) {
+      reply(ws, { type: "error", clientId, error: problem });
+      return;
+    }
     const row = await insertMessage(conversationId, userId, { kind: "text", body }, body, {
       clientId,
       replyToId: replyToId ?? null
     });
     reply(ws, { type: "ack", clientId, message: toMessage(row, [], clientId) });
+    void senninaiAfterMessage(conversationId, userId, body, row);
   } catch {
     reply(ws, { type: "error", clientId, error: "送信できませんでした。" });
   }

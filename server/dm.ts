@@ -12,6 +12,7 @@ import {
   broadcastList,
   broadcastReactions,
   broadcastToConversation,
+  findOrCreateDm,
   insertMessage,
   membership,
   removeImageIfUnused,
@@ -20,6 +21,7 @@ import {
   toMessage,
   type MessageRow
 } from "./messages.js";
+import { aiEnabledFor, BOT_ID, senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { sb } from "./supabase.js";
 
 export const dm = Router();
@@ -87,78 +89,29 @@ dm.get("/dm/conversations", async (_req, res) => {
   const me = currentUserId(res);
   const { data, error } = await sb.rpc("sc_list_conversations", { p_user: me });
   if (error) throw error;
+  // senninai（AIチャット）は、設定でAI機能をオンにしている人の一覧にだけ出す
+  const aiOn = await aiEnabledFor(me);
   res.json(
-    (data ?? []).map((row: any) => ({
-      id: row.conversation_id,
-      isGroup: row.is_group,
-      name: row.name ?? "",
-      otherId: row.other_id,
-      otherUsername: row.other_username,
-      hasAvatar: row.has_avatar,
-      lastMessageAt: row.last_message_at,
-      lastPreview: decryptText(row.last_preview),
-      lastFromMe: row.last_sender_id === me,
-      unread: Number(row.unread),
-      myRole: row.my_role,
-      memberCount: Number(row.member_count)
-    }))
+    (data ?? [])
+      .filter((row: any) => aiOn || row.other_id !== BOT_ID)
+      .map((row: any) => ({
+        id: row.conversation_id,
+        isGroup: row.is_group,
+        name: row.name ?? "",
+        otherId: row.other_id,
+        otherUsername: row.other_username,
+        hasAvatar: row.has_avatar,
+        lastMessageAt: row.last_message_at,
+        lastPreview: decryptText(row.last_preview),
+        lastFromMe: row.last_sender_id === me,
+        unread: Number(row.unread),
+        myRole: row.my_role,
+        memberCount: Number(row.member_count)
+      }))
   );
 });
 
 const openSchema = z.object({ username: z.string().trim().toLowerCase().regex(USERNAME) });
-
-// 2人だけの「グループでない」会話を探す。なければ新しく作る。
-// グループ（is_group = true）は絶対に返さない。旧DMは is_group が null のことがあるので null は1対1扱い。
-async function findOrCreateDm(me: string, other: string): Promise<string> {
-  const { data: mine, error: mineError } = await sb.from("sc_members").select("conversation_id").eq("user_id", me);
-  if (mineError) throw mineError;
-  const myIds = (mine ?? []).map((row: { conversation_id: string }) => row.conversation_id);
-
-  if (myIds.length) {
-    const { data: shared, error: sharedError } = await sb
-      .from("sc_members")
-      .select("conversation_id")
-      .eq("user_id", other)
-      .in("conversation_id", myIds);
-    if (sharedError) throw sharedError;
-    const sharedIds = (shared ?? []).map((row: { conversation_id: string }) => row.conversation_id);
-
-    if (sharedIds.length) {
-      const { data: convs, error: convsError } = await sb
-        .from("sc_conversations")
-        .select("id, is_group")
-        .in("id", sharedIds);
-      if (convsError) throw convsError;
-      const candidates = (convs ?? []).filter((c: { is_group: boolean | null }) => c.is_group !== true).map((c: { id: string }) => c.id);
-
-      if (candidates.length) {
-        const { data: members, error: membersError } = await sb
-          .from("sc_members")
-          .select("conversation_id, user_id")
-          .in("conversation_id", candidates);
-        if (membersError) throw membersError;
-        for (const id of candidates) {
-          const people = (members ?? []).filter((m: { conversation_id: string }) => m.conversation_id === id);
-          const ids = people.map((m: { user_id: string }) => m.user_id);
-          if (ids.length === 2 && ids.includes(me) && ids.includes(other)) return id;
-        }
-      }
-    }
-  }
-
-  const { data: created, error: createError } = await sb
-    .from("sc_conversations")
-    .insert({ is_group: false })
-    .select("id")
-    .single();
-  if (createError) throw createError;
-  const { error: memberError } = await sb.from("sc_members").insert([
-    { conversation_id: created.id, user_id: me },
-    { conversation_id: created.id, user_id: other },
-  ]);
-  if (memberError) throw memberError;
-  return created.id as string;
-}
 
 dm.post("/dm/open", async (req, res) => {
   const parsed = openSchema.safeParse(req.body);
@@ -177,7 +130,11 @@ dm.post("/dm/open", async (req, res) => {
     res.status(400).json({ error: "自分とのDMは作成できません。" });
     return;
   }
-  const id = await findOrCreateDm(me, other.id);
+  if (other.id === BOT_ID && !(await aiEnabledFor(me))) {
+    res.status(400).json({ error: "senninaiを使うには、設定でAI機能をオンにしてください。" });
+    return;
+  }
+  const { id } = await findOrCreateDm(me, other.id);
   res.json({ id });
 });
 
@@ -459,10 +416,16 @@ dm.post("/dm/:id/messages", async (req, res) => {
     res.status(400).json({ error: "返信先のメッセージが見つかりません。" });
     return;
   }
+  const problem = await senninaiPrecheck(id, me, parsed.data.body);
+  if (problem) {
+    res.status(400).json({ error: problem });
+    return;
+  }
   const row = await insertMessage(id, me, { kind: "text", body: parsed.data.body }, parsed.data.body, {
     clientId: parsed.data.clientId ?? null,
     replyToId
   });
+  void senninaiAfterMessage(id, me, parsed.data.body, row);
   res.status(201).json(toMessage(row, [], parsed.data.clientId ?? null));
 });
 

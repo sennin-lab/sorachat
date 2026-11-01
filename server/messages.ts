@@ -78,6 +78,59 @@ export async function memberIds(conversationId: string): Promise<string[]> {
   return (data ?? []).map((row: any) => row.user_id as string);
 }
 
+// 2人だけの「グループでない」会話を探す。なければ新しく作る（created は新しく作ったかどうか）。
+// グループ（is_group = true）は絶対に返さない。旧DMは is_group が null のことがあるので null は1対1扱い。
+export async function findOrCreateDm(me: string, other: string): Promise<{ id: string; created: boolean }> {
+  const { data: mine, error: mineError } = await sb.from("sc_members").select("conversation_id").eq("user_id", me);
+  if (mineError) throw mineError;
+  const myIds = (mine ?? []).map((row: { conversation_id: string }) => row.conversation_id);
+
+  if (myIds.length) {
+    const { data: shared, error: sharedError } = await sb
+      .from("sc_members")
+      .select("conversation_id")
+      .eq("user_id", other)
+      .in("conversation_id", myIds);
+    if (sharedError) throw sharedError;
+    const sharedIds = (shared ?? []).map((row: { conversation_id: string }) => row.conversation_id);
+
+    if (sharedIds.length) {
+      const { data: convs, error: convsError } = await sb
+        .from("sc_conversations")
+        .select("id, is_group")
+        .in("id", sharedIds);
+      if (convsError) throw convsError;
+      const candidates = (convs ?? []).filter((c: { is_group: boolean | null }) => c.is_group !== true).map((c: { id: string }) => c.id);
+
+      if (candidates.length) {
+        const { data: members, error: membersError } = await sb
+          .from("sc_members")
+          .select("conversation_id, user_id")
+          .in("conversation_id", candidates);
+        if (membersError) throw membersError;
+        for (const id of candidates) {
+          const people = (members ?? []).filter((m: { conversation_id: string }) => m.conversation_id === id);
+          const ids = people.map((m: { user_id: string }) => m.user_id);
+          if (ids.length === 2 && ids.includes(me) && ids.includes(other)) return { id, created: false };
+        }
+      }
+    }
+  }
+
+  const { data: created, error: createError } = await sb
+    .from("sc_conversations")
+    .insert({ is_group: false })
+    .select("id")
+    .single();
+  if (createError) throw createError;
+  const { error: memberError } = await sb.from("sc_members").insert([
+    { conversation_id: created.id, user_id: me },
+    { conversation_id: created.id, user_id: other },
+  ]);
+  if (memberError) throw memberError;
+  return { id: created.id as string, created: true };
+}
+
 export function summarize(rows: { user_id: string; emoji: string }[], viewer: string): Reaction[] {
   const map = new Map<string, Reaction>();
   for (const r of rows) {

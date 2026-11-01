@@ -11,6 +11,8 @@ export type Me = {
   notifyDm: boolean;
   sennin: boolean;
   coverTheme: CoverTheme;
+  // senninai（AIチャット）を使うか。既定はオフ
+  aiEnabled: boolean;
 };
 
 export type Conversation = {

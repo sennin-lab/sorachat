@@ -24,6 +24,10 @@ export const config = {
     meUrl: process.env.SENNIN_ME_URL || "",
     scope: process.env.SENNIN_SCOPE || "profile email"
   },
+  // senninai（AIチャット）の回答元（UserLocal の senninai API）。既定は作者の公開エンドポイント
+  senninAi: {
+    baseUrl: (process.env.SENNIN_AI_URL || "https://senninai.hiroki2013403.workers.dev").replace(/\/+$/, "")
+  },
   // 管理者パネル（/admin/login）のパスワード。未設定なら管理者ログインは使えません
   adminPassword: process.env.ADMIN_PASSWORD || "",
   vapid: {

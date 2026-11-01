@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { BANNED_MESSAGE, cookieBase, currentUserId, endSession, isBanned, randomToken, requireAuth, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
 import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
+import { enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
 
 export const accounts = Router();
@@ -54,13 +55,14 @@ const patchSchema = z.object({
   contact: z.string().max(120).optional(),
   profileUrl: z.string().max(200).refine((value) => !value || /^https?:\/\//i.test(value), "URLはhttps:// または http:// から入力してください。").optional(),
   notifyDm: z.boolean().optional(),
-  coverTheme: z.enum(COVER_THEMES).optional()
+  coverTheme: z.enum(COVER_THEMES).optional(),
+  aiEnabled: z.boolean().optional()
 });
 
 async function loadMe(userId: string) {
   const { data, error } = await sb
     .from("sc_users")
-    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme")
+    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme, ai_enabled")
     .eq("id", userId)
     .maybeSingle();
   if (error) throw error;
@@ -75,7 +77,8 @@ async function loadMe(userId: string) {
     hasAvatar: Boolean(data.avatar_path),
     notifyDm: data.notify_dm as boolean,
     sennin: Boolean(data.sennin_id),
-    coverTheme: (data.cover_theme ?? "green") as string
+    coverTheme: (data.cover_theme ?? "green") as string,
+    aiEnabled: Boolean(data.ai_enabled)
   };
 }
 
@@ -249,6 +252,7 @@ accounts.post("/me", requireAuth, async (req, res) => {
   if (body.profileUrl !== undefined) update.profile_url = body.profileUrl;
   if (body.notifyDm !== undefined) update.notify_dm = body.notifyDm;
   if (body.coverTheme !== undefined) update.cover_theme = body.coverTheme;
+  if (body.aiEnabled !== undefined) update.ai_enabled = body.aiEnabled;
   const userId = currentUserId(res);
   const { error } = await sb.from("sc_users").update(update).eq("id", userId);
   if (error) {
@@ -258,6 +262,8 @@ accounts.post("/me", requireAuth, async (req, res) => {
     }
     throw error;
   }
+  // AI機能をオンにしたら、senninaiとのトークを用意する（一覧に出すため）
+  if (body.aiEnabled === true) await enableAi(userId);
   res.json(await loadMe(userId));
 });
 

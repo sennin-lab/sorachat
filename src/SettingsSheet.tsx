@@ -21,9 +21,25 @@ export function SettingsSheet({
   onLogout: () => void;
 }) {
   const [notify, setNotify] = useState(me.notifyDm);
+  const [ai, setAi] = useState(me.aiEnabled);
   const [status, setStatus] = useState("");
   const [testMessage, setTestMessage] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // senninai（AIチャット）のオン・オフ。オンにするとトーク一覧に「senninai」が出る
+  const toggleAi = async (on: boolean) => {
+    setBusy(true);
+    setStatus("");
+    setAi(on);
+    try {
+      onChange(await api<Me>("/api/me", patch({ aiEnabled: on })));
+    } catch (err) {
+      setAi(!on);
+      setStatus(err instanceof ApiError ? err.message : "AI機能の設定を変更できませんでした。");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const toggleNotify = async (on: boolean) => {
     setBusy(true);
@@ -85,6 +101,31 @@ export function SettingsSheet({
           />
         </label>
       </div>
+
+      <div className="section-label flush">
+        <span>AI</span>
+      </div>
+      <div className="page-card">
+        <label className="page-row">
+          <span className="row-label">
+            <span className="option-icon">
+              <Icon name="chat" size={18} />
+            </span>
+            senninai（AIチャット）
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={ai}
+            disabled={busy}
+            onChange={(e) => void toggleAi(e.target.checked)}
+          />
+        </label>
+      </div>
+      <p className="notice center small">
+        オンにすると、トーク一覧に「senninai」が出ます。グループでは「/senninai add」で参加、「/senninai ask 質問」で質問できます。
+        話しかけた内容は、AIの応答のために外部サービス（UserLocal）へ送られます。
+      </p>
 
       <div className="section-label flush">
         <span>通知</span>

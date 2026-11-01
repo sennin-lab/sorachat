@@ -10,6 +10,7 @@
     "build": "vite build",
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
+    "test:senninai": "tsx test/senninai-parse.test.ts && tsx test/senninai-flow.test.ts",
     "encrypt:backfill": "tsx server/scripts/encrypt-existing.ts"
   },
   "dependencies": {

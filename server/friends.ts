@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { UUID } from "./messages.js";
+import { BOT_ID } from "./senninai.js";
 import { sb } from "./supabase.js";
 
 export const friends = Router();
@@ -142,6 +143,10 @@ friends.post("/friends", async (req, res) => {
   }
   if (other.id === me) {
     res.status(400).json({ error: "自分を友だちに追加することはできません。" });
+    return;
+  }
+  if (other.id === BOT_ID) {
+    res.status(400).json({ error: "senninaiは友だちにできません。設定でAI機能をオンにすると、トーク一覧から使えます。" });
     return;
   }
 
