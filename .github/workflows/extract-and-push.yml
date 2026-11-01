@@ -93,11 +93,9 @@ jobs:
             rm -rf "$temp_dir"
           done
 
-      - name: uploadフォルダを再作成してプレースホルダーを配置
+      - name: 展開元のuploadフォルダを削除
         run: |
           rm -rf upload/
-          mkdir -p upload/
-          touch upload/.gitkeep
 
       - name: 変更をコミット
         shell: bash
@@ -105,14 +103,13 @@ jobs:
           set -euo pipefail
 
           git add -A
-          git reset .github/workflows/ || true
 
           if git diff --cached --quiet; then
             echo "変更はありません。"
             exit 0
           fi
 
-          git commit -m "chore: auto-extract and recreate empty upload folder [skip ci]"
+          git commit -m "chore: auto-extract and push from upload folder [skip ci]"
 
       - name: 最新のリモート変更を取り込んでプッシュ
         shell: bash
