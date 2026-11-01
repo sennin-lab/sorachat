@@ -69,8 +69,8 @@ jobs:
               for item in "${root_entries[@]}"; do
                 name="$(basename "$item")"
 
-                # Git管理情報を上書きしない。
-                if [ "$name" = ".git" ]; then
+                # Git管理情報やGitHubワークフロー関連ファイルを上書きしない。
+                if [ "$name" = ".git" ] || [ "$name" = ".github" ]; then
                   continue
                 fi
 
@@ -81,7 +81,8 @@ jobs:
               for item in "${entries[@]}"; do
                 name="$(basename "$item")"
 
-                if [ "$name" = ".git" ]; then
+                # Git管理情報やGitHubワークフロー関連ファイルを上書きしない。
+                if [ "$name" = ".git" ] || [ "$name" = ".github" ]; then
                   continue
                 fi
 
