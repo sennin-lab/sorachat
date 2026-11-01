@@ -18,9 +18,12 @@ export const BUILTIN_STAMPS: Stamp[] = Object.entries(files)
 
 const urlByRef = new Map(BUILTIN_STAMPS.map((s) => [s.ref, s.url]));
 
+// 以前の名前（「#U3042#U308a…」のように文字コードで書かれた名前）で送られたスタンプを、今の名前に読み替える
+const decodeLegacyRef = (ref: string) => ref.replace(/#U([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+
 // スタンプの指定（ref）から表示する画像のURLを求める
 export const stampUrlOf = (ref: string): string | null => {
-  if (ref.startsWith("builtin:")) return urlByRef.get(ref) ?? null;
+  if (ref.startsWith("builtin:")) return urlByRef.get(ref) ?? urlByRef.get(decodeLegacyRef(ref)) ?? null;
   if (ref.startsWith("user:")) return `/api/stamps/${ref.slice(5)}/image`;
   return null;
 };
