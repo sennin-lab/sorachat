@@ -1,6 +1,5 @@
 import {
   Fragment,
-  type CSSProperties,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -25,6 +24,8 @@ import { MessageMenu } from "./MessageMenu";
 import { isSocketOpen, onChatEvent, sendChat } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { AttachSheet } from "./AttachSheet";
+import { StampSheet } from "./StampSheet";
+import { stampUrlOf } from "./stamps";
 import { ContactSheet } from "./ContactSheet";
 import type { Conversation, FriendshipState, Message } from "./types";
 
@@ -49,6 +50,7 @@ const messagePreview = (m: Message) => {
   if (m.kind === "image") return "写真";
   if (m.kind === "file") return m.fileName ?? "ファイル";
   if (m.kind === "contact") return `連絡先 ${m.contact?.displayName ?? ""}`.trim();
+  if (m.kind === "stamp") return "スタンプ";
   return clipLongWords(m.body ?? "");
 };
 
@@ -163,7 +165,7 @@ export function ChatView({
   // 新しく届いた・送った吹き出しだけ、出現アニメーションを付ける
   const enterIds = useRef(new Set<string>());
   // ハートを送ったときに浮かぶハートの一覧
-  const [hearts, setHearts] = useState<number[]>([]);
+  const [stampOpen, setStampOpen] = useState(false);
   const [editing, setEditing] = useState<Message | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [viewing, setViewing] = useState<Message | null>(null);
@@ -385,12 +387,20 @@ export function ChatView({
     enqueue(body);
   };
 
-  const sendHeart = () => {
+  // スタンプを送る（画像とは別の種類。返信にも使える）
+  const sendStamp = async (stampRef: string) => {
+    setStampOpen(false);
     if (editing) return;
-    enqueue("❤️");
-    const id = Date.now() + Math.random();
-    setHearts((list) => [...list, id]);
-    window.setTimeout(() => setHearts((list) => list.filter((x) => x !== id)), 1200);
+    const replyId = replyTo?.id ?? null;
+    setReplyTo(null);
+    setError("");
+    try {
+      const message = await api<Message>(`/api/dm/${conversationId}/stamp`, post({ stampRef, replyToId: replyId }));
+      upsert([message]);
+      onActivity();
+    } catch (err) {
+      setError(errorText(err));
+    }
   };
 
   const enqueue = (body: string) => {
@@ -688,6 +698,7 @@ export function ChatView({
           const mine = m.senderId === meId;
           const replyTarget = m.replyToId ? byId.get(m.replyToId) : undefined;
           const showImage = m.kind === "image" && !m.deleted && m.imageUrl;
+          const showStamp = m.kind === "stamp" && !m.deleted && Boolean(m.stampRef);
           const hasStatus = Boolean(m.status) || (m.edited && !m.deleted);
           const sender = people.get(m.senderId);
           const avatarName = isGroup ? sender?.name ?? "" : conversation?.name ?? "";
@@ -749,7 +760,7 @@ export function ChatView({
                   <div className="bubble-line">
                     {mine && meta}
                     <div
-                      className={`bubble ${showImage ? "image" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
+                      className={`bubble ${showImage ? "image" : ""} ${showStamp ? "stamp" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
                       onContextMenu={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -760,6 +771,8 @@ export function ChatView({
                         <p className="unsent">送信を取り消しました</p>
                       ) : showImage ? (
                         <img src={m.imageUrl!} alt="送信された画像" loading="lazy" draggable={false} />
+                      ) : m.kind === "stamp" && m.stampRef ? (
+                        <img className="stamp-img" src={stampUrlOf(m.stampRef) ?? undefined} alt="スタンプ" />
                       ) : m.kind === "file" && m.fileUrl ? (
                         <a
                           className="file-card"
@@ -858,13 +871,6 @@ export function ChatView({
       )}
 
       <form className="composer" ref={formRef} onSubmit={onSubmit}>
-        <span className="float-hearts" aria-hidden="true">
-          {hearts.map((id, i) => (
-            <span key={id} className="float-heart" style={{ "--dx": `${(i % 3) * 14 - 14}px` } as CSSProperties}>
-              ❤️
-            </span>
-          ))}
-        </span>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={pickImage} />
         <input ref={anyFileRef} type="file" hidden onChange={pickAnyFile} />
         <button
@@ -897,8 +903,8 @@ export function ChatView({
             <i className={editing ? "fa-solid fa-check" : "fa-solid fa-paper-plane"} aria-hidden="true" />
           </button>
         ) : (
-          <button type="button" className="composer-icon heart" onClick={sendHeart} aria-label="❤️を送る">
-            <Icon name="heart" size={26} />
+          <button type="button" className="composer-icon stamp" onClick={() => setStampOpen(true)} aria-label="スタンプを送る">
+            <i className="fa-regular fa-face-smile" aria-hidden="true" />
           </button>
         )}
       </form>
@@ -952,6 +958,7 @@ export function ChatView({
           }}
         />
       )}
+      {stampOpen && <StampSheet onPick={(ref) => void sendStamp(ref)} onClose={() => setStampOpen(false)} />}
       {attachOpen && (
         <AttachSheet
           onClose={() => setAttachOpen(false)}

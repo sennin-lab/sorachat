@@ -39,13 +39,15 @@ export type Message = {
   conversationId: string;
   senderId: string;
   // system はグループのお知らせ（参加・退出・削除・名前の変更）
-  kind: "text" | "image" | "file" | "contact" | "system";
+  kind: "text" | "image" | "file" | "contact" | "system" | "stamp";
   body: string | null;
   imageUrl: string | null;
   fileName?: string | null;
   fileSize?: number | null;
   fileUrl?: string | null;
   contact?: { id: string; username: string; displayName: string; hasAvatar: boolean } | null;
+  // スタンプの指定（builtin:ファイル名 または user:ID）
+  stampRef?: string | null;
   createdAt: string;
   edited: boolean;
   deleted: boolean;

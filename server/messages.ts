@@ -6,7 +6,7 @@ import { sb } from "./supabase.js";
 
 export const UUID = /^[0-9a-f-]{36}$/i;
 export const COLUMNS =
-  "id, conversation_id, sender_id, kind, body, created_at, edited_at, deleted_at, forwarded, file_name, file_size, contact_user_id, reply_to_id";
+  "id, conversation_id, sender_id, kind, body, created_at, edited_at, deleted_at, forwarded, file_name, file_size, contact_user_id, reply_to_id, stamp_ref";
 
 export type Role = "owner" | "member";
 export type Reaction = { emoji: string; count: number; mine: boolean };
@@ -14,7 +14,7 @@ export type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  kind: "text" | "image" | "file" | "contact" | "system";
+  kind: "text" | "image" | "file" | "contact" | "system" | "stamp";
   body: string | null;
   created_at: string;
   edited_at: string | null;
@@ -24,6 +24,7 @@ export type MessageRow = {
   file_size: number | null;
   contact_user_id: string | null;
   reply_to_id: string | null;
+  stamp_ref: string | null;
 };
 export type ContactInfo = { id: string; username: string; displayName: string; hasAvatar: boolean };
 export type Content =
@@ -31,7 +32,8 @@ export type Content =
   | { kind: "text"; body: string }
   | { kind: "image"; imagePath: string }
   | { kind: "file"; filePath: string; fileName: string; fileSize: number }
-  | { kind: "contact"; contactUserId: string };
+  | { kind: "contact"; contactUserId: string }
+  | { kind: "stamp"; stampRef: string };
 
 export function toMessage(
   row: MessageRow,
@@ -51,6 +53,7 @@ export function toMessage(
     fileSize: row.kind === "file" && !deleted ? row.file_size : null,
     fileUrl: row.kind === "file" && !deleted ? `/api/dm/messages/${row.id}/file` : null,
     contact: row.kind === "contact" && !deleted ? contact : null,
+    stampRef: row.kind === "stamp" && !deleted ? row.stamp_ref : null,
     createdAt: row.created_at,
     edited: row.edited_at !== null,
     deleted,
@@ -329,6 +332,7 @@ export async function insertMessage(
     file_name: null,
     file_size: null,
     contact_user_id: null,
+    stamp_ref: null,
     reply_to_id: options.replyToId ?? null
   };
   const fields =
@@ -340,7 +344,9 @@ export async function insertMessage(
           ? { ...none, kind: "file", body: null, file_path: content.filePath, file_name: content.fileName, file_size: content.fileSize }
           : content.kind === "contact"
             ? { ...none, kind: "contact", body: null, contact_user_id: content.contactUserId }
-            : { ...none, kind: "system", body: encryptText(content.body) };
+            : content.kind === "stamp"
+              ? { ...none, kind: "stamp", body: null, stamp_ref: content.stampRef }
+              : { ...none, kind: "system", body: encryptText(content.body) };
 
   const { data, error } = await sb
     .from("sc_messages")

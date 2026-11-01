@@ -1,3 +1,4 @@
+import { stamps } from "./stamps.js";
 import express from "express";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
@@ -36,6 +37,7 @@ app.use("/api", friends);
 app.use("/api", push);
 app.use("/api", openChats);
 app.use("/api", senninai);
+app.use("/api", stamps);
 app.use("/api", blocks);
 app.use("/api", admin);
 app.use("/api", (_req, res) => {

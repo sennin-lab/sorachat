@@ -28,6 +28,7 @@ import {
   type MessageRow
 } from "./messages.js";
 import { aiEnabledFor, BOT_ID, senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
+import { stampRefOk } from "./stamps.js";
 import { sb } from "./supabase.js";
 
 export const dm = Router();
@@ -532,6 +533,28 @@ dm.post("/dm/:id/image", upload.single("file"), async (req, res) => {
   res.status(201).json(toMessage(row, []));
 });
 
+// スタンプ（画像とは別の種類。組み込みは builtin:ファイル名、自分のものは user:ID）
+dm.post("/dm/:id/stamp", async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  if (!(await membership(id, me))) {
+    res.status(404).json({ error: "会話が見つかりません。" });
+    return;
+  }
+  const stampRef = typeof req.body?.stampRef === "string" ? req.body.stampRef : "";
+  if (!(await stampRefOk(stampRef, me))) {
+    res.status(400).json({ error: "スタンプが見つかりません。" });
+    return;
+  }
+  const replyToId = await replyFrom(id, req.body?.replyToId);
+  if (replyToId === undefined) {
+    res.status(400).json({ error: "返信先のメッセージが見つかりません。" });
+    return;
+  }
+  const row = await insertMessage(id, me, { kind: "stamp", stampRef }, "スタンプ", { replyToId });
+  res.status(201).json(toMessage(row, []));
+});
+
 dm.post("/dm/:id/read", async (req, res) => {
   const id = String(req.params.id);
   const me = currentUserId(res);
@@ -692,6 +715,7 @@ dm.post("/dm/messages/:messageId/forward", async (req, res) => {
 function previewOf(content: Content) {
   if (content.kind === "text") return content.body;
   if (content.kind === "image") return "写真";
+  if (content.kind === "stamp") return "スタンプ";
   if (content.kind === "file") return `ファイル: ${content.fileName}`.slice(0, 80);
   return "連絡先";
 }

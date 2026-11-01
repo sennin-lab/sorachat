@@ -250,7 +250,12 @@ export async function askAi(messages: { role: "user" | "assistant"; content: str
 function postToAi(messages: { role: "user" | "assistant"; content: string }[]) {
   return fetch(`${config.senninAi.baseUrl}/api/chat`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    // User-Agent がないリクエストは Cloudflare に弾かれることがあるので、ブラウザ相当の見た目にする
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": "Mozilla/5.0 (compatible; SoraChat/1.0)"
+    },
     body: JSON.stringify({ messages }),
     signal: AbortSignal.timeout(30_000)
   });
@@ -403,12 +408,15 @@ function matchTargets(targets: Target[], name: string): Target[] {
 
 // ---------- 確認待ちの送信（DBに保存する。モーダルと「はい」「いいえ」の両方で使う） ----------
 
+type Recipient = { label: string; targetConversationId: string | null; friendId: string | null };
 type PendingPayload = {
   summary: string;
   label: string;
   targetConversationId: string | null;
   friendId: string | null;
   body: string;
+  // 複数の相手（「全員に…」）のとき。なければ上の単独の相手を使う（古い確認待ちとの互換）
+  recipients?: Recipient[];
 };
 
 async function savePending(userId: string, botDm: string, payload: PendingPayload) {
@@ -493,9 +501,18 @@ export async function senninaiAfterMessage(conversationId: string, userId: strin
     }
     if (conv.botMember) await handleDm(conversationId, userId, body, row);
   } catch (error) {
-    console.error("senninai:", error);
-    await say(conversationId, "AIが応答できませんでした。時間をおいてもう一度お試しください。", row.id).catch(() => undefined);
+    console.error("senninai:", error, (error as any)?.cause ?? "");
+    // 原因の手がかり（HTTPステータスや通信エラーのコード）を添える。原因の特定が済んだら外してよい
+    const reason = failureReason(error);
+    await say(conversationId, `AIが応答できませんでした。時間をおいてもう一度お試しください。${reason ? `\n（原因: ${reason}）` : ""}`, row.id).catch(() => undefined);
   }
+}
+
+function failureReason(error: unknown): string {
+  const e: any = error;
+  const code = e?.cause?.code ?? e?.code ?? (e?.name !== "Error" ? e?.name : "");
+  const message = String(e?.message ?? "").replace(/\s+/g, " ").slice(0, 160);
+  return [code, message].filter(Boolean).join(" / ");
 }
 
 // グループでの質問。要約系の質問は広めに、人について聞かれたらその人の発言も添える
@@ -550,6 +567,8 @@ async function handleDm(conversationId: string, userId: string, body: string, ro
   return handleChat(conversationId, text, row);
 }
 
+const ALL_TARGETS = ["全員", "みんな", "みなさん", "皆さん"];
+
 async function handleSendRequest(conversationId: string, userId: string, intent: { target: string; body: string }, row: MessageRow) {
   let body = intent.body;
   if (body === PREVIOUS) {
@@ -559,45 +578,86 @@ async function handleSendRequest(conversationId: string, userId: string, intent:
   if (!body) return say(conversationId, "何を送るか書いてください。例: 太郎に『明日遅れます』と送って");
   if (body.length > 1000) return say(conversationId, "メッセージは1000文字以内にしてください。");
 
-  const matches = matchTargets(await listTargets(userId), intent.target);
-  if (matches.length === 0) {
-    return say(conversationId, `「${intent.target}」というトーク相手・グループは見つかりませんでした。名前を確かめてもう一度お願いします。`);
+  const targets = await listTargets(userId);
+  let recipients: Recipient[];
+  let label: string;
+  if (ALL_TARGETS.includes(normalizeName(intent.target))) {
+    // 「全員に…」：トークのある相手・グループ全員に送る（確認の画面で名前を全部出す）
+    const all = targets.filter((t) => t.conversationId || t.friendId);
+    if (!all.length) return say(conversationId, "送る相手がまだいません。");
+    recipients = all.map((t) => ({ label: t.label, targetConversationId: t.conversationId, friendId: t.friendId }));
+    label = `全員（${all.length}人）`;
+  } else {
+    const matches = matchTargets(targets, intent.target);
+    if (matches.length === 0) {
+      return say(conversationId, `「${intent.target}」というトーク相手・グループは見つかりませんでした。名前を確かめてもう一度お願いします。`);
+    }
+    if (matches.length > 1) {
+      const names = matches.map((t) => t.label).join("、");
+      return say(conversationId, `候補が複数あります（${names}）。もう一度、正しい名前で指定してください。「全員に…」で全員に送ることもできます。`);
+    }
+    const target = matches[0];
+    recipients = [{ label: target.label, targetConversationId: target.conversationId, friendId: target.friendId }];
+    label = target.label;
   }
-  if (matches.length > 1) {
-    const names = matches.map((t) => t.label).join("、");
-    return say(conversationId, `候補が複数あります（${names}）。もう一度、正しい名前で指定してください。`);
-  }
-  const target = matches[0];
-  const summary = `「${body}」を${target.label}に送信します。よろしいですか？`;
+  const summary = recipients.length > 1
+    ? `「${body}」を次の${recipients.length}人に送信します（${recipients.map((r) => r.label).join("、")}）。よろしいですか？`
+    : `「${body}」を${label}に送信します。よろしいですか？`;
+  const first = recipients[0];
   await savePending(userId, conversationId, {
     summary,
-    label: target.label,
-    targetConversationId: target.conversationId,
-    friendId: target.friendId,
-    body
+    label,
+    targetConversationId: first.targetConversationId,
+    friendId: first.friendId,
+    body,
+    recipients
   });
   return say(conversationId, `${summary}（はい／いいえ）`);
 }
 
-async function runSend(botDm: string, userId: string, pending: PendingPayload) {
-  const { label, body } = pending;
-  let targetConversation = pending.targetConversationId;
-  if (!targetConversation && pending.friendId) {
+const SEND_REASON: Record<string, string> = {
+  "not-friend": "友だちではなくなっています",
+  "no-talk": "トークが見つかりません",
+  blocked: "ブロックされているため送れません"
+};
+
+// 1人に送る。送れなかった理由を返す（送れたら "sent"）
+async function sendTo(userId: string, body: string, recipient: Recipient): Promise<"sent" | keyof typeof SEND_REASON> {
+  let conversation = recipient.targetConversationId;
+  if (!conversation && recipient.friendId) {
     // 友だちなら、まだなかったDMを作ってから送る（友だちでなくなっていたら送らない）
-    const { data: friend } = await sb.from("sc_friends").select("friend_id").eq("user_id", userId).eq("friend_id", pending.friendId).maybeSingle();
-    if (!friend) return say(botDm, `${label}さんとは友だちではなくなっているため、送信しませんでした。`);
-    targetConversation = (await findOrCreateDm(userId, pending.friendId)).id;
+    const { data: friend } = await sb.from("sc_friends").select("friend_id").eq("user_id", userId).eq("friend_id", recipient.friendId).maybeSingle();
+    if (!friend) return "not-friend";
+    conversation = (await findOrCreateDm(userId, recipient.friendId)).id;
   }
-  if (!targetConversation || !(await membership(targetConversation, userId))) {
-    return say(botDm, `${label}へのトークが見つからないため、送信しませんでした。`);
-  }
+  if (!conversation || !(await membership(conversation, userId))) return "no-talk";
   try {
-    await insertMessage(targetConversation, userId, { kind: "text", body }, body);
+    await insertMessage(conversation, userId, { kind: "text", body }, body);
   } catch (error) {
-    if (error instanceof BlockedError) return say(botDm, `${label}さんとはトークできないため、送信しませんでした。`);
+    if (error instanceof BlockedError) return "blocked";
     throw error;
   }
-  return say(botDm, `${label}に送信しました。`);
+  return "sent";
+}
+
+async function runSend(botDm: string, userId: string, pending: PendingPayload) {
+  const recipients: Recipient[] = pending.recipients ?? [
+    { label: pending.label, targetConversationId: pending.targetConversationId, friendId: pending.friendId }
+  ];
+  const sent: string[] = [];
+  const failed: string[] = [];
+  for (const recipient of recipients) {
+    const result = await sendTo(userId, pending.body, recipient);
+    if (result === "sent") sent.push(recipient.label);
+    else failed.push(`${recipient.label}（${SEND_REASON[result]}）`);
+  }
+  if (recipients.length === 1) {
+    if (sent.length) return say(botDm, `${pending.label}に送信しました。`);
+    return say(botDm, `${pending.label}さんには送信しませんでした（${failed[0].replace(/^.*（|）$/g, "")}）。`);
+  }
+  const lines = [`${sent.length}人に送信しました（${sent.join("、") || "なし"}）。`];
+  if (failed.length) lines.push(`送れなかった相手: ${failed.join("、")}`);
+  return say(botDm, lines.join("\n"));
 }
 
 async function resolveOne(userId: string, conversationId: string, name: string): Promise<Target | null> {
