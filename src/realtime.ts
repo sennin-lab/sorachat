@@ -1,6 +1,6 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { api, post } from "./api";
-import type { Message, Reaction } from "./types";
+import type { GameView, Message, PollView, Reaction } from "./types";
 
 type TokenInfo = { token: string; url: string; anonKey: string; expiresAt: number };
 
@@ -66,6 +66,8 @@ export type ChatEvent =
   | { type: "message_updated"; conversationId: string; id: string; body: string; editedAt: string }
   | { type: "message_deleted"; conversationId: string; id: string }
   | { type: "reactions"; conversationId: string; messageId: string; reactions: Reaction[] }
+  | { type: "poll"; conversationId: string; messageId: string; poll: PollView }
+  | { type: "game"; conversationId: string; messageId: string; game: GameView }
   | { type: "read"; conversationId: string; userId: string; readAt: string };
 
 const chatListeners = new Set<(event: ChatEvent) => void>();

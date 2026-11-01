@@ -322,11 +322,16 @@ accounts.get("/users/by-username", requireAuth, async (req, res) => {
     res.status(404).json({ error: "そのユーザーは見つかりません。" });
     return;
   }
+  // QRで読んだ相手が自分か、すでに友だちかを返す（画面の表示を正しく切り替えるため）
+  const me = currentUserId(res);
+  const friendIds = await friendIdsOf(me);
   res.json({
     id: data.id,
     username: data.username,
     displayName: data.display_name,
-    hasAvatar: Boolean(data.avatar_path)
+    hasAvatar: Boolean(data.avatar_path),
+    isSelf: data.id === me,
+    isFriend: friendIds.has(data.id)
   });
 });
 

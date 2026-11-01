@@ -17,6 +17,9 @@ import {
   displayNameOf,
   findOrCreateDm,
   leaveConversation,
+  memberIds,
+  pollDataOf,
+  pollView,
   postNotice,
   purgeConversation,
   insertMessage,
@@ -25,10 +28,14 @@ import {
   replyTargetOk,
   summarize,
   toMessage,
-  type MessageRow
+  type MessageRow,
+  type PollData,
+  type PollVote
 } from "./messages.js";
 import { aiEnabledFor, BOT_ID, senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { stampRefOk } from "./stamps.js";
+import { createGame, gameAction, gameViewsFor } from "./games.js";
+import { GAME_KINDS, GameError } from "./gameLogic.js";
 import { sb } from "./supabase.js";
 
 export const dm = Router();
@@ -82,14 +89,48 @@ async function withReactions(rows: MessageRow[], viewer: string) {
     list.push(r);
     grouped.set(r.message_id, list);
   }
+  const polls = await pollViewsFor(rows, viewer);
+  const games = await gameViewsFor(rows, viewer);
   return rows.map((row) =>
     toMessage(
       row,
       summarize(grouped.get(row.id) ?? [], viewer),
       null,
-      row.contact_user_id ? contacts.get(row.contact_user_id) ?? null : null
+      row.contact_user_id ? contacts.get(row.contact_user_id) ?? null : null,
+      polls.get(row.id) ?? null,
+      games.get(row.id) ?? null
     )
   );
+}
+
+// 投票のメッセージについて、票の集計（自分の選択つき）をまとめて作る
+async function pollViewsFor(rows: MessageRow[], viewer: string) {
+  const views = new Map<string, ReturnType<typeof pollView>>();
+  const polls = rows.map((row) => ({ row, data: pollDataOf(row) })).filter((p): p is { row: MessageRow; data: PollData } => p.data !== null);
+  if (!polls.length) return views;
+  const { data, error } = await sb.from("sc_poll_votes").select("message_id, user_id, option_index").in("message_id", polls.map((p) => p.row.id));
+  if (error) throw error;
+  const votes = new Map<string, PollVote[]>();
+  for (const v of (data ?? []) as { message_id: string; user_id: string; option_index: number }[]) {
+    const list = votes.get(v.message_id) ?? [];
+    list.push({ user_id: v.user_id, option_index: v.option_index });
+    votes.set(v.message_id, list);
+  }
+  for (const p of polls) views.set(p.row.id, pollView(p.data, votes.get(p.row.id) ?? [], viewer));
+  return views;
+}
+
+// 投票の票が変わったことを、会話の全員へ知らせる（自分の選択は人ごとに違うので、人ごとに作る）
+async function broadcastPoll(conversationId: string, messageId: string) {
+  const row = await messageRow(messageId);
+  const data = row ? pollDataOf(row) : null;
+  if (!row || !data) return;
+  const { data: rows, error } = await sb.from("sc_poll_votes").select("user_id, option_index").eq("message_id", messageId);
+  if (error) throw error;
+  const votes = (rows ?? []) as PollVote[];
+  for (const uid of await memberIds(conversationId)) {
+    sendToUser(uid, { type: "poll", conversationId, messageId, poll: pollView(data, votes, uid) });
+  }
 }
 
 dm.get("/dm/conversations", async (_req, res) => {
@@ -673,6 +714,130 @@ dm.delete("/dm/messages/:messageId", async (req, res) => {
   res.json({ ok: true });
 });
 
+const pollSchema = z.object({
+  question: z.string().trim().min(1).max(100),
+  options: z.array(z.string().trim().min(1).max(60)).min(2).max(10),
+  multiple: z.boolean().optional(),
+  replyToId: z.string().regex(UUID).nullish()
+});
+
+// 投票を作る（「＋」→「投票」から送る）
+dm.post("/dm/:id/poll", async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  if (!(await membership(id, me))) {
+    res.status(404).json({ error: "会話が見つかりません。" });
+    return;
+  }
+  const parsed = pollSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "質問（100文字まで）と選択肢（2〜10個、各60文字まで）を入力してください。" });
+    return;
+  }
+  if (new Set(parsed.data.options).size !== parsed.data.options.length) {
+    res.status(400).json({ error: "同じ選択肢があります。" });
+    return;
+  }
+  const replyToId = await replyFrom(id, parsed.data.replyToId);
+  if (replyToId === undefined) {
+    res.status(400).json({ error: "返信先のメッセージが見つかりません。" });
+    return;
+  }
+  const content: Content = { kind: "poll", question: parsed.data.question, options: parsed.data.options, multiple: Boolean(parsed.data.multiple) };
+  const row = await insertMessage(id, me, content, `投票: ${content.question}`.slice(0, 80), { replyToId });
+  res.status(201).json((await withReactions([row], me))[0]);
+});
+
+const voteSchema = z.object({ optionIndex: z.number().int().min(0).max(9) });
+
+const gameCreateSchema = z.object({ kind: z.enum(GAME_KINDS) });
+
+// ミニゲームを作る（グループのトークだけ。1対1では使えない）
+dm.post("/dm/:id/game", async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  if (!(await membership(id, me))) {
+    res.status(404).json({ error: "会話が見つかりません。" });
+    return;
+  }
+  const { data: conv, error } = await sb.from("sc_conversations").select("is_group").eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (conv?.is_group !== true) {
+    res.status(400).json({ error: "ミニゲームはグループのトークで遊べます。" });
+    return;
+  }
+  const parsed = gameCreateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "ゲームを選んでください。" });
+    return;
+  }
+  const row = await createGame(id, me, parsed.data.kind);
+  res.status(201).json((await withReactions([row], me))[0]);
+});
+
+const gameActionSchema = z.object({
+  action: z.enum(["join", "start", "cancel", "move", "buzz", "answer", "next", "hand", "guess"]),
+  index: z.number().int().optional(),
+  choice: z.number().int().optional(),
+  hand: z.enum(["rock", "scissors", "paper"]).optional(),
+  value: z.number().int().optional()
+});
+
+// ミニゲームの操作（参加・開始・中止・プレイ）。結果は会話の全員へ届く
+dm.post("/dm/messages/:messageId/game", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const me = currentUserId(res);
+  const parsed = gameActionSchema.safeParse(req.body);
+  if (!UUID.test(messageId) || !parsed.success) {
+    res.status(400).json({ error: "その操作はできません。" });
+    return;
+  }
+  try {
+    await gameAction(messageId, me, parsed.data);
+  } catch (err) {
+    if (err instanceof GameError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+  res.json({ ok: true });
+});
+
+// 選択肢を選ぶ／選び直す。同じ選択肢をもう一度押すと取り消す。単一選択では前の選択を外す
+dm.post("/dm/messages/:messageId/vote", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const me = currentUserId(res);
+  const parsed = voteSchema.safeParse(req.body);
+  const msg = UUID.test(messageId) ? await messageRow(messageId) : null;
+  const poll = msg ? pollDataOf(msg) : null;
+  if (!msg || !poll || !(await membership(msg.conversation_id, me))) {
+    res.status(404).json({ error: "投票が見つかりません。" });
+    return;
+  }
+  if (!parsed.success || parsed.data.optionIndex >= poll.options.length) {
+    res.status(400).json({ error: "選択肢が見つかりません。" });
+    return;
+  }
+  const index = parsed.data.optionIndex;
+  const { data: mine, error } = await sb.from("sc_poll_votes").select("option_index").eq("message_id", messageId).eq("user_id", me);
+  if (error) throw error;
+  const chosen = (mine ?? []).some((v: { option_index: number }) => v.option_index === index);
+  if (chosen) {
+    const { error: deleteError } = await sb.from("sc_poll_votes").delete().match({ message_id: messageId, user_id: me, option_index: index });
+    if (deleteError) throw deleteError;
+  } else {
+    if (!poll.multiple && (mine ?? []).length) {
+      const { error: clearError } = await sb.from("sc_poll_votes").delete().match({ message_id: messageId, user_id: me });
+      if (clearError) throw clearError;
+    }
+    const { error: insertError } = await sb.from("sc_poll_votes").insert({ message_id: messageId, user_id: me, option_index: index });
+    if (insertError) throw insertError;
+  }
+  await broadcastPoll(msg.conversation_id, messageId);
+  res.json({ ok: true });
+});
+
 const forwardSchema = z.object({ conversationId: z.string().regex(UUID) });
 
 dm.post("/dm/messages/:messageId/forward", async (req, res) => {
@@ -688,6 +853,10 @@ dm.post("/dm/messages/:messageId/forward", async (req, res) => {
     res.status(404).json({ error: "メッセージが見つかりません。" });
     return;
   }
+  if (source.kind === "poll" || source.kind === "game") {
+    res.status(400).json({ error: "投票・ミニゲームは送信できません。" });
+    return;
+  }
   const target = parsed.data.conversationId;
   if (!(await membership(target, me))) {
     res.status(404).json({ error: "送信先が見つかりません。" });
@@ -701,6 +870,13 @@ dm.post("/dm/messages/:messageId/forward", async (req, res) => {
     content = { kind: "file", filePath: source.file_path, fileName: source.file_name ?? "file", fileSize: Number(source.file_size ?? 0) };
   } else if (source.kind === "contact" && source.contact_user_id) {
     content = { kind: "contact", contactUserId: source.contact_user_id };
+  } else if (source.kind === "stamp" && source.stamp_ref) {
+    // スタンプは本文を持たないので、スタンプの参照をそのまま転送する
+    if (!(await stampRefOk(source.stamp_ref, me))) {
+      res.status(400).json({ error: "このスタンプは送信できません。" });
+      return;
+    }
+    content = { kind: "stamp", stampRef: source.stamp_ref };
   }
   if (content.kind === "text" && !content.body) {
     res.status(400).json({ error: "このメッセージは送信できません。" });

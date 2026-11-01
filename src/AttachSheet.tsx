@@ -6,11 +6,16 @@ export function AttachSheet({
   onImage,
   onFile,
   onContact,
+  onPoll,
+  onGame,
   onClose
 }: {
   onImage: () => void;
   onFile: () => void;
   onContact: () => void;
+  onPoll: () => void;
+  // グループのトークでだけ出す「ミニゲーム」
+  onGame?: () => void;
   onClose: () => void;
 }) {
   const { closing, close } = useExitClose(onClose);
@@ -38,6 +43,14 @@ export function AttachSheet({
         <button onClick={onContact}>
           <Icon name="card" size={22} /> <span>連絡先（SoraChat）</span>
         </button>
+        <button onClick={onPoll}>
+          <Icon name="poll" size={22} /> <span>投票</span>
+        </button>
+        {onGame && (
+          <button onClick={onGame}>
+            <Icon name="game" size={22} /> <span>ミニゲーム</span>
+          </button>
+        )}
         <button className="cancel" onClick={() => close()}>
           キャンセル
         </button>

@@ -346,6 +346,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       )}
       {showAdd && (
         <AddFriendSheet
+          me={me}
           onClose={() => setShowAdd(false)}
           onAdded={bumpFriends}
           onOpenDm={(username) => openDmWith(username)}

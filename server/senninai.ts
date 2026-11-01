@@ -3,7 +3,7 @@ import { config } from "./config.js";
 import { currentUserId, requireAuth } from "./auth.js";
 import { decryptText } from "./crypto.js";
 import { sendToUser } from "./hub.js";
-import { BlockedError, COLUMNS, broadcastList, findOrCreateDm, insertMessage, membership, type MessageRow } from "./messages.js";
+import { BlockedError, COLUMNS, broadcastList, findOrCreateDm, insertMessage, membership, pollDataOf, postNotice, type MessageRow } from "./messages.js";
 import { sb } from "./supabase.js";
 
 // senninai（AIチャット）
@@ -31,7 +31,7 @@ export const GREETING = [
   "・「太郎とのチャットを読んで要点を教えて」→ そのトークの内容をもとに答えます",
   "・「太郎への返信を考えて」→ 返信案を3つ出します",
   "・「太郎に『明日遅れます』と送って」→ 送る前に確認の画面を出します",
-  "・グループでは「/senninai add」で参加、「/senninai ask 質問」で質問できます（「太郎のことどう思う？」のように人について聞くこともできます）",
+  "・グループでは「/senninai add」で参加、「/senninai ask 質問」で質問できます（「太郎のことどう思う？」のように人について聞くこともできます）。外すときは「/senninai delete」",
   "",
   "※ 話しかけた内容や読んだトークの内容は、AIの応答のために外部サービス（UserLocal）へ送られます。"
 ].join("\n");
@@ -52,7 +52,7 @@ const SUMMARY_HINT = /まとめ|要約|話し合|決ま|議論|振り返|やる�
 
 // ---------- 純粋な解析（テストしやすいように外に出している） ----------
 
-export type GroupCommand = { kind: "add" } | { kind: "ask"; question: string };
+export type GroupCommand = { kind: "add" } | { kind: "delete" } | { kind: "ask"; question: string };
 
 // 「/senninai add」「/senninai ask 質問」を読む。どちらでもなければ null
 export function parseGroupCommand(text: string): GroupCommand | null {
@@ -60,6 +60,7 @@ export function parseGroupCommand(text: string): GroupCommand | null {
   if (!match) return null;
   const rest = (match[1] ?? "").trim();
   if (/^(add|参加)$/i.test(rest)) return { kind: "add" };
+  if (/^(delete|削除)$/i.test(rest)) return { kind: "delete" };
   const ask = rest.match(/^ask(?:\s+([\s\S]*))?$/i);
   if (ask) return { kind: "ask", question: (ask[1] ?? "").trim() };
   return null;
@@ -188,8 +189,9 @@ export async function senninaiPrecheck(conversationId: string, userId: string, b
   if (!BOT_COMMAND.test(body.trim())) return null;
   if (!(await aiEnabledFor(userId))) return AI_OFF_MESSAGE;
   const command = parseGroupCommand(body);
-  if (!command) return "使い方: /senninai add（グループに参加）／ /senninai ask 質問（AIに質問）";
+  if (!command) return "使い方: /senninai add（グループに参加）／ /senninai ask 質問（AIに質問）／ /senninai delete（グループから外す）";
   if (command.kind === "add") return conv.botMember ? "senninaiはすでにこのグループにいます。" : null;
+  if (command.kind === "delete") return conv.botMember ? null : "senninaiはこのグループにいません。";
   if (!conv.botMember) return "senninaiはまだこのグループにいません。先に /senninai add を送ってください。";
   if (!command.question) return "質問を入力してください。例: /senninai ask 今日の予定は？";
   if (command.question.length > MAX_QUESTION_CHARS) return `質問は${MAX_QUESTION_CHARS}文字以内で入力してください。`;
@@ -299,6 +301,8 @@ function textOf(row: MessageRow): string | null {
   if (row.kind === "text" || row.kind === "system") return decryptText(row.body) ?? "";
   if (row.kind === "image") return "[写真]";
   if (row.kind === "file") return `[ファイル: ${row.file_name ?? "ファイル"}]`;
+  if (row.kind === "poll") return `[投票: ${(pollDataOf(row)?.question ?? "")}]`;
+  if (row.kind === "game") return "[ミニゲーム]";
   return "[連絡先]";
 }
 
@@ -495,6 +499,11 @@ export async function senninaiAfterMessage(conversationId: string, userId: strin
         await say(conversationId, "senninaiが参加しました。「/senninai ask 質問」で質問できます。");
         return;
       }
+      if (command.kind === "delete") {
+        if (!conv.botMember) return;
+        await removeBotFromGroup(conversationId, userId);
+        return;
+      }
       if (!conv.botMember || !command.question) return;
       await answerInGroup(conversationId, userId, command.question, row);
       return;
@@ -506,6 +515,14 @@ export async function senninaiAfterMessage(conversationId: string, userId: strin
     const reason = failureReason(error);
     await say(conversationId, `AIが応答できませんでした。時間をおいてもう一度お試しください。${reason ? `\n（原因: ${reason}）` : ""}`, row.id).catch(() => undefined);
   }
+}
+
+// グループからsenninaiを外す（グループのメンバーなら誰でもできる）。外したことはお知らせとして残す
+async function removeBotFromGroup(conversationId: string, actorId: string): Promise<void> {
+  const { error } = await sb.from("sc_members").delete().eq("conversation_id", conversationId).eq("user_id", BOT_ID);
+  if (error) throw error;
+  await broadcastList(conversationId);
+  await postNotice(conversationId, actorId, "senninaiがグループから削除されました（「/senninai add」で再び参加できます）");
 }
 
 function failureReason(error: unknown): string {

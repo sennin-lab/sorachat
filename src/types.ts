@@ -39,7 +39,7 @@ export type Message = {
   conversationId: string;
   senderId: string;
   // system はグループのお知らせ（参加・退出・削除・名前の変更）
-  kind: "text" | "image" | "file" | "contact" | "system" | "stamp";
+  kind: "text" | "image" | "file" | "contact" | "system" | "stamp" | "poll" | "game";
   body: string | null;
   imageUrl: string | null;
   fileName?: string | null;
@@ -48,6 +48,10 @@ export type Message = {
   contact?: { id: string; username: string; displayName: string; hasAvatar: boolean } | null;
   // スタンプの指定（builtin:ファイル名 または user:ID）
   stampRef?: string | null;
+  // 投票（kind が poll のとき）。body は質問文
+  poll?: PollView | null;
+  // ミニゲーム（kind が game のとき）。中身は見る人ごとに違う
+  game?: GameView | null;
   createdAt: string;
   edited: boolean;
   deleted: boolean;
@@ -58,6 +62,65 @@ export type Message = {
   clientId?: string | null;
   // 送信中・送信失敗（ローカルだけの一時表示。保存しない）
   status?: "sending" | "failed";
+};
+
+// 投票の中身と集計（counts は選択肢ごとの票数、mine は自分が選んだ番号）
+export type PollView = {
+  question: string;
+  options: string[];
+  multiple: boolean;
+  counts: number[];
+  mine: number[];
+  voters: number;
+};
+
+export type GameKind = "tictactoe" | "quiz" | "janken" | "guess";
+export type GameHand = "rock" | "scissors" | "paper";
+
+// ミニゲームの画面用の形（サーバーの gameLogic.ts の GameView と同じ）
+export type GameView = {
+  kind: GameKind;
+  status: "waiting" | "playing" | "finished";
+  cancelled: boolean;
+  creatorId: string;
+  me: string;
+  players: string[];
+  min: number;
+  max: number;
+  tictactoe: null | {
+    board: string[];
+    turn: "X" | "O";
+    symbols: { X: string; O: string };
+    winner: "X" | "O" | "draw" | null;
+    line: number[] | null;
+  };
+  quiz: null | {
+    round: number;
+    total: number;
+    phase: "question" | "revealed" | "done";
+    question: string | null;
+    options: string[];
+    buzzed: string | null;
+    tried: string[];
+    scores: Record<string, number>;
+    result: { answer: number; choice: number | null; by: string | null; correct: boolean } | null;
+  };
+  janken: null | {
+    round: number;
+    phase: "hand" | "revealed" | "done";
+    alive: string[];
+    submitted: string[];
+    myHand: GameHand | null;
+    last: { hands: Record<string, GameHand>; outcome: "draw" | "win"; winningHand: GameHand | null; eliminated: string[] } | null;
+    champion: string | null;
+  };
+  guess: null | {
+    min: number;
+    max: number;
+    guesses: { by: string; value: number; result: "higher" | "lower" | "correct" }[];
+    secret: number | null;
+    winner: string | null;
+  };
 };
 
 export type Member = {

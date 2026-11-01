@@ -63,6 +63,7 @@ export function QrScanner({ onDetect }: { onDetect: (value: string) => void }) {
   return (
     <div className="scanner">
       <video ref={videoRef} muted playsInline />
+      <div className="scanner-frame" aria-hidden="true" />
       {status !== "scanning" && (
         <p className="scanner-note">
           {status === "starting" ? "カメラを起動しています…" : "カメラを使えません。カメラの許可を確認してください。"}

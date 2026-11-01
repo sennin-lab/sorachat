@@ -3,20 +3,24 @@ import { ApiError, api, post } from "./api";
 import { Avatar } from "./Avatar";
 import { Icon } from "./Icon";
 import { QrScanner } from "./QrScanner";
-import { usernameFromQr } from "./qr";
+import { makeQrImage, profileQrValue, usernameFromQr } from "./qr";
 import { UserRow } from "./UserRow";
+import type { Me } from "./types";
 
 type Mode = "search" | "qr";
-type Found = { id: string; username: string; displayName: string; hasAvatar: boolean; isFriend: boolean };
+type Found = { id: string; username: string; displayName: string; hasAvatar: boolean; isFriend: boolean; isSelf?: boolean };
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
 
-// 「友だち追加」画面：ユーザー名で検索、またはQRコードを読み取って友だちに追加する
+// 「友だち追加」画面：ユーザー名で検索、またはQRコードを読み取って友だちに追加する。
+// QR画面からは自分のQRコードも表示できる（相手に読み取ってもらうため）
 export function AddFriendSheet({
+  me,
   onClose,
   onAdded,
   onOpenDm,
 }: {
+  me: Me;
   onClose: () => void;
   onAdded: () => void;
   onOpenDm: (username: string) => Promise<boolean>;
@@ -25,6 +29,11 @@ export function AddFriendSheet({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Found[]>([]);
   const [scanned, setScanned] = useState<Found | null>(null);
+  // 自分のQRコードを表示しているか（表示中はカメラを止める）
+  const [showMyQr, setShowMyQr] = useState(false);
+  const [myQrImage, setMyQrImage] = useState("");
+  // 読み取りを何度でもやり直せるように、スキャナーを作り直すための番号
+  const [scanKey, setScanKey] = useState(0);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [justAdded, setJustAdded] = useState<string | null>(null);
@@ -49,6 +58,17 @@ export function AddFriendSheet({
       window.clearTimeout(timer);
     };
   }, [keyword, mode]);
+
+  useEffect(() => {
+    if (!showMyQr) return;
+    let alive = true;
+    makeQrImage(profileQrValue(me.username))
+      .then((url) => alive && setMyQrImage(url))
+      .catch(() => alive && setMyQrImage(""));
+    return () => {
+      alive = false;
+    };
+  }, [showMyQr, me.username]);
 
   // フレンド申請を送る。相手が許可するまでは申請中のまま（申請中でもDMは送れる）。
   // 送ったらそのままトークを開く。開けなかったときだけ案内を出す。
@@ -80,25 +100,34 @@ export function AddFriendSheet({
     setBusy("");
   };
 
-  // QRを読み取ったら、相手を確認してから友だちに追加する
+  // QRを読み取ったら、相手を確認してから友だちに追加する。
+  // 失敗したときはスキャナーを作り直して、すぐ次のQRを読み取れるようにする
   const onQrDetect = async (value: string) => {
     const name = usernameFromQr(value);
     if (!name) {
       setError("SoraChatのQRコードではありません。");
+      setScanKey((k) => k + 1);
       return;
     }
     try {
       const found = await api<Found>(`/api/users/by-username?username=${encodeURIComponent(name)}`);
-      setScanned({ ...found, isFriend: false });
+      if (found.isSelf) {
+        setError("それはあなた自身のQRコードです。");
+        setScanKey((k) => k + 1);
+        return;
+      }
+      setScanned(found);
       setError("");
     } catch (err) {
       setError(messageOf(err));
+      setScanKey((k) => k + 1);
     }
   };
 
   const changeMode = (next: Mode) => {
     setError("");
     setScanned(null);
+    setShowMyQr(false);
     setMode(next);
   };
 
@@ -172,7 +201,19 @@ export function AddFriendSheet({
 
       {mode === "qr" && (
         <div className="qr-mode">
-          {scanned ? (
+          {showMyQr ? (
+            <div className="qr-found">
+              <div className="qr-card">
+                {myQrImage && <img src={myQrImage} alt={`${me.username} のQRコード`} />}
+                <strong className="hero-name">{me.displayName}</strong>
+                <span className="muted">@{me.username}</span>
+                <p className="muted small center">相手がこのQRコードを読み取ると、友だちに追加できます。</p>
+              </div>
+              <button className="btn-secondary wide" onClick={() => setShowMyQr(false)}>
+                <Icon name="qr" size={18} /> 読み取り画面に戻る
+              </button>
+            </div>
+          ) : scanned ? (
             <div className="qr-found">
               <Avatar userId={scanned.id} hasAvatar={scanned.hasAvatar} name={scanned.displayName} size={96} />
               <strong className="hero-name">{scanned.displayName}</strong>
@@ -194,10 +235,17 @@ export function AddFriendSheet({
             </div>
           ) : (
             <>
-              <QrScanner onDetect={(value) => void onQrDetect(value)} />
-              <p className="muted center">相手のQRコードを枠内に映してください。</p>
+              <QrScanner key={scanKey} onDetect={(value) => void onQrDetect(value)} />
+              <p className="muted center small">相手のQRコードを枠内に映してください。</p>
             </>
           )}
+
+          {!scanned && !showMyQr && (
+            <button className="btn-secondary wide my-qr-button" onClick={() => setShowMyQr(true)}>
+              <Icon name="qr" size={18} /> 自分のQRコードを表示
+            </button>
+          )}
+
           <button className="btn-text" onClick={() => changeMode("search")}>
             ユーザー名で検索
           </button>

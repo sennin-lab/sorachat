@@ -2,6 +2,7 @@ import { decryptText, encryptText } from "./crypto.js";
 import { activeEndpoints, sendToUser } from "./hub.js";
 import { removeImage } from "./media.js";
 import { notifyRecipient } from "./push.js";
+import type { GameView } from "./gameLogic.js";
 import { sb } from "./supabase.js";
 
 export const UUID = /^[0-9a-f-]{36}$/i;
@@ -14,7 +15,7 @@ export type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  kind: "text" | "image" | "file" | "contact" | "system" | "stamp";
+  kind: "text" | "image" | "file" | "contact" | "system" | "stamp" | "poll" | "game";
   body: string | null;
   created_at: string;
   edited_at: string | null;
@@ -33,21 +34,62 @@ export type Content =
   | { kind: "image"; imagePath: string }
   | { kind: "file"; filePath: string; fileName: string; fileSize: number }
   | { kind: "contact"; contactUserId: string }
-  | { kind: "stamp"; stampRef: string };
+  | { kind: "stamp"; stampRef: string }
+  | { kind: "poll"; question: string; options: string[]; multiple: boolean }
+  | { kind: "game" };
+
+// 投票の中身（body に暗号化して保存する JSON）と、画面に返す形（票数・自分の選択つき）
+export type PollData = { question: string; options: string[]; multiple: boolean };
+export type PollView = PollData & { counts: number[]; mine: number[]; voters: number };
+export type PollVote = { user_id: string; option_index: number };
+
+export const pollBodyOf = (poll: PollData) => JSON.stringify(poll);
+
+export function pollDataOf(row: MessageRow): PollData | null {
+  if (row.kind !== "poll" || row.deleted_at) return null;
+  try {
+    const data = JSON.parse(decryptText(row.body ?? "") || "null");
+    if (data && typeof data.question === "string" && Array.isArray(data.options)) {
+      return { question: data.question, options: data.options.map(String), multiple: Boolean(data.multiple) };
+    }
+  } catch {
+    // 壊れたデータは表示しない
+  }
+  return null;
+}
+
+export function pollView(data: PollData, votes: PollVote[], viewer: string): PollView {
+  const counts = data.options.map(() => 0);
+  const mine: number[] = [];
+  const voters = new Set<string>();
+  for (const v of votes) {
+    if (v.option_index >= counts.length) continue;
+    counts[v.option_index] += 1;
+    voters.add(v.user_id);
+    if (v.user_id === viewer) mine.push(v.option_index);
+  }
+  return { ...data, counts, mine, voters: voters.size };
+}
 
 export function toMessage(
   row: MessageRow,
   reactions: Reaction[] = [],
   clientId: string | null = null,
-  contact: ContactInfo | null = null
+  contact: ContactInfo | null = null,
+  poll: PollView | null = null,
+  game: GameView | null = null
 ) {
   const deleted = row.deleted_at !== null;
+  const pollData = row.kind === "poll" ? pollDataOf(row) : null;
   return {
     id: row.id,
     conversationId: row.conversation_id,
     senderId: row.sender_id,
     kind: row.kind,
-    body: deleted ? null : decryptText(row.body),
+    // 投票の本文は質問文にする（一覧・返信の表示用）
+    body: deleted ? null : row.kind === "poll" ? pollData?.question ?? null : decryptText(row.body),
+    poll: deleted ? null : poll,
+    game: deleted ? null : game,
     imageUrl: row.kind === "image" && !deleted ? `/api/dm/messages/${row.id}/image` : null,
     fileName: row.kind === "file" && !deleted ? row.file_name : null,
     fileSize: row.kind === "file" && !deleted ? row.file_size : null,
@@ -346,7 +388,11 @@ export async function insertMessage(
             ? { ...none, kind: "contact", body: null, contact_user_id: content.contactUserId }
             : content.kind === "stamp"
               ? { ...none, kind: "stamp", body: null, stamp_ref: content.stampRef }
-              : { ...none, kind: "system", body: encryptText(content.body) };
+              : content.kind === "poll"
+                ? { ...none, kind: "poll", body: encryptText(pollBodyOf(content)) }
+                : content.kind === "game"
+                  ? { ...none, kind: "game", body: null }
+                  : { ...none, kind: "system", body: encryptText(content.body) };
 
   const { data, error } = await sb
     .from("sc_messages")
@@ -381,7 +427,9 @@ export async function insertMessage(
     sb.from("sc_members").update({ last_read_at: now }).eq("conversation_id", conversationId).eq("user_id", senderId)
   ]);
 
-  const wire = toMessage(row, [], options.clientId ?? null);
+  // 投票は作った直後なので票はまだ空（自分の選択も空）
+  const wirePoll = content.kind === "poll" ? pollView(content, [], senderId) : null;
+  const wire = toMessage(row, [], options.clientId ?? null, null, wirePoll);
   // ブロックした側には、その人の発言を届けない（一覧の更新も送らない）
   const skip = new Set([...muted, ...blockers]);
   for (const uid of members) {

@@ -27,7 +27,12 @@ import { AttachSheet } from "./AttachSheet";
 import { StampSheet } from "./StampSheet";
 import { stampUrlOf } from "./stamps";
 import { ContactSheet } from "./ContactSheet";
-import type { Conversation, FriendshipState, Message } from "./types";
+import { PollCard } from "./PollCard";
+import { PollSheet, type PollDraft } from "./PollSheet";
+import { GameCard } from "./GameCard";
+import { GameSheet } from "./GameSheet";
+import { MentionText } from "./MentionText";
+import type { Conversation, FriendshipState, GameKind, Member, Message } from "./types";
 
 type ContactInfo = NonNullable<Message["contact"]>;
 
@@ -51,6 +56,8 @@ const messagePreview = (m: Message) => {
   if (m.kind === "file") return m.fileName ?? "ファイル";
   if (m.kind === "contact") return `連絡先 ${m.contact?.displayName ?? ""}`.trim();
   if (m.kind === "stamp") return "スタンプ";
+  if (m.kind === "poll") return `投票: ${m.body ?? ""}`;
+  if (m.kind === "game") return "ミニゲーム";
   return clipLongWords(m.body ?? "");
 };
 
@@ -178,6 +185,10 @@ export function ChatView({
   const [attachOpen, setAttachOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactUser, setContactUser] = useState<ContactInfo | null>(null);
+  const [pollOpen, setPollOpen] = useState(false);
+  const [gameOpen, setGameOpen] = useState(false);
+  // グループのメンバー一覧（@ で名前を選ぶときと、メンションを強調するときに使う）
+  const [memberList, setMemberList] = useState<Member[]>([]);
   const messagesRef = useRef(messages);
   const formRef = useRef<HTMLFormElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -229,11 +240,12 @@ export function ChatView({
     try {
       const info = await api<{
         readBy: Reader[];
-        members: { id: string; displayName: string; hasAvatar: boolean }[];
+        members: Member[];
         friendship: FriendshipState | null;
       }>(`/api/dm/${conversationId}`);
       setReaders(info.readBy);
       setFriendship(info.friendship);
+      setMemberList(info.members);
       setPeople(new Map(info.members.map((m) => [m.id, { name: m.displayName, hasAvatar: m.hasAvatar }])));
     } catch {
       return;
@@ -311,6 +323,14 @@ export function ChatView({
       }
       if (event.type === "reactions" && event.conversationId === conversationId) {
         patchMessage(event.messageId, (m) => ({ ...m, reactions: event.reactions }));
+        return;
+      }
+      if (event.type === "poll" && event.conversationId === conversationId) {
+        patchMessage(event.messageId, (m) => ({ ...m, poll: event.poll }));
+        return;
+      }
+      if (event.type === "game" && event.conversationId === conversationId) {
+        patchMessage(event.messageId, (m) => ({ ...m, game: event.game }));
       }
     });
   }, [conversationId]);
@@ -525,6 +545,48 @@ export function ChatView({
     }
   };
 
+  // 投票の選択（同じ選択肢をもう一度押すと取り消す）。結果は全員に届く
+  const vote = async (messageId: string, optionIndex: number) => {
+    try {
+      await api(`/api/dm/messages/${messageId}/vote`, post({ optionIndex }));
+      if (!isSocketOpen()) void load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const sendPoll = async (poll: PollDraft) => {
+    const replyId = replyTo?.id ?? null;
+    const message = await api<Message>(`/api/dm/${conversationId}/poll`, post({ ...poll, replyToId: replyId }));
+    setPollOpen(false);
+    setReplyTo(null);
+    upsert([message]);
+    onActivity();
+  };
+
+  // ミニゲームを作る（グループのトークだけ）。募集がトークに出る
+  const createGame = async (kind: GameKind) => {
+    setGameOpen(false);
+    setError("");
+    try {
+      const message = await api<Message>(`/api/dm/${conversationId}/game`, post({ kind }));
+      upsert([message]);
+      onActivity();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  // ミニゲームの操作（参加・開始・中止・プレイ）。結果は全員の画面に届く
+  const gameAction = async (messageId: string, action: string, extra: Record<string, unknown> = {}) => {
+    try {
+      await api(`/api/dm/messages/${messageId}/game`, post({ action, ...extra }));
+      if (!isSocketOpen()) void load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
   const startEdit = (m: Message) => {
     setMenuFor(null);
     setReplyTo(null);
@@ -638,6 +700,24 @@ export function ChatView({
     return isGroup ? `既読 ${readCount}人` : "既読";
   };
 
+  // @ の入力中（直前の「@名前」）なら、その名前に合うメンバーを候補に出す
+  const mentionTyping = isGroup ? text.match(/(?:^|\s)@([a-z0-9_]{0,20})$/i)?.[1] ?? null : null;
+  const mentionCandidates =
+    mentionTyping === null
+      ? []
+      : memberList.filter(
+          (m) =>
+            m.id !== meId &&
+            (m.username.startsWith(mentionTyping.toLowerCase()) || (mentionTyping !== "" && m.displayName.includes(mentionTyping)))
+        );
+  const pickMention = (username: string) => {
+    setText((current) => current.replace(/(^|\s)@[a-z0-9_]{0,20}$/i, (_, space: string) => `${space}@${username} `));
+    textRef.current?.focus();
+  };
+  const mentionable = new Set(memberList.map((m) => m.username.toLowerCase()));
+  const memberNames = new Map(memberList.map((m): [string, string] => [m.id, m.displayName]));
+  const meName = memberList.find((m) => m.id === meId)?.username.toLowerCase() ?? "";
+
   return (
     <section className={`chat${leaving ? " is-leaving" : ""}`}>
       <header className="chat-head">
@@ -661,6 +741,7 @@ export function ChatView({
         )}
       </header>
 
+      <div className="thread-area">
       {friendship === "incoming" && otherId && (
         <div className="friend-request" role="region" aria-label="フレンドリクエスト">
           <p>
@@ -777,7 +858,7 @@ export function ChatView({
                   <div className="bubble-line">
                     {mine && meta}
                     <div
-                      className={`bubble ${showImage ? "image" : ""} ${showStamp ? "stamp" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
+                      className={`bubble ${showImage ? "image" : ""} ${showStamp ? "stamp" : ""} ${m.kind === "poll" && m.poll && !m.deleted ? "poll" : ""} ${m.kind === "game" && !m.deleted ? "game" : ""} ${m.deleted ? "deleted" : ""} ${m.status ? "pending" : ""} ${hasStatus ? "has-status" : ""}`}
                       onContextMenu={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -811,8 +892,18 @@ export function ChatView({
                             <small>@{m.contact.username}</small>
                           </span>
                         </button>
+                      ) : m.kind === "poll" && m.poll ? (
+                        <PollCard poll={m.poll} onVote={(index) => void vote(m.id, index)} />
+                      ) : m.kind === "game" ? (
+                        m.game ? (
+                          <GameCard game={m.game} names={memberNames} onAction={(action, extra) => void gameAction(m.id, action, extra)} />
+                        ) : (
+                          <p className="game-loading">ミニゲームを読み込み中…</p>
+                        )
                       ) : (
-                        <p>{clipLongWords(m.body ?? "")}</p>
+                        <p>
+                          <MentionText text={clipLongWords(m.body ?? "")} users={mentionable} meName={meName} />
+                        </p>
                       )}
                       {hasStatus && (
                         <time>
@@ -861,6 +952,7 @@ export function ChatView({
         })}
         <div ref={bottomRef} />
       </div>
+      </div>
 
       {error && <p className="error">{error}</p>}
 
@@ -885,6 +977,25 @@ export function ChatView({
             やめる
           </button>
         </div>
+      )}
+
+      {mentionCandidates.length > 0 && (
+        <ul className="mention-picker" aria-label="メンションする人">
+          {mentionCandidates.slice(0, 8).map((m) => (
+            <li key={m.id}>
+              <button
+                type="button"
+                // 押しても入力欄のフォーカスを外さない（キーボードを閉じないため）
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickMention(m.username)}
+              >
+                <Avatar userId={m.id} hasAvatar={m.hasAvatar} name={m.displayName} size={28} />
+                <span className="mention-name">{m.displayName}</span>
+                <small>@{m.username}</small>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
 
       <form className="composer" ref={formRef} onSubmit={onSubmit}>
@@ -991,8 +1102,22 @@ export function ChatView({
             setAttachOpen(false);
             setContactOpen(true);
           }}
+          onPoll={() => {
+            setAttachOpen(false);
+            setPollOpen(true);
+          }}
+          onGame={
+            isGroup
+              ? () => {
+                  setAttachOpen(false);
+                  setGameOpen(true);
+                }
+              : undefined
+          }
         />
       )}
+      {pollOpen && <PollSheet onSubmit={sendPoll} onClose={() => setPollOpen(false)} />}
+      {gameOpen && <GameSheet onPick={(kind) => void createGame(kind)} onClose={() => setGameOpen(false)} />}
       {contactOpen && (
         <ContactSheet
           meId={meId}
