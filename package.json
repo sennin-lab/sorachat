@@ -11,7 +11,8 @@
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "test:senninai": "tsx test/senninai-parse.test.ts && tsx test/senninai-flow.test.ts",
-    "encrypt:backfill": "tsx server/scripts/encrypt-existing.ts"
+    "encrypt:backfill": "tsx server/scripts/encrypt-existing.ts",
+    "compress:images": "tsx server/scripts/compress-existing-images.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",
@@ -25,6 +26,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.6",
+    "sharp": "^0.34.5",
     "tsx": "^4.19.2",
     "web-push": "^3.6.7",
     "ws": "^8.18.0",

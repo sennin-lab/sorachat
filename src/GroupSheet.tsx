@@ -3,6 +3,7 @@ import { ApiError, api, patch, post } from "./api";
 import { Avatar } from "./Avatar";
 import { AvatarCropper } from "./AvatarCropper";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AVATAR_OPTIONS, compressImage } from "./imageCompress";
 import { FriendSelectPage } from "./FriendSelectPage";
 import { Icon } from "./Icon";
 import { UserRow } from "./UserRow";
@@ -148,8 +149,10 @@ export function GroupSheet({
     setBusy(true);
     setStatus("");
     try {
+      // アイコンは送る前に圧縮する
+      const small = await compressImage(blob, AVATAR_OPTIONS);
       const form = new FormData();
-      form.append("file", blob, "group.jpg");
+      form.append("file", small, small.name);
       await api(`/api/dm/${conversationId}/avatar`, { method: "POST", body: form });
       setAvatarKey((k) => k + 1);
       await load();

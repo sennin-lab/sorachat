@@ -35,6 +35,7 @@ import { FileViewer, viewerKindOf } from "./FileViewer";
 import { GameCard } from "./GameCard";
 import { GameSheet } from "./GameSheet";
 import { MentionText } from "./MentionText";
+import { CHAT_IMAGE_OPTIONS, compressImage } from "./imageCompress";
 import type { Conversation, FriendshipState, GameKind, Member, Message } from "./types";
 
 type ContactInfo = NonNullable<Message["contact"]>;
@@ -504,8 +505,10 @@ export function ChatView({
     setBusy(true);
     setError("");
     try {
+      // 写真は送る前に端末で圧縮する（ファイルはそのまま送る）
+      const payload = path === "image" ? await compressImage(file, CHAT_IMAGE_OPTIONS) : file;
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", payload);
       if (replyId) form.append("replyToId", replyId);
       const message = await api<Message>(`/api/dm/${conversationId}/${path}`, { method: "POST", body: form });
       upsert([message]);

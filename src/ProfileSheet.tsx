@@ -6,6 +6,7 @@ import { COVER_THEMES, Cover } from "./Cover";
 import { Icon } from "./Icon";
 import { makeQrImage, profileQrValue } from "./qr";
 import { SettingsSheet } from "./SettingsSheet";
+import { AVATAR_OPTIONS, compressImage } from "./imageCompress";
 import type { CoverTheme, Me } from "./types";
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
@@ -115,8 +116,10 @@ export function ProfileSheet({
   const saveCroppedAvatar = async (blob: Blob) => {
     setCropSource(null);
     await run(async () => {
+      // アイコンは送る前に圧縮する
+      const small = await compressImage(blob, AVATAR_OPTIONS);
       const form = new FormData();
-      form.append("file", blob, "profile.jpg");
+      form.append("file", small, small.name);
       onChange(await api<Me>("/api/me/avatar", { method: "POST", body: form }));
       return "プロフィール画像を更新しました。";
     });
