@@ -28,6 +28,7 @@ export function BannedScreen({ ban, onRecheck }: { ban: BanInfo; onRecheck: () =
           <p className="banned-tag">バンされました</p>
           <h1 className="banned-goodbye">さようなら</h1>
           <p className="banned-text">このアカウントは永久に利用停止になりました。</p>
+          {ban.reason && <p className="banned-reason">理由：{ban.reason}</p>}
           <p className="banned-note">利用停止中はログアウトできません。</p>
         </div>
       </div>
@@ -39,6 +40,7 @@ export function BannedScreen({ ban, onRecheck }: { ban: BanInfo; onRecheck: () =
       <div className="banned-card">
         <p className="banned-tag">バンされました</p>
         <h1 className="banned-title">このアカウントは利用停止中です</h1>
+        {ban.reason && <p className="banned-reason">理由：{ban.reason}</p>}
         <div className="banned-count" aria-live="polite">
           <span className="banned-count-label">{ended ? "まもなく利用できるか確認します" : "利用再開まで"}</span>
           <strong className="banned-count-time">{ended ? "…" : formatRemaining(remaining ?? 0)}</strong>

@@ -7,6 +7,7 @@ import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./med
 import { friendIdsOf, friendshipOf } from "./friends.js";
 import { disableAi, enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
+import { befriendTeam } from "./team.js";
 
 export const accounts = Router();
 
@@ -100,6 +101,8 @@ accounts.post("/auth/register", authLimit, async (req, res) => {
     }
     throw error;
   }
+  // 新しい人には、開発チームを友だちに追加しておく（お知らせを受け取れるように）
+  await befriendTeam(data as string).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
   await startSession(res, data as string);
   res.json({ ok: true });
 });
@@ -210,6 +213,7 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
     }
     const profile = await fetchSenninProfile(tokenData.access_token);
     const userId = await upsertSenninUser(profile.id, profile.name);
+    await befriendTeam(userId).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
     res.clearCookie("sc_oauth", cookieBase);
     await startSession(res, userId);
     res.redirect(`${config.appOrigin}/`);

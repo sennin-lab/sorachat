@@ -1264,7 +1264,7 @@ img.avatar { animation: fade-in 0.35s ease both; }
 .admin-logout { padding: 6px 12px; border-radius: 999px; background: var(--raised); color: var(--accent-ink); font-size: 13px; font-weight: 600; }
 .admin-main { max-width: 760px; margin: 0 auto; padding: 16px 16px 48px; display: flex; flex-direction: column; gap: 14px; }
 .admin-back { align-self: flex-start; padding: 4px 0; color: var(--accent-ink); font-size: 14px; font-weight: 600; }
-.admin-segment { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--raised); }
+.admin-segment { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--raised); }
 .admin-segment button { height: 38px; border-radius: 10px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 700; }
 .admin-segment button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
 .admin-segment button.on.danger { color: var(--danger); }
@@ -1358,6 +1358,7 @@ img.avatar { animation: fade-in 0.35s ease both; }
 .admin-msgs { display: flex; flex-direction: column; gap: 8px; }
 .admin-msg { padding: 10px 12px; border-radius: 14px; background: var(--panel); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); }
 .admin-msg-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+.admin-msg-delete { margin-left: auto; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); font-size: 12px; font-weight: 700; }
 .admin-msg-head strong { color: var(--text); font-size: 13px; }
 .admin-msg p { margin: 0; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
 .admin-msg p.deleted { color: var(--muted); font-style: italic; }
@@ -1901,3 +1902,34 @@ button, .bubble, .send-btn, .composer-icon, .chip { touch-action: manipulation; 
 .game-fs-inner .quiz-option { padding: 14px; font-size: 16px; }
 .game-fs-inner .janken-hand { padding: 18px 6px; font-size: 16px; }
 .game-fs-inner .guess-log { max-height: 40dvh; }
+
+/* ---- お知らせ・BANの理由 ---- */
+.admin-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.admin-count { margin: 0; text-align: right; }
+.admin-field { display: flex; flex-direction: column; gap: 6px; }
+.admin-team-head { display: flex; align-items: center; gap: 14px; }
+.admin-team-head .admin-hero-text { gap: 2px; }
+.banned-reason {
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.banned-final .banned-reason { color: #ffb4b4; }

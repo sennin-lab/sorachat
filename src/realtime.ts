@@ -65,6 +65,7 @@ export type ChatEvent =
   | { type: "message"; message: Message }
   | { type: "message_updated"; conversationId: string; id: string; body: string; editedAt: string }
   | { type: "message_deleted"; conversationId: string; id: string }
+  | { type: "message_removed"; conversationId: string; id: string }
   | { type: "reactions"; conversationId: string; messageId: string; reactions: Reaction[] }
   | { type: "poll"; conversationId: string; messageId: string; poll: PollView }
   | { type: "game"; conversationId: string; messageId: string; game: GameView }

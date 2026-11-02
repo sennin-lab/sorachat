@@ -169,4 +169,4 @@ export type Friend = {
 export type FriendshipState = "friend" | "incoming" | "outgoing" | "none";
 
 // 利用停止（BAN）の内容。until が null なら永久
-export type BanInfo = { until: string | null; permanent: boolean };
+export type BanInfo = { until: string | null; permanent: boolean; reason: string | null };

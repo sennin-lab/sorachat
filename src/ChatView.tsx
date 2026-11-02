@@ -330,6 +330,11 @@ export function ChatView({
         patchMessage(event.id, (m) => ({ ...m, body: event.body, edited: true }));
         return;
       }
+      // 管理者が削除したメッセージは、取り消しの表示も残さずに消す
+      if (event.type === "message_removed" && event.conversationId === conversationId) {
+        commit(messagesRef.current.filter((m) => m.id !== event.id));
+        return;
+      }
       if (event.type === "message_deleted" && event.conversationId === conversationId) {
         patchMessage(event.id, (m) => ({ ...m, deleted: true, body: null, imageUrl: null, reactions: [] }));
         return;

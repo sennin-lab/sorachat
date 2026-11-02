@@ -108,7 +108,7 @@ export function OpenChatSheet({ onOpen, onClose }: { onOpen: (id: string) => voi
             <ul className="open-list">
               {chats.map((chat) => (
                 <li key={chat.id} className="open-item">
-                  <Avatar userId="" hasAvatar={false} name={chat.title} size={48} />
+                  <Avatar userId={chat.id} hasAvatar={chat.hasAvatar} name={chat.title} size={48} src={`/api/dm/${chat.id}/avatar`} />
                   <span className="open-text">
                     <strong>{chat.title}</strong>
                     {chat.description && <small>{chat.description}</small>}

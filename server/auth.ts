@@ -81,20 +81,21 @@ export const currentUserId = (res: Response) => res.locals.userId as string;
 export const BANNED_MESSAGE = "このアカウントは利用停止中です。";
 
 // 利用停止の内容。permanent なら期限なし、そうでなければ until（ISO形式）まで
-export type BanInfo = { until: string | null; permanent: boolean };
+export type BanInfo = { until: string | null; permanent: boolean; reason: string | null };
 
 // いまの利用停止を返す。利用停止でない・期限が過ぎているなら null
-export function banOf(row: { banned_at: string | null; banned_until: string | null } | null): BanInfo | null {
+export function banOf(row: { banned_at: string | null; banned_until: string | null; ban_reason?: string | null } | null): BanInfo | null {
   if (!row?.banned_at) return null;
-  if (!row.banned_until) return { until: null, permanent: true };
+  const reason = row.ban_reason ?? null;
+  if (!row.banned_until) return { until: null, permanent: true, reason };
   if (new Date(row.banned_until).getTime() <= Date.now()) return null;
-  return { until: row.banned_until, permanent: false };
+  return { until: row.banned_until, permanent: false, reason };
 }
 
 export async function banOfUser(userId: string): Promise<BanInfo | null> {
-  const { data, error } = await sb.from("sc_users").select("banned_at, banned_until").eq("id", userId).maybeSingle();
+  const { data, error } = await sb.from("sc_users").select("banned_at, banned_until, ban_reason").eq("id", userId).maybeSingle();
   if (error) throw error;
-  return banOf(data as { banned_at: string | null; banned_until: string | null } | null);
+  return banOf(data as { banned_at: string | null; banned_until: string | null; ban_reason: string | null } | null);
 }
 
 export async function isBanned(userId: string) {

@@ -74,6 +74,32 @@ openChats.post("/open-chats", async (req, res) => {
   res.status(201).json({ id: conv.id });
 });
 
+// オープンチャットをグループチャットに切り替える（オーナーだけ）。一覧から消え、新しい人は参加できなくなる
+openChats.post("/open-chats/:id/to-group", async (req, res) => {
+  const id = String(req.params.id);
+  const me = currentUserId(res);
+  const member = UUID.test(id) ? await membership(id, me) : null;
+  if (!member) {
+    res.status(404).json({ error: "オープンチャットが見つかりません。" });
+    return;
+  }
+  if (member.role !== "owner") {
+    res.status(403).json({ error: "グループチャットに切り替えられるのは管理者だけです。" });
+    return;
+  }
+  const { data: conv, error } = await sb.from("sc_conversations").select("is_open").eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (!conv?.is_open) {
+    res.status(400).json({ error: "すでにグループチャットです。" });
+    return;
+  }
+  const { error: updateError } = await sb.from("sc_conversations").update({ is_open: false }).eq("id", id);
+  if (updateError) throw updateError;
+  await postNotice(id, me, "オープンチャットからグループチャットに切り替わりました。新しく参加することはできなくなります。");
+  await broadcastList(id);
+  res.json({ ok: true });
+});
+
 openChats.post("/open-chats/:id/join", async (req, res) => {
   const id = String(req.params.id);
   if (!UUID.test(id)) {

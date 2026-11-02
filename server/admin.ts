@@ -5,9 +5,10 @@ import { config } from "./config.js";
 import { banOf, cookieBase, type BanInfo } from "./auth.js";
 import { disconnectUser } from "./hub.js";
 import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
-import { UUID } from "./messages.js";
 import { sb } from "./supabase.js";
-import { decryptText } from "./crypto.js";
+import { decryptText, encryptText } from "./crypto.js";
+import { broadcastList, broadcastToConversation, removeImageIfUnused, UUID } from "./messages.js";
+import { sendAnnouncement, TEAM_ID } from "./team.js";
 
 // 管理者パネル専用のAPI。一般の画面からはこの入口を使わない（管理者パスワードでだけ入れる）
 export const admin = Router();
@@ -101,7 +102,7 @@ admin.get("/admin/session", (_req, res) => {
 });
 
 // ---- ユーザー ----
-const USER_COLUMNS = "id, username, display_name, bio, contact, profile_url, avatar_path, sennin_id, cover_theme, created_at, banned_at, banned_until";
+const USER_COLUMNS = "id, username, display_name, bio, contact, profile_url, avatar_path, sennin_id, cover_theme, created_at, banned_at, banned_until, ban_reason";
 
 type UserRow = {
   id: string;
@@ -116,6 +117,7 @@ type UserRow = {
   created_at: string;
   banned_at: string | null;
   banned_until: string | null;
+  ban_reason: string | null;
 };
 
 // 利用停止は「期限が過ぎていないもの」だけ有効。ban が null なら利用中
@@ -191,7 +193,8 @@ const MAX_BAN_MS = 10 * 365 * 86_400_000;
 const banSchema = z.object({
   permanent: z.boolean(),
   amount: z.number().int().min(1).max(100_000).optional(),
-  unit: z.enum(["minutes", "hours", "days"]).optional()
+  unit: z.enum(["minutes", "hours", "days"]).optional(),
+  reason: z.string().trim().max(200).optional()
 });
 
 // BAN: 期間つき・永久から選ぶ。セッションは残し、利用者の画面に「利用停止」と期限を出す（ログアウトはできない）
@@ -214,9 +217,10 @@ admin.post("/admin/users/:id/ban", async (req, res) => {
     bannedUntil = new Date(now + ms).toISOString();
   }
   const bannedAt = new Date(now).toISOString();
+  const banReason = parsed.data.reason ? parsed.data.reason : null;
   const { data, error } = await sb
     .from("sc_users")
-    .update({ banned_at: bannedAt, banned_until: bannedUntil })
+    .update({ banned_at: bannedAt, banned_until: bannedUntil, ban_reason: banReason })
     .eq("id", id)
     .select("id")
     .maybeSingle();
@@ -227,13 +231,13 @@ admin.post("/admin/users/:id/ban", async (req, res) => {
   }
   // 開いている接続は閉じる（利用者の画面が利用停止の表示に切り替わる）
   disconnectUser(id);
-  res.json({ ok: true, ban: banOf({ banned_at: bannedAt, banned_until: bannedUntil }) });
+  res.json({ ok: true, ban: banOf({ banned_at: bannedAt, banned_until: bannedUntil, ban_reason: banReason }) });
 });
 
 admin.post("/admin/users/:id/unban", async (req, res) => {
   const id = idParam(req, res);
   if (!id) return;
-  const { error } = await sb.from("sc_users").update({ banned_at: null, banned_until: null }).eq("id", id);
+  const { error } = await sb.from("sc_users").update({ banned_at: null, banned_until: null, ban_reason: null }).eq("id", id);
   if (error) throw error;
   res.json({ ok: true });
 });
@@ -302,6 +306,100 @@ admin.post("/admin/users/:id/friends", async (req, res) => {
   );
   if (upsertError) throw upsertError;
   res.status(201).json(userSummary(other as UserRow));
+});
+
+// ---- パスワードの再設定（今のパスワードは保存されていない＝見られない。新しく設定する）----
+const passwordSchema = z.object({
+  password: z.string().min(8, "パスワードは8文字以上にしてください。").max(72, "パスワードは72文字以内にしてください。")
+});
+
+admin.post("/admin/users/:id/password", async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  const parsed = passwordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0].message });
+    return;
+  }
+  const { data, error } = await sb.rpc("sc_set_password", { p_user_id: id, p_password: parsed.data.password });
+  if (error) throw error;
+  if (!data) {
+    res.status(404).json({ error: "ユーザーが見つかりません。" });
+    return;
+  }
+  // 今のログインは全て切る（新しいパスワードで入り直してもらう）
+  const { error: sessionError } = await sb.from("sc_sessions").delete().eq("user_id", id);
+  if (sessionError) throw sessionError;
+  disconnectUser(id);
+  res.json({ ok: true });
+});
+
+// ---- メッセージの削除（取り消しの表示も残さず、トークから消す。相手の画面からも消える）----
+const PREVIEW_LABEL: Record<string, string> = { image: "画像", file: "ファイル", contact: "連絡先", stamp: "スタンプ", poll: "投票", game: "ミニゲーム" };
+
+async function refreshLastPreview(conversationId: string, deletedAt: string) {
+  // 削除したのが一番新しいメッセージだった場合、一覧に出す最後の文を残っているものに直す
+  const { data: latest, error } = await sb
+    .from("sc_messages")
+    .select("kind, body, sender_id, created_at")
+    .eq("conversation_id", conversationId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!latest) return;
+  const text = latest.kind === "text" || latest.kind === "system" ? decryptText(latest.body) ?? "" : PREVIEW_LABEL[latest.kind] ?? "";
+  await sb
+    .from("sc_conversations")
+    .update({ last_message_at: latest.created_at, last_sender_id: latest.sender_id, last_preview: encryptText(text.slice(0, 80)) })
+    .eq("id", conversationId)
+    .eq("last_message_at", deletedAt);
+}
+
+admin.delete("/admin/messages/:id", async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  const { data: msg, error: readError } = await sb
+    .from("sc_messages")
+    .select("id, conversation_id, image_path, file_path, created_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!msg) {
+    res.status(404).json({ error: "メッセージが見つかりません。" });
+    return;
+  }
+  // 行を消す（リアクション・投票・ミニゲームなどは一緒に消える）
+  const { error } = await sb.from("sc_messages").delete().eq("id", id);
+  if (error) throw error;
+  if (msg.image_path) await removeImageIfUnused(msg.image_path);
+  if (msg.file_path) await removeImageIfUnused(msg.file_path);
+  await refreshLastPreview(msg.conversation_id as string, msg.created_at as string);
+  await broadcastToConversation(msg.conversation_id as string, { type: "message_removed", conversationId: msg.conversation_id, id });
+  await broadcastList(msg.conversation_id as string);
+  res.json({ ok: true });
+});
+
+// ---- お知らせ（開発チームから全ユーザーへ）----
+const announceSchema = z.object({ body: z.string().trim().min(1).max(1000) });
+
+admin.post("/admin/announcements", async (req, res) => {
+  const parsed = announceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "お知らせの本文を入力してください（1000文字まで）。" });
+    return;
+  }
+  const { data, error } = await sb.from("sc_users").select("id").eq("is_bot", false).neq("id", TEAM_ID);
+  if (error) throw error;
+  const ids = (data ?? []).map((row: { id: string }) => row.id);
+  if (!ids.length) {
+    res.status(400).json({ error: "送る相手がいません。" });
+    return;
+  }
+  // 人数が多いと時間がかかるので、送信は裏で続ける
+  sendAnnouncement(ids, parsed.data.body).catch((err) => console.error("お知らせの送信に失敗しました", err));
+  res.json({ ok: true, queued: ids.length });
 });
 
 // ---- チャット（全員分を閲覧できる。送信や編集はできない）----

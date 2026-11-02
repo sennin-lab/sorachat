@@ -11,6 +11,8 @@ import type { Friend, Member } from "./types";
 type Detail = {
   id: string;
   isGroup: boolean;
+  // オープンチャットかどうか（グループチャットに切り替えられるのは、オープンのときだけ）
+  isOpen: boolean;
   title: string;
   hasAvatar: boolean;
   myRole: "owner" | "member";
@@ -46,12 +48,30 @@ export function GroupSheet({
   // 通知のオン・オフ（自分だけ）と、管理者のグループ削除の確認
   const [muted, setMuted] = useState(false);
   const [askDisband, setAskDisband] = useState(false);
+  const [askToGroup, setAskToGroup] = useState(false);
 
   const load = async () => {
     const next = await api<Detail>(`/api/dm/${conversationId}`);
     setDetail(next);
     setTitle(next.title);
     setMuted(next.muted);
+  };
+
+  // オープンチャットを、グループチャットに切り替える（オーナーだけ。元に戻せない）
+  const toGroup = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/open-chats/${conversationId}/to-group`, post());
+      setAskToGroup(false);
+      await load();
+      onChanged();
+      setStatus("グループチャットに切り替えました。");
+    } catch (err) {
+      setAskToGroup(false);
+      setStatus(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const toggleNotify = async (on: boolean) => {
@@ -295,6 +315,19 @@ export function GroupSheet({
       )}
       {status && <p className="notice center">{status}</p>}
 
+      {isOwner && detail.isOpen && (
+        <>
+          <div className="page-card">
+            <button className="page-row" disabled={busy} onClick={() => setAskToGroup(true)}>
+              グループチャットに切り替える
+            </button>
+          </div>
+          <p className="notice center small">
+            切り替えると、オープンチャットの一覧から消えます。新しく参加することはできなくなり、今のメンバーはそのまま残ります。
+          </p>
+        </>
+      )}
+
       {isOwner && (
         <>
           <div className="page-card leave-card">
@@ -324,6 +357,17 @@ export function GroupSheet({
           グループを退出
         </button>
       </div>
+
+      {askToGroup && (
+        <ConfirmDialog
+          title="グループチャットに切り替えますか？"
+          message="オープンチャットをグループチャットに切り替えます。一覧から消え、新しく参加することはできなくなります。元に戻せません。"
+          confirmLabel="切り替える"
+          busy={busy}
+          onConfirm={() => void toGroup()}
+          onCancel={() => setAskToGroup(false)}
+        />
+      )}
 
       {askDisband && (
         <ConfirmDialog

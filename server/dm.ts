@@ -253,7 +253,7 @@ dm.get("/dm/:id", async (req, res) => {
     res.status(404).json({ error: "会話が見つかりません。" });
     return;
   }
-  const { data: conv, error } = await sb.from("sc_conversations").select("is_group, title, avatar_path").eq("id", id).single();
+  const { data: conv, error } = await sb.from("sc_conversations").select("is_group, is_open, title, avatar_path").eq("id", id).single();
   if (error) throw error;
   const { data: rows, error: membersError } = await sb
     .from("sc_members")
@@ -277,7 +277,7 @@ dm.get("/dm/:id", async (req, res) => {
   const other = members.find((m) => m.id !== viewer);
   const friendship = conv.is_group || !other ? null : await friendshipOf(viewer, other.id);
   const muted = Boolean((rows ?? []).find((row: any) => row.sc_users.id === viewer)?.muted);
-  res.json({ id, isGroup: conv.is_group, title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, muted, members, readBy, friendship });
+  res.json({ id, isGroup: conv.is_group, isOpen: Boolean(conv.is_open), title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, muted, members, readBy, friendship });
 });
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(40) });
@@ -331,11 +331,16 @@ dm.post("/dm/:id/avatar", upload.single("file"), async (req, res) => {
 
 dm.get("/dm/:id/avatar", async (req, res) => {
   const id = String(req.params.id);
-  if (!(await membership(id, currentUserId(res)))) {
+  if (!UUID.test(id)) {
     res.status(404).end();
     return;
   }
-  const { data } = await sb.from("sc_conversations").select("avatar_path").eq("id", id).maybeSingle();
+  const { data } = await sb.from("sc_conversations").select("avatar_path, is_open").eq("id", id).maybeSingle();
+  // オープンチャットのアイコンは一覧から誰でも見られる。それ以外は参加している人だけ
+  if (!data?.is_open && !(await membership(id, currentUserId(res)))) {
+    res.status(404).end();
+    return;
+  }
   if (!data?.avatar_path) {
     res.status(404).end();
     return;

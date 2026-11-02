@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, api, delete_, post } from "./api";
 import { Avatar } from "./Avatar";
 import { formatRemaining } from "./Banned";
+import { TEAM_ID } from "./team";
 import type { BanInfo } from "./types";
 
 // 管理者パネル（/admin/login からだけ入る。一般の画面からは入口を出さない）
@@ -168,7 +169,7 @@ function AdminLogin({ onDone }: { onDone: () => void }) {
 type Go = (to: string) => void;
 
 function Dashboard({ go }: { go: Go }) {
-  const [tab, setTab] = useState<"users" | "chats">("users");
+  const [tab, setTab] = useState<"users" | "chats" | "news">("users");
   return (
     <>
       <div className="admin-segment" role="tablist">
@@ -178,9 +179,96 @@ function Dashboard({ go }: { go: Go }) {
         <button role="tab" aria-selected={tab === "chats"} className={tab === "chats" ? "on" : ""} onClick={() => setTab("chats")}>
           チャット
         </button>
+        <button role="tab" aria-selected={tab === "news"} className={tab === "news" ? "on" : ""} onClick={() => setTab("news")}>
+          お知らせ
+        </button>
       </div>
-      {tab === "users" ? <UsersList go={go} /> : <ChatsList go={go} />}
+      {tab === "users" ? <UsersList go={go} /> : tab === "chats" ? <ChatsList go={go} /> : <AnnouncementPanel />}
     </>
+  );
+}
+
+// お知らせ：開発チームから全ユーザーへ送る。開発チームのアイコンもここで設定できる
+function AnnouncementPanel() {
+  const [team, setTeam] = useState<UserDetail | null>(null);
+  const [avatarVersion, setAvatarVersion] = useState(0);
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  const loadTeam = () =>
+    adminApi<UserDetail>(`/api/admin/users/${TEAM_ID}`)
+      .then(setTeam)
+      .catch((err) => setError(msg(err)));
+
+  useEffect(() => {
+    void loadTeam();
+  }, []);
+
+  const send = async () => {
+    const text = body.trim();
+    if (!text) return;
+    if (!window.confirm("全ユーザーに、開発チームからお知らせを送りますか？\n送ったお知らせは取り消せません。")) return;
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const result = await adminApi<{ ok: boolean; queued: number }>("/api/admin/announcements", post({ body: text }));
+      setBody("");
+      setStatus(`${result.queued}人に送信を始めました。全員に届くまで少し時間がかかることがあります。`);
+    } catch (err) {
+      setError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="admin-stack">
+      <section className="admin-card admin-team">
+        <div className="admin-team-head">
+          <Avatar userId={TEAM_ID} hasAvatar={team?.hasAvatar ?? false} name="SoraChat開発チーム" size={56} src={avatarSrc(TEAM_ID, avatarVersion)} />
+          <div className="admin-hero-text">
+            <h3 className="admin-section-title">SoraChat開発チーム</h3>
+            <p className="muted small">お知らせの送り主です。全ユーザーの友だちに入っています。</p>
+          </div>
+        </div>
+        {team && (
+          <AvatarPanel
+            user={team}
+            onChanged={(message) => {
+              setStatus(message);
+              setAvatarVersion((v) => v + 1);
+              void loadTeam();
+            }}
+            onError={setError}
+          />
+        )}
+      </section>
+
+      <section className="admin-card">
+        <h3 className="admin-section-title">お知らせを送る</h3>
+        <p className="muted small">全ユーザーの「SoraChat開発チーム」とのトークに届きます（通知も届きます）。</p>
+        <textarea
+          className="admin-textarea"
+          value={body}
+          maxLength={1000}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="お知らせの本文"
+          rows={6}
+        />
+        <p className="muted small admin-count">{body.length}/1000</p>
+        <div className="admin-actions">
+          <button className="btn-primary" disabled={busy || !body.trim()} onClick={() => void send()}>
+            {busy ? "送信中…" : "全ユーザーに送る"}
+          </button>
+        </div>
+      </section>
+
+      {status && <p className="admin-status">{status}</p>}
+      {error && <p className="notice error">{error}</p>}
+    </section>
   );
 }
 
@@ -226,6 +314,7 @@ function UsersList({ go }: { go: Go }) {
                   <strong>
                     {u.displayName}
                     {u.sennin && <small className="admin-badge">仙人</small>}
+                    {u.id === TEAM_ID && <small className="admin-badge">開発チーム</small>}
                   </strong>
                   <small>@{u.username}</small>
                 </span>
@@ -386,6 +475,8 @@ function UserPage({ id, go }: { id: string; go: Go }) {
 
       <BanPanel user={user} onChanged={changed} onError={setStatus} />
 
+      <PasswordPanel user={user} onChanged={changed} onError={setStatus} />
+
       <section className="admin-card">
         <h3 className="admin-section-title">友だちを追加</h3>
         <p className="muted small">管理者は、相手の承認なしで誰とでも友だちにできます。</p>
@@ -445,6 +536,60 @@ function UserPage({ id, go }: { id: string; go: Go }) {
         )}
       </section>
     </>
+  );
+}
+
+// パスワードの再設定。今のパスワードは見られない（保存されているのはハッシュだけ）。新しく設定して本人に伝える
+function PasswordPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (message: string) => void; onError: (message: string) => void }) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const valid = password.length >= 8 && password.length <= 72;
+
+  const apply = async () => {
+    if (!valid) {
+      setError("8文字以上72文字以内で入力してください。");
+      return;
+    }
+    if (!window.confirm(`${user.displayName} のパスワードを新しく設定しますか？\n今のログインは全て切れます。`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await adminApi(`/api/admin/users/${user.id}/password`, post({ password }));
+      setPassword("");
+      onChanged("パスワードを再設定しました。新しいパスワードを本人にお伝えください。");
+    } catch (err) {
+      setError(msg(err));
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="admin-card">
+      <h3 className="admin-section-title">パスワードの再設定</h3>
+      <p className="muted small">今のパスワードは見られません。新しく設定して、本人にお伝えください。入力中の文字は画面に表示されます。</p>
+      <label className="admin-field">
+        <span className="muted small">新しいパスワード（8〜72文字）</span>
+        <input
+          className="auth-input"
+          type="text"
+          autoComplete="off"
+          autoCapitalize="none"
+          value={password}
+          maxLength={72}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="新しいパスワード"
+        />
+      </label>
+      {error && <p className="notice error">{error}</p>}
+      <div className="admin-actions">
+        <button className="btn-primary" disabled={busy || !password} onClick={() => void apply()}>
+          {busy ? "設定中…" : "パスワードを設定する"}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -518,6 +663,7 @@ function BanPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (
   const [error, setError] = useState("");
 
   const ban = user.ban;
+  const [reason, setReason] = useState(user.ban?.reason ?? "");
   const amountNumber = Number(amount);
   const validAmount = Number.isInteger(amountNumber) && amountNumber >= 1 && amountNumber <= 100000;
   const label = mode === "permanent" ? "永久" : `${amountNumber}${UNIT_LABEL[unit]}`;
@@ -531,7 +677,8 @@ function BanPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (
     setBusy(true);
     setError("");
     try {
-      const body = mode === "permanent" ? { permanent: true } : { permanent: false, amount: amountNumber, unit };
+      const period = mode === "permanent" ? { permanent: true } : { permanent: false, amount: amountNumber, unit };
+      const body = { ...period, reason: reason.trim() };
       await adminApi(`/api/admin/users/${user.id}/ban`, post(body));
       onChanged(`${label}の利用停止にしました。`);
     } catch (err) {
@@ -563,6 +710,7 @@ function BanPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (
             {ban.permanent ? "永久に利用停止中です" : `${fmt(ban.until!)} まで利用停止中`}
           </strong>
           {!ban.permanent && <small>残り {formatRemaining(new Date(ban.until!).getTime() - Date.now())}</small>}
+          {ban.reason && <small>理由：{ban.reason}</small>}
         </div>
       ) : (
         <p className="muted small">いまは利用中です。停止する期間を選んでください。</p>
@@ -598,6 +746,17 @@ function BanPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (
       ) : (
         <p className="admin-warn">永久の利用停止は、解除するまで続きます。</p>
       )}
+
+      <label className="admin-field">
+        <span className="muted small">理由（任意・利用者の画面に表示されます）</span>
+        <input
+          className="auth-input"
+          value={reason}
+          maxLength={200}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="例：不適切な投稿のため"
+        />
+      </label>
 
       {error && <p className="notice error">{error}</p>}
 
@@ -657,6 +816,17 @@ function ChatPage({ id, go }: { id: string; go: Go }) {
     }
   };
 
+  // メッセージを完全に削除する（取り消しの表示は残さない。相手の画面からも消える）
+  const removeMessage = async (messageId: string) => {
+    if (!window.confirm("このメッセージを削除しますか？\n削除すると、相手の画面からも消えます（取り消しの表示は残りません）。")) return;
+    try {
+      await adminApi(`/api/admin/messages/${messageId}`, delete_());
+      setMessages((current) => current.filter((m) => m.id !== messageId));
+    } catch (err) {
+      setError(msg(err));
+    }
+  };
+
   if (error) return <p className="notice error">{error}</p>;
   if (!info) return <p className="muted">読み込み中…</p>;
 
@@ -693,6 +863,9 @@ function ChatPage({ id, go }: { id: string; go: Go }) {
               <strong>{m.senderName}</strong>
               <time>{fmt(m.createdAt)}</time>
               {m.edited && !m.deleted && <span>編集済み</span>}
+              <button className="admin-msg-delete" onClick={() => void removeMessage(m.id)}>
+                削除
+              </button>
             </div>
             {m.deleted ? (
               <p className="deleted">送信を取り消しました</p>
