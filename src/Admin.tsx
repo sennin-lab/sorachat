@@ -169,7 +169,7 @@ function AdminLogin({ onDone }: { onDone: () => void }) {
 type Go = (to: string) => void;
 
 function Dashboard({ go }: { go: Go }) {
-  const [tab, setTab] = useState<"users" | "chats" | "news">("users");
+  const [tab, setTab] = useState<"users" | "chats" | "news" | "maintenance">("users");
   return (
     <>
       <div className="admin-segment" role="tablist">
@@ -182,10 +182,60 @@ function Dashboard({ go }: { go: Go }) {
         <button role="tab" aria-selected={tab === "news"} className={tab === "news" ? "on" : ""} onClick={() => setTab("news")}>
           お知らせ
         </button>
+        <button role="tab" aria-selected={tab === "maintenance"} className={tab === "maintenance" ? "on" : ""} onClick={() => setTab("maintenance")}>
+          メンテナンス
+        </button>
       </div>
-      {tab === "users" ? <UsersList go={go} /> : tab === "chats" ? <ChatsList go={go} /> : <AnnouncementPanel />}
+      {tab === "users" ? <UsersList go={go} /> : tab === "chats" ? <ChatsList go={go} /> : tab === "news" ? <AnnouncementPanel /> : <MaintenancePanel />}
     </>
   );
+}
+
+
+function MaintenancePanel() {
+  const [enabled, setEnabled] = useState(false);
+  const [message, setMessage] = useState("メンテナンス中です。しばらくお待ちください。");
+  const [busy, setBusy] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    adminApi<{ enabled: boolean; message: string }>("/api/admin/maintenance")
+      .then((data) => { setEnabled(data.enabled); setMessage(data.message); })
+      .catch((err) => setError(msg(err)))
+      .finally(() => setBusy(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true); setError(""); setStatus("");
+    try {
+      const result = await adminApi<{ enabled: boolean; message: string }>("/api/admin/maintenance", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled, message })
+      });
+      setEnabled(result.enabled); setMessage(result.message);
+      setStatus(result.enabled ? "メンテナンスモードを有効にしました。" : "メンテナンスモードを解除しました。");
+    } catch (err) { setError(msg(err)); }
+    finally { setSaving(false); }
+  };
+
+  if (busy) return <div className="boot">設定を読み込み中…</div>;
+  return <section className="admin-stack">
+    <section className="admin-card">
+      <h2>メンテナンスモード</h2>
+      <p className="muted">ここから切り替えると、サーバーの再起動なしで利用者向け機能を停止・再開できます。管理者パネルと稼働状況ページは引き続き利用できます。</p>
+      <label className="admin-maintenance-toggle" style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0" }}>
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+        <strong>{enabled ? "メンテナンスモード：有効" : "メンテナンスモード：無効"}</strong>
+      </label>
+      <label className="field-label" htmlFor="maintenance-message">利用者に表示するメッセージ</label>
+      <textarea id="maintenance-message" className="auth-input" rows={4} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="メンテナンス中です。しばらくお待ちください。" style={{ width: "100%", resize: "vertical", boxSizing: "border-box" }} />
+      <p className="muted small">最大500文字。保存するとすぐに反映されます。</p>
+      {error && <p className="notice error">{error}</p>}
+      {status && <p className="notice">{status}</p>}
+      <button className="btn-primary" disabled={saving} onClick={() => void save()}>{saving ? "保存中…" : "設定を保存"}</button>
+    </section>
+  </section>;
 }
 
 // お知らせ：開発チームから全ユーザーへ送る。開発チームのアイコンもここで設定できる

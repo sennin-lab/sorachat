@@ -9,6 +9,7 @@ import { sb } from "./supabase.js";
 import { decryptText, encryptText } from "./crypto.js";
 import { broadcastList, broadcastToConversation, removeImageIfUnused, UUID } from "./messages.js";
 import { sendAnnouncement, TEAM_ID } from "./team.js";
+import { getMaintenanceSettings, updateMaintenanceSettings } from "./maintenance.js";
 
 // 管理者パネル専用のAPI。一般の画面からはこの入口を使わない（管理者パスワードでだけ入れる）
 export const admin = Router();
@@ -99,6 +100,23 @@ admin.use("/admin", requireAdmin);
 
 admin.get("/admin/session", (_req, res) => {
   res.json({ ok: true });
+});
+
+// ---- メンテナンスモード ----
+admin.get("/admin/maintenance", (_req, res) => {
+  res.set("Cache-Control", "no-store").json(getMaintenanceSettings());
+});
+
+admin.put("/admin/maintenance", async (req, res) => {
+  const parsed = z.object({ enabled: z.boolean(), message: z.string().trim().max(500).optional() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "設定内容が正しくありません。" }); return; }
+  try {
+    const settings = await updateMaintenanceSettings(parsed.data.enabled, parsed.data.message ?? getMaintenanceSettings().message);
+    res.set("Cache-Control", "no-store").json({ ok: true, ...settings });
+  } catch (error) {
+    console.error("メンテナンス設定の保存に失敗しました", error);
+    res.status(500).json({ error: error instanceof Error ? error.message : "設定を保存できませんでした。" });
+  }
 });
 
 // ---- ユーザー ----

@@ -4,6 +4,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { z } from "zod";
 import { banOfUser, SESSION_COOKIE, sha256 } from "./auth.js";
 import { config } from "./config.js";
+import { getMaintenanceSettings } from "./maintenance.js";
 import { addSocket, removeSocket, setViewing } from "./hub.js";
 import { BlockedError, UUID, insertMessage, membership, replyTargetOk, toMessage } from "./messages.js";
 import { senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
@@ -47,7 +48,7 @@ function sameOrigin(req: IncomingMessage) {
 export function attachRealtime(server: Server) {
   server.on("upgrade", (req, socket: Duplex, head) => {
     // メンテナンス中は WebSocket でも送受信させない
-    if (config.maintenance.enabled) {
+    if (getMaintenanceSettings().enabled) {
       socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
       socket.destroy();
       return;

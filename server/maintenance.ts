@@ -1,5 +1,30 @@
 import type { NextFunction, Request, Response } from "express";
 import { config } from "./config.js";
+import { sb } from "./supabase.js";
+
+let current = { enabled: config.maintenance.enabled, message: config.maintenance.message };
+
+export function getMaintenanceSettings() { return { ...current }; }
+
+export async function initializeMaintenanceSettings() {
+  const { data, error } = await sb.from("sc_system_settings").select("setting_value").eq("setting_key", "maintenance").maybeSingle();
+  if (error) { console.warn("メンテナンス設定をDBから読み込めませんでした。初期設定を使用します。", error.message); return; }
+  const value = data?.setting_value as { enabled?: unknown; message?: unknown } | null;
+  if (value && typeof value === "object") {
+    current = {
+      enabled: typeof value.enabled === "boolean" ? value.enabled : current.enabled,
+      message: typeof value.message === "string" && value.message.trim() ? value.message.trim().slice(0, 500) : current.message
+    };
+  }
+}
+
+export async function updateMaintenanceSettings(enabled: boolean, message: string) {
+  const next = { enabled, message: message.trim().slice(0, 500) || "メンテナンス中です。しばらくお待ちください。" };
+  const { error } = await sb.from("sc_system_settings").upsert({ setting_key: "maintenance", setting_value: next, updated_at: new Date().toISOString() }, { onConflict: "setting_key" });
+  if (error) throw new Error("メンテナンス設定を保存できませんでした。SupabaseのSQLを適用してください。");
+  current = next;
+  return { ...current };
+}
 
 // メンテナンスモード（環境変数 MAINTENANCE_MODE=on で有効）
 // 有効中は、利用者向けの API と画面をすべて止めて「メンテナンス中」を返す。
@@ -48,19 +73,20 @@ export function maintenanceGate(req: Request, res: Response, next: NextFunction)
   const path = req.path.replace(/\/+$/, "") || "/";
 
   if (OPEN_API.has(path) || path.startsWith("/api/admin")) return next();
+  if (!current.enabled) return next();
 
   if (path.startsWith("/api/")) {
-    res.status(503).json({ error: config.maintenance.message, maintenance: true });
+    res.status(503).json({ error: current.message, maintenance: true });
     return;
   }
 
   if (req.method !== "GET" && req.method !== "HEAD") {
-    res.status(503).json({ error: config.maintenance.message, maintenance: true });
+    res.status(503).json({ error: current.message, maintenance: true });
     return;
   }
 
   // 稼働状況の画面と管理者パネルの画面、画像・スクリプトなどのファイルは通す
   if (path === "/status" || path === "/admin" || path.startsWith("/admin/") || path.includes(".")) return next();
 
-  res.status(503).set("Cache-Control", "no-store").type("html").send(maintenancePage(config.maintenance.message));
+  res.status(503).set("Cache-Control", "no-store").type("html").send(maintenancePage(current.message));
 }

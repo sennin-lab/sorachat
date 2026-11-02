@@ -19,7 +19,7 @@ import { senninai } from "./senninai.js";
 import { blocks } from "./blocks.js";
 import { BlockedError } from "./messages.js";
 import { attachRealtime } from "./realtime.js";
-import { maintenanceGate } from "./maintenance.js";
+import { initializeMaintenanceSettings, maintenanceGate } from "./maintenance.js";
 import { getStatus } from "./status.js";
 
 const app = express();
@@ -40,10 +40,9 @@ app.get("/api/status", async (_req, res) => {
   res.json(await getStatus());
 });
 
-// メンテナンスモード（MAINTENANCE_MODE=on のときだけ有効）
-if (config.maintenance.enabled) {
-  app.use(maintenanceGate);
-}
+// メンテナンスモードは管理者パネルから即時切り替え可能。
+// /api/admin と /admin はメンテナンス中も利用できる。
+app.use(maintenanceGate);
 
 app.use("/api", accounts);
 app.use("/api", dm);
@@ -85,7 +84,7 @@ attachRealtime(server);
 
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`SoraChat listening on ${config.port}`);
-  if (config.maintenance.enabled) console.log("メンテナンスモードで起動しています（MAINTENANCE_MODE）");
+  initializeMaintenanceSettings().catch((error) => console.error("メンテナンス設定の初期化に失敗しました", error));
   // 再起動前に始まったミニゲームの制限時間を引き継ぐ
   resumeGameTimers().catch((error) => console.error("ミニゲームの制限時間を引き継げませんでした", error));
 });
