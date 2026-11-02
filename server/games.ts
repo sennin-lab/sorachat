@@ -2,7 +2,7 @@
 // 1つのゲームは「game」のメッセージ1件に紐づく（sc_games.message_id）。状態は sc_games.state に保存する。
 import { sendToUser } from "./hub.js";
 import { insertMessage, memberIds, membership, type MessageRow } from "./messages.js";
-import { GAME_CONFIG, GameError, reduce, viewOf, type GameAction, type GameKind, type GameStatus, type GameView, type Stored } from "./gameLogic.js";
+import { deadlineOf, GAME_CONFIG, GameError, reduce, viewOf, type GameAction, type GameKind, type GameStatus, type GameView, type Reduced, type Stored } from "./gameLogic.js";
 import { generateQuizQuestions } from "./quizgen.js";
 import { sb } from "./supabase.js";
 
@@ -35,10 +35,60 @@ function serialize<T>(key: string, task: () => Promise<T>): Promise<T> {
   return run;
 }
 
-// 会話の全員へ、それぞれに見せてよい形のゲームを送る
+// 制限時間のタイマー（ゲームごとに1つ）。締め切りの時刻に、サーバーがそのゲームを進める
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleTick(messageId: string, deadline: number | null) {
+  const previous = timers.get(messageId);
+  if (previous) clearTimeout(previous);
+  timers.delete(messageId);
+  if (deadline === null) return;
+  const delay = Math.min(Math.max(deadline - Date.now(), 0) + 30, 2_000_000_000);
+  timers.set(
+    messageId,
+    setTimeout(() => {
+      timers.delete(messageId);
+      void tickGame(messageId).catch((error) => console.error("ミニゲームの時間切れ処理に失敗しました", error));
+    }, delay)
+  );
+}
+
+// 時間切れの分だけ進める（押し忘れ・出し忘れがあっても止まらないように）
+async function tickGame(messageId: string): Promise<void> {
+  await serialize(messageId, async () => {
+    const row = await gameRow(messageId);
+    if (!row || row.state.cancelled) return;
+    let next: Reduced;
+    try {
+      next = reduce(row.kind, row.creator_id, row.state, "", { action: "tick" });
+    } catch (error) {
+      // すでに終わったゲームなど、進める必要がないときは何もしない
+      if (error instanceof GameError) return;
+      throw error;
+    }
+    const { error } = await sb
+      .from("sc_games")
+      .update({ state: next.stored, status: next.status, updated_at: new Date().toISOString() })
+      .eq("message_id", messageId);
+    if (error) throw error;
+    await broadcastGame(messageId);
+  });
+}
+
+// サーバーを再起動したあとも、進行中のゲームの締め切りを引き継ぐ
+export async function resumeGameTimers(): Promise<void> {
+  const { data, error } = await sb.from("sc_games").select("message_id, state").eq("status", "playing");
+  if (error) throw error;
+  for (const row of (data ?? []) as { message_id: string; state: Stored }[]) {
+    scheduleTick(row.message_id, deadlineOf(row.state.play));
+  }
+}
+
+// 会話の全員へ、それぞれに見せてよい形のゲームを送る（締め切りのタイマーも合わせて入れ直す）
 export async function broadcastGame(messageId: string): Promise<void> {
   const row = await gameRow(messageId);
   if (!row) return;
+  scheduleTick(messageId, deadlineOf(row.state.play));
   for (const uid of await memberIds(row.conversation_id)) {
     sendToUser(uid, {
       type: "game",
@@ -80,7 +130,7 @@ export async function gameAction(messageId: string, me: string, input: GameActio
       !row.state.cancelled &&
       row.state.players.length >= GAME_CONFIG.quiz.min;
     const quizQuestions = startingQuiz ? await generateQuizQuestions() : null;
-    const next = reduce(row.kind, row.creator_id, row.state, me, input, Math.random, quizQuestions ?? undefined);
+    const next = reduce(row.kind, row.creator_id, row.state, me, input, Math.random, quizQuestions ?? undefined, Date.now());
     const { error } = await sb
       .from("sc_games")
       .update({ state: next.stored, status: next.status, updated_at: new Date().toISOString() })

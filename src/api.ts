@@ -1,9 +1,14 @@
+import type { BanInfo } from "./types";
+
 export class ApiError extends Error {
   status: number;
+  // 利用停止中のときだけ入る（期限の表示に使う）
+  ban: BanInfo | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, ban: BanInfo | null = null) {
     super(message);
     this.status = status;
+    this.ban = ban;
   }
 }
 
@@ -21,7 +26,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(`${path} への接続に失敗しました（${detail}）。`, 0);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error ?? `${path} がエラーを返しました（HTTP ${res.status}）。`, res.status);
+  if (!res.ok) {
+    const ban: BanInfo | null = data.ban ?? null;
+    // 利用停止になっていたら、どの画面からでも利用停止の表示に切り替える
+    if (ban) window.dispatchEvent(new CustomEvent<BanInfo>("account-banned", { detail: ban }));
+    throw new ApiError(data.error ?? `${path} がエラーを返しました（HTTP ${res.status}）。`, res.status, ban);
+  }
   return data as T;
 }
 

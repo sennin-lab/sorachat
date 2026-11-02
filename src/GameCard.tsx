@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { GameHand, GameKind, GameView } from "./types";
 
 export const GAME_TITLES: Record<GameKind, string> = {
@@ -18,7 +19,98 @@ type Props = {
 };
 
 // ミニゲームの吹き出しの中身。操作はすべてサーバーに送り、結果は全員の画面に届く
-export function GameCard({ game, names, onAction }: Props) {
+// 「全画面」を押すと、同じ中身を画面いっぱいに出す（状態は同じものを見ているので、ずれない）
+export function GameCard(props: Props) {
+  const [full, setFull] = useState(false);
+  // 全画面は、ボタンを押した瞬間に要求する（ブラウザは操作の直後でないと許可しないため）
+  const expand = () => {
+    if (typeof document.documentElement.requestFullscreen === "function") {
+      document.documentElement.requestFullscreen().catch(() => undefined);
+    }
+    setFull(true);
+  };
+  return (
+    <>
+      <GameBody {...props} onExpand={expand} />
+      {full && (
+        <GameFullscreen title={GAME_TITLES[props.game.kind]} onClose={() => setFull(false)}>
+          <GameBody {...props} />
+        </GameFullscreen>
+      )}
+    </>
+  );
+}
+
+// 締め切りまでの残り秒数。サーバーは「あと何ミリ秒」で送ってくるので、受け取った時点から数える
+function useCountdown(remainingMs: number | null | undefined): number | null {
+  const [, tick] = useReducer((n: number) => n + 1, 0);
+  const endAt = useMemo(() => (typeof remainingMs === "number" ? Date.now() + remainingMs : null), [remainingMs]);
+  useEffect(() => {
+    if (endAt === null) return;
+    const timer = window.setInterval(() => tick(), 250);
+    return () => window.clearInterval(timer);
+  }, [endAt]);
+  if (endAt === null) return null;
+  return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+}
+
+// 時間の表示（残りが少ないと赤くする）
+function Timer({ seconds, label }: { seconds: number; label: string }) {
+  return (
+    <span className={`game-timer${seconds <= 3 ? " urgent" : ""}`}>
+      {label} <strong>{seconds}</strong>秒
+    </span>
+  );
+}
+
+// 全画面の表示。端末が対応していれば本当の全画面にし、非対応（iPhoneなど）でも画面いっぱいに広げる
+function GameFullscreen({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    let entered = false;
+    const onFullscreenChange = () => {
+      if (document.fullscreenElement) entered = true;
+      // 端末側の操作で全画面が解除されたら、画面も閉じる
+      else if (entered) closeRef.current();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRef.current();
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+      if (document.fullscreenElement && typeof document.exitFullscreen === "function") {
+        document.exitFullscreen().catch(() => undefined);
+      }
+    };
+  }, []);
+
+  // 吹き出しのクリックや長押しが、チャット側に伝わらないようにする
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  return createPortal(
+    <div className="game-fs" role="dialog" aria-modal="true" aria-label={title} onClick={stop} onPointerDown={stop} onTouchStart={stop}>
+      <div className="game-fs-bar">
+        <strong>{title}</strong>
+        <button type="button" className="btn-small" onClick={() => onClose()}>
+          閉じる
+        </button>
+      </div>
+      <div className="game-fs-body">
+        <div className="game-fs-inner">{children}</div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function GameBody({ game, names, onAction, onExpand }: Props & { onExpand?: () => void }) {
   const nameOf = (uid: string | null | undefined) => (uid === game.me ? "あなた" : uid ? names.get(uid) ?? "メンバー" : "");
   const joined = game.players.includes(game.me);
   const isCreator = game.me === game.creatorId;
@@ -32,6 +124,11 @@ export function GameCard({ game, names, onAction }: Props) {
         {game.status === "waiting" && <span className="game-chip">募集中</span>}
         {game.status === "playing" && <span className="game-chip live">対戦中</span>}
         {finished && <span className="game-chip">{game.cancelled ? "中止" : "終了"}</span>}
+        {onExpand && (
+          <button type="button" className="game-expand" onClick={() => onExpand()} aria-label="全画面で遊ぶ">
+            全画面
+          </button>
+        )}
       </div>
 
       {game.status === "waiting" && (
@@ -132,6 +229,7 @@ function TicTacToe({ game, nameOf, canPlay, onAction }: Sub) {
 
 function Quiz({ game, nameOf, canPlay, onAction }: Sub) {
   const q = game.quiz!;
+  const seconds = useCountdown(q.deadlineIn);
   const amBuzzer = q.buzzed === game.me;
   const canBuzz = canPlay && q.phase === "question" && !q.buzzed && !q.tried.includes(game.me);
   const ranking = game.players
@@ -168,6 +266,12 @@ function Quiz({ game, nameOf, canPlay, onAction }: Sub) {
     <div className="quiz">
       <p className="game-meta">
         第{q.round + 1}問 / {q.total}問
+        {seconds !== null && (
+          <>
+            {" ・ "}
+            <Timer seconds={seconds} label={q.phase === "revealed" ? "次の問題まで" : "残り"} />
+          </>
+        )}
       </p>
       <p className="quiz-question">{q.question}</p>
       <div className="quiz-options">
@@ -220,6 +324,7 @@ function ScoreList({ ranking, nameOf }: { ranking: { uid: string; score: number 
 
 function Janken({ game, nameOf, canPlay, onAction }: Sub) {
   const j = game.janken!;
+  const seconds = useCountdown(j.deadlineIn);
   const amAlive = j.alive.includes(game.me);
   const isChampionRound = Boolean(j.champion);
 
@@ -235,7 +340,15 @@ function Janken({ game, nameOf, canPlay, onAction }: Sub) {
         : `${last.winningHand ? HAND_LABEL[last.winningHand] : ""}の勝ち。${last.eliminated.map((uid) => nameOf(uid)).join("、")}が敗退`;
     return (
       <div className="janken">
-        <p className="game-meta">第{j.round}回の結果</p>
+        <p className="game-meta">
+          第{j.round}回の結果
+          {seconds !== null && (
+            <>
+              {" ・ "}
+              <Timer seconds={seconds} label="次へ" />
+            </>
+          )}
+        </p>
         <ul className="game-scores">
           {Object.entries(last.hands).map(([uid, hand]) => (
             <li key={uid}>
@@ -259,7 +372,16 @@ function Janken({ game, nameOf, canPlay, onAction }: Sub) {
 
   return (
     <div className="janken">
-      <p className="game-meta">第{j.round}回　残り{j.alive.length}人</p>
+      <p className="game-meta">
+        第{j.round}回　残り{j.alive.length}人
+        {seconds !== null && (
+          <>
+            {" ・ "}
+            <Timer seconds={seconds} label="残り" />
+          </>
+        )}
+      </p>
+      {canPlay && amAlive && !j.myHand && seconds !== null && <p className="game-meta">時間内に出さないと、ランダムの手になります</p>}
       {canPlay && amAlive && !j.myHand && (
         <div className="janken-hands">
           {(Object.keys(HAND_LABEL) as GameHand[]).map((hand) => (

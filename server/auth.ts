@@ -33,6 +33,19 @@ export async function endSession(token: unknown) {
   }
 }
 
+// Cookie の証明書から、有効なログイン中のユーザーIDを取り出す（期限切れや無効なら null）
+export async function sessionUserId(token: unknown): Promise<string | null> {
+  if (typeof token !== "string" || !token) return null;
+  const { data, error } = await sb
+    .from("sc_sessions")
+    .select("user_id, expires_at")
+    .eq("token_hash", sha256(token))
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || new Date(data.expires_at).getTime() < Date.now()) return null;
+  return data.user_id as string;
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const token = req.cookies?.[SESSION_COOKIE];
@@ -50,6 +63,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       res.status(401).json({ error: "セッションが切れました。再ログインしてください。" });
       return;
     }
+    // 利用停止中は、セッションが残っていても操作させない。画面に期限を出せるように ban を返す
+    const ban = await banOfUser(data.user_id as string);
+    if (ban) {
+      res.status(403).json({ error: BANNED_MESSAGE, ban });
+      return;
+    }
     res.locals.userId = data.user_id;
     next();
   } catch (error) {
@@ -61,10 +80,25 @@ export const currentUserId = (res: Response) => res.locals.userId as string;
 
 export const BANNED_MESSAGE = "このアカウントは利用停止中です。";
 
-export async function isBanned(userId: string) {
-  const { data, error } = await sb.from("sc_users").select("banned_at").eq("id", userId).maybeSingle();
+// 利用停止の内容。permanent なら期限なし、そうでなければ until（ISO形式）まで
+export type BanInfo = { until: string | null; permanent: boolean };
+
+// いまの利用停止を返す。利用停止でない・期限が過ぎているなら null
+export function banOf(row: { banned_at: string | null; banned_until: string | null } | null): BanInfo | null {
+  if (!row?.banned_at) return null;
+  if (!row.banned_until) return { until: null, permanent: true };
+  if (new Date(row.banned_until).getTime() <= Date.now()) return null;
+  return { until: row.banned_until, permanent: false };
+}
+
+export async function banOfUser(userId: string): Promise<BanInfo | null> {
+  const { data, error } = await sb.from("sc_users").select("banned_at, banned_until").eq("id", userId).maybeSingle();
   if (error) throw error;
-  return Boolean(data?.banned_at);
+  return banOf(data as { banned_at: string | null; banned_until: string | null } | null);
+}
+
+export async function isBanned(userId: string) {
+  return (await banOfUser(userId)) !== null;
 }
 
 export function signRealtimeToken(userId: string, ttlSeconds = 3600) {

@@ -2,7 +2,7 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { z } from "zod";
-import { SESSION_COOKIE, sha256 } from "./auth.js";
+import { banOfUser, SESSION_COOKIE, sha256 } from "./auth.js";
 import { addSocket, removeSocket, setViewing } from "./hub.js";
 import { BlockedError, UUID, insertMessage, membership, replyTargetOk, toMessage } from "./messages.js";
 import { senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
@@ -56,9 +56,14 @@ export function attachRealtime(server: Server) {
       return;
     }
     userFromRequest(req)
-      .then((userId) => {
+      .then(async (userId) => {
         if (!userId) {
           socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        if (await banOfUser(userId)) {
+          socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
           socket.destroy();
           return;
         }

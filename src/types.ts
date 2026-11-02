@@ -110,6 +110,8 @@ export type GameView = {
     tried: string[];
     scores: Record<string, number>;
     result: { answer: number; choice: number | null; by: string | null; correct: boolean } | null;
+    // 次の締め切りまでの残り（ミリ秒）。締め切りがないときは null
+    deadlineIn: number | null;
   };
   janken: null | {
     round: number;
@@ -119,6 +121,7 @@ export type GameView = {
     myHand: GameHand | null;
     last: { hands: Record<string, GameHand>; outcome: "draw" | "win"; winningHand: GameHand | null; eliminated: string[] } | null;
     champion: string | null;
+    deadlineIn: number | null;
   };
   guess: null | {
     min: number;
@@ -164,3 +167,6 @@ export type Friend = {
 
 // 1対1の相手とのフレンド関係（自分から見た状態）
 export type FriendshipState = "friend" | "incoming" | "outgoing" | "none";
+
+// 利用停止（BAN）の内容。until が null なら永久
+export type BanInfo = { until: string | null; permanent: boolean };

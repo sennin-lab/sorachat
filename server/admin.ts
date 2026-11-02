@@ -2,9 +2,9 @@ import crypto from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { config } from "./config.js";
-import { cookieBase } from "./auth.js";
+import { banOf, cookieBase, type BanInfo } from "./auth.js";
 import { disconnectUser } from "./hub.js";
-import { readImage } from "./media.js";
+import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
 import { UUID } from "./messages.js";
 import { sb } from "./supabase.js";
 import { decryptText } from "./crypto.js";
@@ -101,7 +101,7 @@ admin.get("/admin/session", (_req, res) => {
 });
 
 // ---- ユーザー ----
-const USER_COLUMNS = "id, username, display_name, bio, contact, profile_url, avatar_path, sennin_id, cover_theme, created_at, banned_at";
+const USER_COLUMNS = "id, username, display_name, bio, contact, profile_url, avatar_path, sennin_id, cover_theme, created_at, banned_at, banned_until";
 
 type UserRow = {
   id: string;
@@ -115,8 +115,10 @@ type UserRow = {
   cover_theme: string | null;
   created_at: string;
   banned_at: string | null;
+  banned_until: string | null;
 };
 
+// 利用停止は「期限が過ぎていないもの」だけ有効。ban が null なら利用中
 const userSummary = (u: UserRow) => ({
   id: u.id,
   username: u.username,
@@ -124,7 +126,7 @@ const userSummary = (u: UserRow) => ({
   hasAvatar: Boolean(u.avatar_path),
   sennin: Boolean(u.sennin_id),
   createdAt: u.created_at,
-  bannedAt: u.banned_at
+  ban: banOf(u) as BanInfo | null
 });
 
 admin.get("/admin/users", async (req, res) => {
@@ -183,29 +185,93 @@ admin.get("/admin/users/:id/avatar", async (req, res) => {
   res.send(image.buffer);
 });
 
-// BAN: ログインを止め、既存のログインを切り、接続も閉じる
+// 利用停止の期間。permanent なら永久、そうでなければ amount × unit のあいだ
+const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 } as const;
+const MAX_BAN_MS = 10 * 365 * 86_400_000;
+const banSchema = z.object({
+  permanent: z.boolean(),
+  amount: z.number().int().min(1).max(100_000).optional(),
+  unit: z.enum(["minutes", "hours", "days"]).optional()
+});
+
+// BAN: 期間つき・永久から選ぶ。セッションは残し、利用者の画面に「利用停止」と期限を出す（ログアウトはできない）
 admin.post("/admin/users/:id/ban", async (req, res) => {
   const id = idParam(req, res);
   if (!id) return;
-  const bannedAt = new Date().toISOString();
-  const { data, error } = await sb.from("sc_users").update({ banned_at: bannedAt }).eq("id", id).select("id").maybeSingle();
+  const parsed = banSchema.safeParse(req.body);
+  if (!parsed.success || (!parsed.data.permanent && (!parsed.data.amount || !parsed.data.unit))) {
+    res.status(400).json({ error: "利用停止の期間を入力してください。" });
+    return;
+  }
+  const now = Date.now();
+  let bannedUntil: string | null = null;
+  if (!parsed.data.permanent) {
+    const ms = parsed.data.amount! * UNIT_MS[parsed.data.unit!];
+    if (ms > MAX_BAN_MS) {
+      res.status(400).json({ error: "期間は10年までにしてください。" });
+      return;
+    }
+    bannedUntil = new Date(now + ms).toISOString();
+  }
+  const bannedAt = new Date(now).toISOString();
+  const { data, error } = await sb
+    .from("sc_users")
+    .update({ banned_at: bannedAt, banned_until: bannedUntil })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
   if (!data) {
     res.status(404).json({ error: "ユーザーが見つかりません。" });
     return;
   }
-  const { error: sessionError } = await sb.from("sc_sessions").delete().eq("user_id", id);
-  if (sessionError) throw sessionError;
+  // 開いている接続は閉じる（利用者の画面が利用停止の表示に切り替わる）
   disconnectUser(id);
-  res.json({ ok: true, bannedAt });
+  res.json({ ok: true, ban: banOf({ banned_at: bannedAt, banned_until: bannedUntil }) });
 });
 
 admin.post("/admin/users/:id/unban", async (req, res) => {
   const id = idParam(req, res);
   if (!id) return;
-  const { error } = await sb.from("sc_users").update({ banned_at: null }).eq("id", id);
+  const { error } = await sb.from("sc_users").update({ banned_at: null, banned_until: null }).eq("id", id);
   if (error) throw error;
   res.json({ ok: true });
+});
+
+// アイコン画像の設定・削除（管理者が不適切な画像を外したり、差し替えたりできる）
+admin.post("/admin/users/:id/avatar", upload.single("file"), async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  if (!isAllowedImage(req.file)) {
+    res.status(415).json({ error: "JPEG・PNG・WebP・GIF の画像を選んでください。" });
+    return;
+  }
+  const { data: user, error: readError } = await sb.from("sc_users").select("avatar_path").eq("id", id).maybeSingle();
+  if (readError) throw readError;
+  if (!user) {
+    res.status(404).json({ error: "ユーザーが見つかりません。" });
+    return;
+  }
+  const path = await saveImage(req.file!, `avatars/${id}`);
+  const { error } = await sb.from("sc_users").update({ avatar_path: path }).eq("id", id);
+  if (error) throw error;
+  await removeImage(user.avatar_path ?? null);
+  res.json({ ok: true, hasAvatar: true });
+});
+
+admin.delete("/admin/users/:id/avatar", async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  const { data: user, error: readError } = await sb.from("sc_users").select("avatar_path").eq("id", id).maybeSingle();
+  if (readError) throw readError;
+  if (!user) {
+    res.status(404).json({ error: "ユーザーが見つかりません。" });
+    return;
+  }
+  const { error } = await sb.from("sc_users").update({ avatar_path: null }).eq("id", id);
+  if (error) throw error;
+  await removeImage(user.avatar_path ?? null);
+  res.json({ ok: true, hasAvatar: false });
 });
 
 // 管理者は、誰とでも友だちにできる（相手の承認は不要。相互に1行ずつ保存する）

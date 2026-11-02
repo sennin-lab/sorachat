@@ -1,9 +1,11 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { ApiError, api, post } from "./api";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ApiError, api, delete_, post } from "./api";
 import { Avatar } from "./Avatar";
+import { formatRemaining } from "./Banned";
+import type { BanInfo } from "./types";
 
 // 管理者パネル（/admin/login からだけ入る。一般の画面からは入口を出さない）
-type UserSummary = { id: string; username: string; displayName: string; hasAvatar: boolean; sennin: boolean; createdAt: string; bannedAt: string | null };
+type UserSummary = { id: string; username: string; displayName: string; hasAvatar: boolean; sennin: boolean; createdAt: string; ban: BanInfo | null };
 type Member = { id: string; username: string; displayName: string; role: string };
 type ConvSummary = {
   id: string;
@@ -34,10 +36,13 @@ type AdminMessage = {
   imageUrl: string | null;
   fileUrl: string | null;
 };
+type Unit = "minutes" | "hours" | "days";
 
+const UNIT_LABEL: Record<Unit, string> = { minutes: "分", hours: "時間", days: "日" };
 const msg = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。");
 const fmt = (iso: string) =>
   new Date(iso).toLocaleString("ja-JP", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const avatarSrc = (id: string, version: number) => `/api/admin/users/${id}/avatar?v=${version}`;
 
 // 管理者のAPI。期限切れ（401）になったらログイン画面に戻す
 async function adminApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -97,9 +102,12 @@ export function AdminApp() {
     <div className="admin">
       <header className="admin-bar">
         <button className="admin-brand" onClick={() => go("/admin")}>
-          SoraChat 管理者
+          <span className="admin-brand-mark">S</span>
+          <span>
+            SoraChat <small>管理者</small>
+          </span>
         </button>
-        <button className="btn-text" onClick={() => void logout()}>
+        <button className="admin-logout" onClick={() => void logout()}>
           ログアウト
         </button>
       </header>
@@ -135,9 +143,11 @@ function AdminLogin({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="auth">
-      <form className="auth-card" onSubmit={submit}>
-        <h1 className="wordmark">管理者</h1>
+    <div className="admin-login">
+      <form className="admin-login-card" onSubmit={submit}>
+        <span className="admin-brand-mark large">S</span>
+        <h1>管理者ログイン</h1>
+        <p className="muted small">SoraChat の管理画面です</p>
         <input
           className="auth-input"
           type="password"
@@ -161,17 +171,22 @@ function Dashboard({ go }: { go: Go }) {
   const [tab, setTab] = useState<"users" | "chats">("users");
   return (
     <>
-      <div className="admin-tabs">
-        <button className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>
+      <div className="admin-segment" role="tablist">
+        <button role="tab" aria-selected={tab === "users"} className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>
           ユーザー
         </button>
-        <button className={tab === "chats" ? "on" : ""} onClick={() => setTab("chats")}>
+        <button role="tab" aria-selected={tab === "chats"} className={tab === "chats" ? "on" : ""} onClick={() => setTab("chats")}>
           チャット
         </button>
       </div>
       {tab === "users" ? <UsersList go={go} /> : <ChatsList go={go} />}
     </>
   );
+}
+
+function BanTag({ ban }: { ban: BanInfo | null }) {
+  if (!ban) return null;
+  return <span className="admin-tag ban">{ban.permanent ? "永久BAN" : "利用停止"}</span>;
 }
 
 function UsersList({ go }: { go: Go }) {
@@ -193,26 +208,31 @@ function UsersList({ go }: { go: Go }) {
 
   return (
     <section className="admin-stack">
-      <input className="auth-input admin-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ユーザー名・名前で検索" />
+      <div className="admin-search-wrap">
+        <input className="admin-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ユーザー名・名前で検索" />
+      </div>
       {error && <p className="notice error">{error}</p>}
       {!users ? (
         <p className="muted">読み込み中…</p>
       ) : users.length === 0 ? (
-        <p className="muted">該当するユーザーがいません。</p>
+        <p className="muted admin-empty">該当するユーザーがいません。</p>
       ) : (
         <ul className="admin-list">
           {users.map((u) => (
             <li key={u.id}>
               <button className="admin-row" onClick={() => go(`/admin/users/${u.id}`)}>
-                <Avatar userId={u.id} hasAvatar={u.hasAvatar} name={u.displayName} size={40} src={`/api/admin/users/${u.id}/avatar`} />
+                <Avatar userId={u.id} hasAvatar={u.hasAvatar} name={u.displayName} size={42} src={`/api/admin/users/${u.id}/avatar`} />
                 <span className="admin-row-text">
                   <strong>
                     {u.displayName}
-                    {u.sennin && <small> 仙人</small>}
+                    {u.sennin && <small className="admin-badge">仙人</small>}
                   </strong>
                   <small>@{u.username}</small>
                 </span>
-                {u.bannedAt ? <span className="admin-tag ban">利用停止</span> : null}
+                <BanTag ban={u.ban} />
+                <span className="admin-chevron" aria-hidden="true">
+                  ›
+                </span>
               </button>
             </li>
           ))}
@@ -237,26 +257,34 @@ function ChatsList({ go }: { go: Go }) {
 
   return (
     <section className="admin-stack">
-      <input className="auth-input admin-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="チャット名・メンバー名で絞り込み" />
+      <div className="admin-search-wrap">
+        <input className="admin-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="チャット名・メンバー名で絞り込み" />
+      </div>
       {error && <p className="notice error">{error}</p>}
       {!chats ? (
         <p className="muted">読み込み中…</p>
       ) : shown.length === 0 ? (
-        <p className="muted">チャットがありません。</p>
+        <p className="muted admin-empty">チャットがありません。</p>
       ) : (
         <ul className="admin-list">
           {shown.map((c) => (
             <li key={c.id}>
               <button className="admin-row" onClick={() => go(`/admin/chats/${c.id}`)}>
+                <span className="admin-chat-icon" aria-hidden="true">
+                  {c.isGroup ? "◎" : "●"}
+                </span>
                 <span className="admin-row-text">
                   <strong>
                     {c.name}
-                    {c.isOpen && <small> オープン</small>}
-                    {c.isGroup && !c.isOpen && <small> グループ</small>}
+                    {c.isOpen && <small className="admin-badge">オープン</small>}
+                    {c.isGroup && !c.isOpen && <small className="admin-badge">グループ</small>}
                   </strong>
                   <small>
                     {c.memberCount}人 ・ {c.lastPreview ?? "まだメッセージがありません"}
                   </small>
+                </span>
+                <span className="admin-chevron" aria-hidden="true">
+                  ›
                 </span>
               </button>
             </li>
@@ -272,7 +300,7 @@ function UserPage({ id, go }: { id: string; go: Go }) {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [friendName, setFriendName] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [avatarVersion, setAvatarVersion] = useState(0);
 
   const load = () =>
     adminApi<UserDetail>(`/api/admin/users/${id}`)
@@ -282,24 +310,15 @@ function UserPage({ id, go }: { id: string; go: Go }) {
   useEffect(() => {
     setUser(null);
     setError("");
+    setStatus("");
     void load();
   }, [id]);
 
-  const toggleBan = async () => {
-    if (!user) return;
-    const banning = !user.bannedAt;
-    if (!window.confirm(banning ? `${user.displayName} を利用停止にしますか？\nログインできなくなり、今のログインも切れます。` : "利用停止を解除しますか？")) return;
-    setBusy(true);
-    setStatus("");
-    try {
-      await adminApi(`/api/admin/users/${id}/${banning ? "ban" : "unban"}`, post());
-      setStatus(banning ? "利用停止にしました。" : "利用停止を解除しました。");
-      await load();
-    } catch (err) {
-      setStatus(msg(err));
-    } finally {
-      setBusy(false);
-    }
+  // 操作のあとは、状態の表示を更新する（アイコンは表示の番号を変えて、新しい画像を読み直す）
+  const changed = (message: string, avatarChanged = false) => {
+    setStatus(message);
+    if (avatarChanged) setAvatarVersion((v) => v + 1);
+    void load();
   };
 
   const addFriend = async (event: FormEvent) => {
@@ -310,8 +329,7 @@ function UserPage({ id, go }: { id: string; go: Go }) {
     try {
       await adminApi(`/api/admin/users/${id}/friends`, post({ username }));
       setFriendName("");
-      setStatus("友だちに追加しました。");
-      await load();
+      changed("友だちに追加しました。");
     } catch (err) {
       setStatus(msg(err));
     }
@@ -322,20 +340,34 @@ function UserPage({ id, go }: { id: string; go: Go }) {
 
   return (
     <>
-      <button className="btn-text" onClick={() => go("/admin")}>
+      <button className="admin-back" onClick={() => go("/admin")}>
         ← 一覧に戻る
       </button>
 
-      <section className="admin-card">
-        <div className="admin-profile">
-          <Avatar userId={user.id} hasAvatar={user.hasAvatar} name={user.displayName} size={72} src={`/api/admin/users/${user.id}/avatar`} />
-          <div>
-            <h2>{user.displayName}</h2>
-            <p className="muted">@{user.username}</p>
-            {user.sennin && <p className="muted small">仙人アカウント連携</p>}
-            {user.bannedAt ? <span className="admin-tag ban">利用停止中（{fmt(user.bannedAt)}〜）</span> : <span className="admin-tag ok">利用中</span>}
-          </div>
+      <section className="admin-card admin-hero">
+        <div className="admin-hero-avatar">
+          <Avatar userId={user.id} hasAvatar={user.hasAvatar} name={user.displayName} size={84} src={avatarSrc(user.id, avatarVersion)} />
         </div>
+        <div className="admin-hero-text">
+          <h2>
+            {user.displayName}
+            {user.sennin && <small className="admin-badge">仙人</small>}
+          </h2>
+          <p className="muted">@{user.username}</p>
+          {user.ban ? (
+            <span className="admin-tag ban big">
+              {user.ban.permanent ? "永久に利用停止中" : `利用停止中（${fmt(user.ban.until!)} まで）`}
+            </span>
+          ) : (
+            <span className="admin-tag ok big">利用中</span>
+          )}
+        </div>
+      </section>
+
+      {status && <p className="admin-status">{status}</p>}
+
+      <section className="admin-card">
+        <h3 className="admin-section-title">基本情報</h3>
         <dl className="admin-dl">
           <dt>自己紹介</dt>
           <dd>{user.bio || "—"}</dd>
@@ -348,16 +380,14 @@ function UserPage({ id, go }: { id: string; go: Go }) {
           <dt>ユーザーID</dt>
           <dd className="mono">{user.id}</dd>
         </dl>
-        <div className="admin-actions">
-          <button className={user.bannedAt ? "btn-secondary" : "btn-danger"} disabled={busy} onClick={() => void toggleBan()}>
-            {user.bannedAt ? "利用停止を解除" : "利用停止（BAN）にする"}
-          </button>
-        </div>
-        {status && <p className="notice center">{status}</p>}
       </section>
 
+      <AvatarPanel user={user} onChanged={(message) => changed(message, true)} onError={setStatus} />
+
+      <BanPanel user={user} onChanged={changed} onError={setStatus} />
+
       <section className="admin-card">
-        <h3>友だちを追加</h3>
+        <h3 className="admin-section-title">友だちを追加</h3>
         <p className="muted small">管理者は、相手の承認なしで誰とでも友だちにできます。</p>
         <form className="admin-inline" onSubmit={addFriend}>
           <input className="auth-input" value={friendName} onChange={(e) => setFriendName(e.target.value)} placeholder="ユーザー名" autoCapitalize="none" />
@@ -368,7 +398,7 @@ function UserPage({ id, go }: { id: string; go: Go }) {
       </section>
 
       <section className="admin-card">
-        <h3>友だち（{user.friends.length}人）</h3>
+        <h3 className="admin-section-title">友だち（{user.friends.length}人）</h3>
         {user.friends.length === 0 ? (
           <p className="muted small">友だちはいません。</p>
         ) : (
@@ -381,7 +411,7 @@ function UserPage({ id, go }: { id: string; go: Go }) {
                     <strong>{f.displayName}</strong>
                     <small>@{f.username}</small>
                   </span>
-                  {f.bannedAt ? <span className="admin-tag ban">利用停止</span> : null}
+                  <BanTag ban={f.ban} />
                 </button>
               </li>
             ))}
@@ -390,7 +420,7 @@ function UserPage({ id, go }: { id: string; go: Go }) {
       </section>
 
       <section className="admin-card">
-        <h3>参加しているチャット（{user.conversations.length}件）</h3>
+        <h3 className="admin-section-title">参加しているチャット（{user.conversations.length}件）</h3>
         {user.conversations.length === 0 ? (
           <p className="muted small">参加しているチャットはありません。</p>
         ) : (
@@ -398,10 +428,13 @@ function UserPage({ id, go }: { id: string; go: Go }) {
             {user.conversations.map((c) => (
               <li key={c.id}>
                 <button className="admin-row" onClick={() => go(`/admin/chats/${c.id}`)}>
+                  <span className="admin-chat-icon" aria-hidden="true">
+                    {c.isGroup ? "◎" : "●"}
+                  </span>
                   <span className="admin-row-text">
                     <strong>
                       {c.name}
-                      {c.isOpen && <small> オープン</small>}
+                      {c.isOpen && <small className="admin-badge">オープン</small>}
                     </strong>
                     <small>{c.memberCount}人</small>
                   </span>
@@ -412,6 +445,177 @@ function UserPage({ id, go }: { id: string; go: Go }) {
         )}
       </section>
     </>
+  );
+}
+
+// アイコン画像の設定・削除（不適切な画像の差し替えや削除ができる）
+function AvatarPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (message: string) => void; onError: (message: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const upload = async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    setBusy(true);
+    try {
+      await adminApi(`/api/admin/users/${user.id}/avatar`, { method: "POST", body: form });
+      onChanged("アイコンを設定しました。");
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm(`${user.displayName} のアイコンを削除しますか？\n削除すると、名前の1文字が表示されます。`)) return;
+    setBusy(true);
+    try {
+      await adminApi(`/api/admin/users/${user.id}/avatar`, delete_());
+      onChanged("アイコンを削除しました。");
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="admin-card">
+      <h3 className="admin-section-title">アイコン画像</h3>
+      <p className="muted small">JPEG・PNG・WebP・GIF（10MBまで）を設定できます。</p>
+      <div className="admin-avatar-actions">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void upload(file);
+          }}
+        />
+        <button className="btn-secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
+          {busy ? "処理中…" : user.hasAvatar ? "画像を差し替える" : "画像を設定する"}
+        </button>
+        {user.hasAvatar && (
+          <button className="btn-danger" disabled={busy} onClick={() => void remove()}>
+            画像を削除
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// 利用停止（BAN）。期間を指定するか、永久にするかを選ぶ
+function BanPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (message: string) => void; onError: (message: string) => void }) {
+  const [mode, setMode] = useState<"duration" | "permanent">("duration");
+  const [amount, setAmount] = useState("3");
+  const [unit, setUnit] = useState<Unit>("days");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const ban = user.ban;
+  const amountNumber = Number(amount);
+  const validAmount = Number.isInteger(amountNumber) && amountNumber >= 1 && amountNumber <= 100000;
+  const label = mode === "permanent" ? "永久" : `${amountNumber}${UNIT_LABEL[unit]}`;
+
+  const apply = async () => {
+    if (mode === "duration" && !validAmount) {
+      setError("1以上の整数を入力してください。");
+      return;
+    }
+    if (!window.confirm(`${user.displayName} を${label}利用停止にしますか？\n利用者の画面は「バンされました」の表示に切り替わります。`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      const body = mode === "permanent" ? { permanent: true } : { permanent: false, amount: amountNumber, unit };
+      await adminApi(`/api/admin/users/${user.id}/ban`, post(body));
+      onChanged(`${label}の利用停止にしました。`);
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unban = async () => {
+    if (!window.confirm(`${user.displayName} の利用停止を解除しますか？`)) return;
+    setBusy(true);
+    try {
+      await adminApi(`/api/admin/users/${user.id}/unban`, post());
+      onChanged("利用停止を解除しました。");
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="admin-card">
+      <h3 className="admin-section-title">利用停止（BAN）</h3>
+      {ban ? (
+        <div className="admin-ban-now">
+          <strong>
+            {ban.permanent ? "永久に利用停止中です" : `${fmt(ban.until!)} まで利用停止中`}
+          </strong>
+          {!ban.permanent && <small>残り {formatRemaining(new Date(ban.until!).getTime() - Date.now())}</small>}
+        </div>
+      ) : (
+        <p className="muted small">いまは利用中です。停止する期間を選んでください。</p>
+      )}
+
+      <div className="admin-segment small" role="radiogroup" aria-label="利用停止の種類">
+        <button type="button" role="radio" aria-checked={mode === "duration"} className={mode === "duration" ? "on" : ""} onClick={() => setMode("duration")}>
+          期間を指定
+        </button>
+        <button type="button" role="radio" aria-checked={mode === "permanent"} className={mode === "permanent" ? "on danger" : ""} onClick={() => setMode("permanent")}>
+          永久
+        </button>
+      </div>
+
+      {mode === "duration" ? (
+        <div className="admin-ban-duration">
+          <input
+            className="auth-input"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={100000}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            aria-label="期間の数"
+          />
+          <select className="admin-select" value={unit} onChange={(e) => setUnit(e.target.value as Unit)} aria-label="期間の単位">
+            <option value="minutes">分</option>
+            <option value="hours">時間</option>
+            <option value="days">日</option>
+          </select>
+        </div>
+      ) : (
+        <p className="admin-warn">永久の利用停止は、解除するまで続きます。</p>
+      )}
+
+      {error && <p className="notice error">{error}</p>}
+
+      <div className="admin-actions">
+        <button
+          className={mode === "permanent" ? "btn-danger" : "btn-primary"}
+          disabled={busy || (mode === "duration" && !validAmount)}
+          onClick={() => void apply()}
+        >
+          {ban ? `${label}に変更する` : `${label}の利用停止にする`}
+        </button>
+        {ban && (
+          <button className="btn-secondary" disabled={busy} onClick={() => void unban()}>
+            解除する
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -458,7 +662,7 @@ function ChatPage({ id, go }: { id: string; go: Go }) {
 
   return (
     <>
-      <button className="btn-text" onClick={() => go("/admin")}>
+      <button className="admin-back" onClick={() => go("/admin")}>
         ← 一覧に戻る
       </button>
       <section className="admin-card">

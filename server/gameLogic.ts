@@ -53,6 +53,14 @@ type TttPlay = {
   winner: "X" | "O" | "draw" | null;
   line: number[] | null;
 };
+// 制限時間（ミリ秒）。時間切れはサーバーが自動で次へ進める
+export const TIMING = {
+  quizQuestion: 15_000, // 問題が出てから、誰かが押すまで
+  quizAnswer: 10_000, // 押した人が答えるまで
+  quizReveal: 6_000, // 正解を見せてから次の問題へ
+  jankenHand: 15_000, // 手を出すまで（出さなかった人はランダムの手）
+  jankenReveal: 6_000 // 結果を見せてから次の回へ
+} as const;
 export type QuizQuestion = { q: string; options: string[]; answer: number };
 type QuizResult = { answer: number; choice: number | null; by: string | null; correct: boolean };
 type QuizPlay = {
@@ -64,6 +72,7 @@ type QuizPlay = {
   tried: string[];
   scores: Record<string, number>;
   result: QuizResult | null;
+  deadline: number | null;
 };
 type JankenLast = { hands: Record<string, Hand>; outcome: "draw" | "win"; winningHand: Hand | null; eliminated: string[] };
 type JankenPlay = {
@@ -74,6 +83,7 @@ type JankenPlay = {
   hands: Record<string, Hand>;
   last: JankenLast | null;
   champion: string | null;
+  deadline: number | null;
 };
 type GuessPlay = {
   kind: "guess";
@@ -113,6 +123,8 @@ export type GameView = {
     tried: string[];
     scores: Record<string, number>;
     result: QuizResult | null;
+    // 次の締め切りまでの残り（ミリ秒）。締め切りがないときは null
+    deadlineIn: number | null;
   };
   janken: null | {
     round: number;
@@ -122,6 +134,7 @@ export type GameView = {
     myHand: Hand | null;
     last: JankenLast | null;
     champion: string | null;
+    deadlineIn: number | null;
   };
   guess: null | {
     min: number;
@@ -133,7 +146,8 @@ export type GameView = {
 };
 
 export type GameAction = {
-  action: "join" | "start" | "cancel" | "move" | "buzz" | "answer" | "next" | "hand" | "guess";
+  // tick は制限時間のタイマーからだけ送る（画面からは送らない）
+  action: "join" | "start" | "cancel" | "move" | "buzz" | "answer" | "next" | "hand" | "guess" | "tick";
   index?: number;
   choice?: number;
   hand?: Hand;
@@ -157,7 +171,7 @@ const shuffle = <T>(list: T[], random: () => number): T[] => {
 };
 
 // quizQuestions は senninai が作った問題（足りないときは固定の問題を使う）
-function startPlay(kind: GameKind, players: string[], random: () => number, quizQuestions?: QuizQuestion[]): Play {
+function startPlay(kind: GameKind, players: string[], random: () => number, now: number, quizQuestions?: QuizQuestion[]): Play {
   if (kind === "tictactoe") return { kind, board: Array(9).fill(""), turn: "X", winner: null, line: null };
   if (kind === "quiz") {
     const scores: Record<string, number> = {};
@@ -173,10 +187,13 @@ function startPlay(kind: GameKind, players: string[], random: () => number, quiz
       buzzed: null,
       tried: [],
       scores,
-      result: null
+      result: null,
+      deadline: now + TIMING.quizQuestion
     };
   }
-  if (kind === "janken") return { kind, round: 1, phase: "hand", alive: [...players], hands: {}, last: null, champion: null };
+  if (kind === "janken") {
+    return { kind, round: 1, phase: "hand", alive: [...players], hands: {}, last: null, champion: null, deadline: now + TIMING.jankenHand };
+  }
   return { kind, secret: 1 + Math.floor(random() * GUESS_MAX), guesses: [], winner: null };
 }
 
@@ -185,6 +202,60 @@ export function isFinished(play: Play | null): boolean {
   if (play.kind === "tictactoe") return play.winner !== null;
   if (play.kind === "quiz" || play.kind === "janken") return play.phase === "done";
   return play.winner !== null;
+}
+
+// 次の締め切り（ミリ秒の時刻）。締め切りのないゲームは null
+export function deadlineOf(play: Play | null): number | null {
+  if (!play || play.kind === "tictactoe" || play.kind === "guess") return null;
+  return typeof play.deadline === "number" ? play.deadline : null;
+}
+
+function remainingOf(play: QuizPlay | JankenPlay, now: number): number | null {
+  if (play.phase === "done" || typeof play.deadline !== "number") return null;
+  return Math.max(0, play.deadline - now);
+}
+
+// 制限時間を過ぎていたら、サーバーが次へ進める（押し忘れ・出し忘れで止まらないように）
+function applyDeadline(play: Play, players: string[], now: number, random: () => number) {
+  if (play.kind === "quiz") {
+    if (play.phase === "done" || typeof play.deadline !== "number" || play.deadline > now) return;
+    if (play.phase === "revealed") {
+      quizAction(play, players, "", { action: "next" }, now);
+      return;
+    }
+    const question = play.questions[play.round];
+    if (play.buzzed) {
+      // 答えるのが遅れた人は不正解扱い
+      const late = play.buzzed;
+      play.buzzed = null;
+      play.tried.push(late);
+      if (play.tried.length >= players.length) {
+        play.phase = "revealed";
+        play.result = { answer: question.answer, choice: null, by: late, correct: false };
+        play.deadline = now + TIMING.quizReveal;
+      } else {
+        play.deadline = now + TIMING.quizQuestion;
+      }
+      return;
+    }
+    // 誰も押さなかったら、正解を見せて次へ
+    play.phase = "revealed";
+    play.result = { answer: question.answer, choice: null, by: null, correct: false };
+    play.deadline = now + TIMING.quizReveal;
+    return;
+  }
+  if (play.kind === "janken") {
+    if (play.phase === "done" || typeof play.deadline !== "number" || play.deadline > now) return;
+    if (play.phase === "hand") {
+      // 出さなかった人は、ランダムの手を出したことにする
+      for (const uid of play.alive) {
+        if (!play.hands[uid]) play.hands[uid] = HANDS[Math.floor(random() * HANDS.length)];
+      }
+      resolveJanken(play, now);
+      return;
+    }
+    jankenAction(play, "", { action: "next" }, now);
+  }
 }
 
 const isIndex = (value: unknown, max: number): value is number =>
@@ -207,7 +278,7 @@ function tttMove(play: TttPlay, players: string[], me: string, index: unknown) {
   }
 }
 
-function quizAction(play: QuizPlay, players: string[], me: string, input: GameAction) {
+function quizAction(play: QuizPlay, players: string[], me: string, input: GameAction, now: number) {
   const question = play.questions[play.round];
   switch (input.action) {
     case "buzz": {
@@ -215,6 +286,7 @@ function quizAction(play: QuizPlay, players: string[], me: string, input: GameAc
       if (play.buzzed) throw new GameError("ほかの人が先に押しました。");
       if (play.tried.includes(me)) throw new GameError("この問題はもう答えています。");
       play.buzzed = me;
+      play.deadline = now + TIMING.quizAnswer;
       return;
     }
     case "answer": {
@@ -226,6 +298,7 @@ function quizAction(play: QuizPlay, players: string[], me: string, input: GameAc
         play.scores[me] = (play.scores[me] ?? 0) + 1;
         play.phase = "revealed";
         play.result = { answer: question.answer, choice, by: me, correct: true };
+        play.deadline = now + TIMING.quizReveal;
         return;
       }
       play.tried.push(me);
@@ -233,6 +306,9 @@ function quizAction(play: QuizPlay, players: string[], me: string, input: GameAc
       if (play.tried.length >= players.length) {
         play.phase = "revealed";
         play.result = { answer: question.answer, choice, by: me, correct: false };
+        play.deadline = now + TIMING.quizReveal;
+      } else {
+        play.deadline = now + TIMING.quizQuestion;
       }
       return;
     }
@@ -243,6 +319,7 @@ function quizAction(play: QuizPlay, players: string[], me: string, input: GameAc
       play.buzzed = null;
       play.result = null;
       play.phase = play.round >= play.questions.length ? "done" : "question";
+      play.deadline = play.phase === "done" ? null : now + TIMING.quizQuestion;
       return;
     }
     default:
@@ -250,7 +327,7 @@ function quizAction(play: QuizPlay, players: string[], me: string, input: GameAc
   }
 }
 
-function resolveJanken(play: JankenPlay) {
+function resolveJanken(play: JankenPlay, now: number) {
   const hands = { ...play.hands };
   const used = [...new Set(play.alive.map((uid) => hands[uid]))];
   if (used.length !== 2) {
@@ -266,9 +343,10 @@ function resolveJanken(play: JankenPlay) {
   }
   play.hands = {};
   play.phase = "revealed";
+  play.deadline = now + TIMING.jankenReveal;
 }
 
-function jankenAction(play: JankenPlay, me: string, input: GameAction) {
+function jankenAction(play: JankenPlay, me: string, input: GameAction, now: number) {
   switch (input.action) {
     case "hand": {
       if (play.phase !== "hand") throw new GameError("今は出せません。");
@@ -276,18 +354,20 @@ function jankenAction(play: JankenPlay, me: string, input: GameAction) {
       if (!input.hand || !HANDS.includes(input.hand)) throw new GameError("手が正しくありません。");
       if (play.hands[me]) throw new GameError("もう出しています。");
       play.hands[me] = input.hand;
-      if (play.alive.every((uid) => play.hands[uid])) resolveJanken(play);
+      if (play.alive.every((uid) => play.hands[uid])) resolveJanken(play, now);
       return;
     }
     case "next": {
       if (play.phase !== "revealed") throw new GameError("まだ次の回へ進めません。");
       if (play.champion) {
         play.phase = "done";
+        play.deadline = null;
         return;
       }
       play.round += 1;
       play.phase = "hand";
       play.hands = {};
+      play.deadline = now + TIMING.jankenHand;
       return;
     }
     default:
@@ -307,14 +387,14 @@ function guessAction(play: GuessPlay, me: string, input: GameAction) {
   if (result === "correct") play.winner = me;
 }
 
-function playAction(play: Play, players: string[], me: string, input: GameAction) {
+function playAction(play: Play, players: string[], me: string, input: GameAction, now: number) {
   if (play.kind === "tictactoe") {
     if (input.action !== "move") throw new GameError("この操作はできません。");
     tttMove(play, players, me, input.index);
   } else if (play.kind === "quiz") {
-    quizAction(play, players, me, input);
+    quizAction(play, players, me, input, now);
   } else if (play.kind === "janken") {
-    jankenAction(play, me, input);
+    jankenAction(play, me, input, now);
   } else {
     guessAction(play, me, input);
   }
@@ -330,12 +410,19 @@ export function reduce(
   me: string,
   input: GameAction,
   random: () => number = Math.random,
-  quizQuestions?: QuizQuestion[]
+  quizQuestions?: QuizQuestion[],
+  now: number = Date.now()
 ): Reduced {
   const stored: Stored = JSON.parse(JSON.stringify(current));
   if (stored.cancelled || isFinished(stored.play)) throw new GameError("このゲームは終わっています。");
+  // 制限時間を過ぎていれば、先に時間切れの分を進めてから操作を処理する
+  if (stored.play) applyDeadline(stored.play, stored.players, now, random);
+  if (input.action !== "tick" && isFinished(stored.play)) throw new GameError("このゲームは終わっています。");
 
   switch (input.action) {
+    case "tick":
+      // 時間切れの分は上で進めたので、ここでは何もしない
+      break;
     case "join": {
       if (stored.play) throw new GameError("もう始まっています。");
       if (stored.players.includes(me)) throw new GameError("すでに参加しています。");
@@ -343,7 +430,7 @@ export function reduce(
       stored.players.push(me);
       // 三目並べは2人そろったら、その場で始まる
       if (kind === "tictactoe" && stored.players.length === GAME_CONFIG[kind].max) {
-        stored.play = startPlay(kind, stored.players, random, quizQuestions);
+        stored.play = startPlay(kind, stored.players, random, now, quizQuestions);
       }
       break;
     }
@@ -353,7 +440,7 @@ export function reduce(
       if (stored.players.length < GAME_CONFIG[kind].min) {
         throw new GameError(`${GAME_CONFIG[kind].min}人そろってから始めてください。`);
       }
-      stored.play = startPlay(kind, stored.players, random, quizQuestions);
+      stored.play = startPlay(kind, stored.players, random, now, quizQuestions);
       break;
     }
     case "cancel": {
@@ -364,7 +451,7 @@ export function reduce(
     default: {
       if (!stored.play) throw new GameError("まだ始まっていません。");
       if (!stored.players.includes(me)) throw new GameError("参加者だけができます。");
-      playAction(stored.play, stored.players, me, input);
+      playAction(stored.play, stored.players, me, input, now);
     }
   }
 
@@ -374,7 +461,7 @@ export function reduce(
 }
 
 // 画面に送る形に変える。viewer は見ている人（自分の手などを出すため）
-export function viewOf(kind: GameKind, creator: string, stored: Stored, status: GameStatus, viewer: string): GameView {
+export function viewOf(kind: GameKind, creator: string, stored: Stored, status: GameStatus, viewer: string, now: number = Date.now()): GameView {
   const view: GameView = {
     kind,
     status,
@@ -412,7 +499,8 @@ export function viewOf(kind: GameKind, creator: string, stored: Stored, status: 
       buzzed: play.buzzed,
       tried: [...play.tried],
       scores: { ...play.scores },
-      result: play.result
+      result: play.result,
+      deadlineIn: remainingOf(play, now)
     };
   } else if (play.kind === "janken") {
     view.janken = {
@@ -422,7 +510,8 @@ export function viewOf(kind: GameKind, creator: string, stored: Stored, status: 
       submitted: Object.keys(play.hands),
       myHand: play.hands[viewer] ?? null,
       last: play.last,
-      champion: play.champion
+      champion: play.champion,
+      deadlineIn: remainingOf(play, now)
     };
   } else {
     const revealed = status === "finished";

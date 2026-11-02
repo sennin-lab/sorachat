@@ -11,6 +11,7 @@ import { accounts } from "./accounts.js";
 import { admin } from "./admin.js";
 import { config } from "./config.js";
 import { dm } from "./dm.js";
+import { resumeGameTimers } from "./games.js";
 import { friends } from "./friends.js";
 import { openChats } from "./openchat.js";
 import { push } from "./push.js";
@@ -71,4 +72,6 @@ attachRealtime(server);
 
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`SoraChat listening on ${config.port}`);
+  // 再起動前に始まったミニゲームの制限時間を引き継ぐ
+  resumeGameTimers().catch((error) => console.error("ミニゲームの制限時間を引き継げませんでした", error));
 });

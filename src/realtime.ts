@@ -145,9 +145,14 @@ function openSocket() {
     emitChat(data as ChatEvent);
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     if (socket === ws) socket = null;
     rejectAll("接続が切れました。");
+    // 利用停止になったときは再接続せず、アカウントの状態を確認し直す（利用停止の画面に切り替わる）
+    if (event.code === 4003) {
+      window.dispatchEvent(new Event("account-check"));
+      return;
+    }
     const delay = Math.min(30_000, 500 * 2 ** retryCount);
     retryCount += 1;
     window.clearTimeout(retryTimer);
