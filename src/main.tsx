@@ -3,13 +3,15 @@ import { BrowserRouter } from "react-router-dom";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { AdminApp } from "./Admin";
+import { StatusPage } from "./StatusPage";
 import { trackKeyboard } from "./keyboard";
 import "./styles.css";
 
 const isAdmin = window.location.pathname.startsWith("/admin");
+const isStatus = window.location.pathname.replace(/\/+$/, "") === "/status";
 
 // チャットアプリ本体はページをスクロールさせない（スクロールは各領域の中だけ）
-if (!isAdmin) {
+if (!isAdmin && !isStatus) {
   document.body.classList.add("app-root");
   trackKeyboard();
 }
@@ -18,6 +20,8 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {isAdmin ? (
       <AdminApp />
+    ) : isStatus ? (
+      <StatusPage />
     ) : (
       <BrowserRouter>
         <App />

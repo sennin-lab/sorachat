@@ -33,6 +33,11 @@ export const config = {
   },
   // 管理者パネル（/admin/login）のパスワード。未設定なら管理者ログインは使えません
   adminPassword: process.env.ADMIN_PASSWORD || "",
+  // メンテナンスモード。MAINTENANCE_MODE=on で有効（変更はサーバーの再起動で反映）
+  maintenance: {
+    enabled: ["on", "true", "1", "yes"].includes((process.env.MAINTENANCE_MODE || "").trim().toLowerCase()),
+    message: process.env.MAINTENANCE_MESSAGE?.trim() || "メンテナンス中ですしばらくお待ちください。"
+  },
   vapid: {
     publicKey: process.env.VAPID_PUBLIC_KEY || "",
     privateKey: process.env.VAPID_PRIVATE_KEY || "",

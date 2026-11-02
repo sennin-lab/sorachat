@@ -19,6 +19,8 @@ import { senninai } from "./senninai.js";
 import { blocks } from "./blocks.js";
 import { BlockedError } from "./messages.js";
 import { attachRealtime } from "./realtime.js";
+import { maintenanceGate } from "./maintenance.js";
+import { getStatus } from "./status.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -31,6 +33,17 @@ app.use(cookieParser());
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, name: "SoraChat" });
 });
+
+// サービス稼働状況（いつでも見られる。メンテナンス中も止めない）
+app.get("/api/status", async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(await getStatus());
+});
+
+// メンテナンスモード（MAINTENANCE_MODE=on のときだけ有効）
+if (config.maintenance.enabled) {
+  app.use(maintenanceGate);
+}
 
 app.use("/api", accounts);
 app.use("/api", dm);
@@ -72,6 +85,7 @@ attachRealtime(server);
 
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`SoraChat listening on ${config.port}`);
+  if (config.maintenance.enabled) console.log("メンテナンスモードで起動しています（MAINTENANCE_MODE）");
   // 再起動前に始まったミニゲームの制限時間を引き継ぐ
   resumeGameTimers().catch((error) => console.error("ミニゲームの制限時間を引き継げませんでした", error));
 });

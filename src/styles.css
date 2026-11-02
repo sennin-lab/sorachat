@@ -1933,3 +1933,49 @@ button, .bubble, .send-btn, .composer-icon, .chip { touch-action: manipulation; 
   overflow-wrap: anywhere;
 }
 .banned-final .banned-reason { color: #ffb4b4; }
+
+/* ---- メンテナンス中の表示 ---- */
+.maintenance { min-height: 100%; height: 100%; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--text); }
+.maintenance-card { max-width: 420px; width: 100%; text-align: center; animation: fade-in 0.4s ease both; }
+.maintenance-tag { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--accent-ink); letter-spacing: 0.04em; }
+.maintenance-text { margin: 0 0 20px; font-size: 18px; line-height: 1.7; }
+.maintenance-reload { border: 0; border-radius: 999px; padding: 10px 22px; font: inherit; font-weight: 700; color: #fff; background: var(--accent-ink); cursor: pointer; }
+.maintenance-status { display: block; margin-top: 16px; font-size: 14px; color: var(--accent-ink); }
+
+/* ---- 稼働状況のページ（/status）---- */
+.status-page { min-height: 100%; padding: 16px; background: var(--bg); color: var(--text); }
+.status-page .status-head { max-width: 720px; margin: 0 auto 12px; }
+.status-page h1 { margin: 4px 0 0; font-size: 22px; }
+.status-page h2 { margin: 0 0 8px; font-size: 15px; color: var(--muted); }
+.status-page h3 { margin: 0; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.status-back { font-size: 14px; color: var(--accent-ink); }
+.status-alert { max-width: 720px; margin: 0 auto 12px; padding: 12px 14px; border-radius: 12px; background: rgba(229, 72, 77, 0.1); color: var(--danger); font-size: 14px; line-height: 1.6; }
+.status-loading { max-width: 720px; margin: 24px auto; color: var(--muted); text-align: center; }
+.status-overall, .status-group, .status-legend { max-width: 720px; margin: 0 auto 14px; padding: 14px 16px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
+.status-overall { border-left: 6px solid var(--c, var(--muted)); }
+.status-overall-label { margin: 0 0 6px; font-size: 18px; font-weight: 700; }
+.status-maintenance-message { margin: 0 0 6px; color: var(--text); line-height: 1.6; }
+.status-meta { margin: 2px 0; font-size: 13px; color: var(--muted); }
+.status-refresh { margin-top: 10px; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 13px; color: var(--accent-ink); background: var(--bg-soft); cursor: pointer; }
+.status-refresh:disabled { opacity: 0.6; cursor: default; }
+.status-feature { padding: 12px 0; border-top: 1px solid var(--line); }
+.status-feature:first-of-type { border-top: 0; padding-top: 4px; }
+.status-feature-head, .status-check-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.status-note { margin: 4px 0 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.status-checks { list-style: none; margin: 8px 0 0; padding: 0 0 0 10px; border-left: 2px solid var(--line); }
+.status-check { padding: 6px 0 6px 10px; }
+.status-check-label { font-size: 14px; overflow-wrap: anywhere; }
+.status-optional { margin-left: 6px; font-size: 12px; color: var(--muted); }
+.status-detail { margin: 2px 0 0; font-size: 13px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.status-legend ul { margin: 0 0 8px; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; line-height: 1.6; }
+.status-legend p { margin: 0; font-size: 13px; color: var(--muted); }
+.status-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: var(--c); white-space: nowrap; }
+.st-ok { --c: #2f9e5b; }
+.st-degraded { --c: #d98a00; }
+.st-down { --c: #e5484d; }
+.st-unconfigured { --c: #71849a; }
+.st-unchecked { --c: #5b7fd6; }
+.st-maintenance { --c: #8a6fd8; }
+@media (max-width: 480px) {
+  .status-page { padding: 16px; }
+}
