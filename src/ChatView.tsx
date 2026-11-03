@@ -18,7 +18,8 @@ import { cachedMessages, saveMessages } from "./cache";
 import { clipLongWords } from "./clip";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
-import { startGroupCall } from "./groupCall";
+import { getCallState, joinCallFromChat, startGroupCall } from "./groupCall";
+import { CallCard } from "./CallCard";
 import { Icon } from "./Icon";
 import { ImageViewer } from "./ImageViewer";
 import { MessageMenu } from "./MessageMenu";
@@ -62,6 +63,7 @@ const messagePreview = (m: Message) => {
   if (m.kind === "stamp") return "スタンプ";
   if (m.kind === "poll") return `投票: ${m.body ?? ""}`;
   if (m.kind === "game") return "ミニゲーム";
+  if (m.kind === "call") return "通話";
   return clipLongWords(m.body ?? "");
 };
 
@@ -750,6 +752,20 @@ export function ChatView({
   const memberNames = new Map(memberList.map((m): [string, string] => [m.id, m.displayName]));
   const meName = memberList.find((m) => m.id === meId)?.username.toLowerCase() ?? "";
 
+  // トークの「電話に参加」から通話に入る
+  const joinCallFromMessage = (callId: string) => {
+    if (!conversation) return;
+    const current = getCallState();
+    if (current.status === "active" && current.callId === callId) return; // もう参加中
+    if (current.status !== "idle") {
+      setError("ほかの通話に参加中です。");
+      return;
+    }
+    joinCallFromChat({ callId, conversationId, groupName: conversation.name }).catch((e) =>
+      setError(e instanceof Error ? e.message : "通話に参加できませんでした")
+    );
+  };
+
   // グループ通話を始める（同じグループの全員に着信を送ります）
   const startGroupVoiceCall = () => {
     if (!conversation) return;
@@ -958,6 +974,8 @@ export function ChatView({
                         </button>
                       ) : m.kind === "poll" && m.poll ? (
                         <PollCard poll={m.poll} onVote={(index) => void vote(m.id, index)} onOpen={() => setPollViewingId(m.id)} />
+                      ) : m.kind === "call" && m.call ? (
+                        <CallCard call={m.call} onJoin={() => joinCallFromMessage(m.call!.callId)} />
                       ) : m.kind === "game" ? (
                         m.game ? (
                           <GameCard game={m.game} names={memberNames} onAction={(action, extra) => void gameAction(m.id, action, extra)} />

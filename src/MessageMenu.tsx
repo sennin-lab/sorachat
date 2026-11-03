@@ -52,7 +52,7 @@ export function MessageMenu({
             <Icon name="edit" size={20} /> 編集
           </button>
         )}
-        {!message.deleted && message.kind !== "system" && message.kind !== "poll" && message.kind !== "game" && (
+        {!message.deleted && message.kind !== "system" && message.kind !== "poll" && message.kind !== "game" && message.kind !== "call" && (
           <button onClick={onForward}>
             <Icon name="forward" size={20} /> 送信
           </button>

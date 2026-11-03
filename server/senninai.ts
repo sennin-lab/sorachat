@@ -303,6 +303,7 @@ function textOf(row: MessageRow): string | null {
   if (row.kind === "file") return `[ファイル: ${row.file_name ?? "ファイル"}]`;
   if (row.kind === "poll") return `[投票: ${(pollDataOf(row)?.question ?? "")}]`;
   if (row.kind === "game") return "[ミニゲーム]";
+  if (row.kind === "call") return "[通話]";
   return "[連絡先]";
 }
 

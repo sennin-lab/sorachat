@@ -224,9 +224,12 @@ async function joinChannel(conversationId: string) {
   on("leave", (p) => dropPeer(p.from));
 
   await new Promise<void>((resolve, reject) => {
-    ch.subscribe((status) => {
+    ch.subscribe((status, err) => {
       if (status === "SUBSCRIBED") resolve();
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") reject(new Error("通話の接続に失敗しました"));
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.error("[call] チャンネル接続に失敗:", status, err);
+        reject(new Error(`通話の接続に失敗しました（${status}${err ? `: ${err.message}` : ""}）`));
+      }
     });
   });
   await seal("join", { info: me });
@@ -257,26 +260,44 @@ export async function startGroupCall(args: { conversationId: string; groupName: 
   }
 }
 
+// 通話に入る（着信への応答・トークの「電話に参加」で共通）
+async function enterCall(target: { callId: string; conversationId: string; groupName: string; secret: string }) {
+  if (!me) throw new Error("ユーザー情報がありません");
+  callId = target.callId;
+  activeConversationId = target.conversationId;
+  await importSignKey(target.secret);
+  await openMic();
+  startedAt = Date.now();
+  setState({ status: "active", callId, conversationId: target.conversationId, groupName: target.groupName, participants: [me], muted: false, startedAt, ringing: false });
+  try {
+    await joinChannel(target.conversationId);
+  } catch (error) {
+    await leaveCall(); // 接続に失敗したら片付ける（「呼び出し中…」のまま固まらないように）
+    throw error;
+  }
+  refreshActive();
+}
+
 // 着信に応答する
 export async function acceptCall() {
   if (state.status !== "incoming") return;
   const { invite } = state;
-  if (!me) throw new Error("ユーザー情報がありません");
   window.clearTimeout(ringTimer);
-  callId = invite.callId;
-  activeConversationId = invite.conversationId;
-  await importSignKey(invite.secret);
-  startedAt = Date.now();
-  await openMic();
-  setState({ status: "active", callId, conversationId: invite.conversationId, groupName: invite.groupName, participants: [me], muted: false, startedAt, ringing: false });
+  await enterCall({ callId: invite.callId, conversationId: invite.conversationId, groupName: invite.groupName, secret: invite.secret });
+  void api(`/api/calls/${callId}/join`, post({ conversationId: invite.conversationId })).catch(() => {});
+}
+
+// トークの「電話に参加」から入る。サーバーが参加を記録し、通話に入るための鍵を返す
+export async function joinCallFromChat(args: { callId: string; conversationId: string; groupName: string }) {
+  if (state.status !== "idle") return;
+  if (!me) throw new Error("ユーザー情報がありません");
+  const joined = await api<{ secret: string }>(`/api/calls/${args.callId}/join`, post({ conversationId: args.conversationId }));
   try {
-    await joinChannel(invite.conversationId);
+    await enterCall({ ...args, secret: joined.secret });
   } catch (error) {
-    await leaveCall();
+    void api(`/api/calls/${args.callId}/leave`, post({ conversationId: args.conversationId })).catch(() => {});
     throw error;
   }
-  void api(`/api/calls/${callId}/join`, post({ conversationId: invite.conversationId })).catch(() => {});
-  refreshActive();
 }
 
 export function declineCall() {

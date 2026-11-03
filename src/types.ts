@@ -39,7 +39,7 @@ export type Message = {
   conversationId: string;
   senderId: string;
   // system はグループのお知らせ（参加・退出・削除・名前の変更）
-  kind: "text" | "image" | "file" | "contact" | "system" | "stamp" | "poll" | "game";
+  kind: "text" | "image" | "file" | "contact" | "system" | "stamp" | "poll" | "game" | "call";
   body: string | null;
   imageUrl: string | null;
   fileName?: string | null;
@@ -52,6 +52,8 @@ export type Message = {
   poll?: PollView | null;
   // ミニゲーム（kind が game のとき）。中身は見る人ごとに違う
   game?: GameView | null;
+  // 通話カード（kind が call のとき）。active は今も通話中かどうか
+  call?: { callId: string; active: boolean } | null;
   createdAt: string;
   edited: boolean;
   deleted: boolean;

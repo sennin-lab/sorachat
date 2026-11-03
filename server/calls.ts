@@ -1,11 +1,13 @@
-// グループ通話の発信・参加・退出。呼び出しはサーバーだけが送り、参加・退出・終了は通話の中のお知らせとしてトークに残します。
+// グループ通話の発信・参加・退出。呼び出しはサーバーだけが送ります。
+// 発信するとトークに「電話に参加」のカードを出し、参加・退出・終了はお知らせとして残します。
 // 身元はログインのセッションから決め、表示名などはDBから取るため、クライアントの申告は信用しません。
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, randomToken, requireAuth } from "./auth.js";
 import { config } from "./config.js";
-import { UUID, displayNameOf, memberIds, membership, postNotice } from "./messages.js";
+import { activeCalls, findCall, pruneCalls } from "./callRegistry.js";
+import { UUID, displayNameOf, insertMessage, memberIds, membership, postNotice } from "./messages.js";
 import { sb } from "./supabase.js";
 
 export const calls = Router();
@@ -13,11 +15,6 @@ export const calls = Router();
 const startSchema = z.object({ conversationId: z.string().regex(UUID) });
 const eventSchema = z.object({ conversationId: z.string().regex(UUID) });
 const callIdSchema = z.string().regex(UUID);
-
-// 進行中の通話（メモリ上。サーバーが再起動すると消え、以後のお知らせは出ません）
-type CallRecord = { conversationId: string; startedAt: number; participants: Set<string> };
-const active = new Map<string, CallRecord>();
-const MAX_CALL_AGE_MS = 12 * 60 * 60_000;
 
 // 連打の防止（1人あたり、時間枠の中で max 回まで）
 const hits = new Map<string, number[]>();
@@ -31,11 +28,6 @@ function allow(key: string, max: number, windowMs: number) {
   recent.push(now);
   hits.set(key, recent);
   return true;
-}
-
-function pruneCalls() {
-  const now = Date.now();
-  for (const [id, record] of active) if (now - record.startedAt > MAX_CALL_AGE_MS) active.delete(id);
 }
 
 function formatDuration(ms: number) {
@@ -103,13 +95,19 @@ calls.post("/calls", requireAuth, async (req, res) => {
     const callId = randomUUID();
     const secret = randomToken(32); // この通話の署名鍵（参加者だけに届く）
     pruneCalls();
-    active.set(callId, { conversationId, startedAt: Date.now(), participants: new Set([userId]) });
+    activeCalls.set(callId, { conversationId, startedAt: Date.now(), secret, participants: new Set([userId]) });
     const callerInfo = { id: userId, name: caller?.display_name ?? "", hasAvatar: Boolean(caller?.avatar_path) };
     const others = (await memberIds(conversationId)).filter((id) => id !== userId);
     // グループ名は sc_conversations.title に入っている（名前がないグループは「グループ」と表示）
     const groupName = conversation.title || "グループ";
     await sendRings(others, { callId, conversationId, groupName, caller: callerInfo, secret });
-    await postNotice(conversationId, userId, "通話が開始しています");
+
+    // トークに「電話に参加」のカードを出す（保存に失敗しても発信自体は続ける）
+    try {
+      await insertMessage(conversationId, userId, { kind: "call", callId }, "通話が始まりました");
+    } catch (error) {
+      console.error("[calls] 通話カードの保存に失敗:", error);
+    }
 
     res.json({ callId, secret });
   } catch (error) {
@@ -118,7 +116,7 @@ calls.post("/calls", requireAuth, async (req, res) => {
   }
 });
 
-// 通話に参加したとき（発信者は発信時に参加済み）
+// 通話に参加したとき（トークのカードや着信から）。参加を記録し、通話に入るための鍵を返す
 calls.post("/calls/:callId/join", requireAuth, async (req, res) => {
   try {
     const userId = currentUserId(res);
@@ -132,9 +130,9 @@ calls.post("/calls/:callId/join", requireAuth, async (req, res) => {
       res.status(429).json({ error: "操作が多すぎます。" });
       return;
     }
-    const record = active.get(callId.data);
+    const record = findCall(callId.data);
     if (!record || record.conversationId !== parsed.data.conversationId) {
-      res.status(404).json({ error: "通話が見つかりません。" });
+      res.status(404).json({ error: "この通話は終了しています。" });
       return;
     }
     if (!(await membership(record.conversationId, userId))) {
@@ -145,8 +143,9 @@ calls.post("/calls/:callId/join", requireAuth, async (req, res) => {
       record.participants.add(userId);
       await postNotice(record.conversationId, userId, `${await displayNameOf(userId)}さんが参加しました`);
     }
-    res.json({ ok: true });
-  } catch {
+    res.json({ ok: true, secret: record.secret });
+  } catch (error) {
+    console.error("[calls] 参加に失敗:", error);
     res.status(500).json({ error: "通話の参加を記録できませんでした。" });
   }
 });
@@ -165,7 +164,7 @@ calls.post("/calls/:callId/leave", requireAuth, async (req, res) => {
       res.status(429).json({ error: "操作が多すぎます。" });
       return;
     }
-    const record = active.get(callId.data);
+    const record = findCall(callId.data);
     // 通話が見つからない・参加していない場合は何もしない（二重に呼ばれても安全）
     if (!record || record.conversationId !== parsed.data.conversationId || !record.participants.has(userId)) {
       res.json({ ok: true });
@@ -174,11 +173,12 @@ calls.post("/calls/:callId/leave", requireAuth, async (req, res) => {
     record.participants.delete(userId);
     await postNotice(record.conversationId, userId, `${await displayNameOf(userId)}さんが退出しました`);
     if (record.participants.size === 0) {
-      active.delete(callId.data);
+      activeCalls.delete(callId.data);
       await postNotice(record.conversationId, userId, `通話が終了しました（通話時間 ${formatDuration(Date.now() - record.startedAt)}）`);
     }
     res.json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error("[calls] 退出に失敗:", error);
     res.status(500).json({ error: "通話の退出を記録できませんでした。" });
   }
 });

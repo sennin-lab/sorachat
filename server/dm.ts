@@ -898,8 +898,8 @@ dm.post("/dm/messages/:messageId/forward", async (req, res) => {
     res.status(404).json({ error: "メッセージが見つかりません。" });
     return;
   }
-  if (source.kind === "poll" || source.kind === "game") {
-    res.status(400).json({ error: "投票・ミニゲームは送信できません。" });
+  if (source.kind === "poll" || source.kind === "game" || source.kind === "call") {
+    res.status(400).json({ error: "投票・ミニゲーム・通話は送信できません。" });
     return;
   }
   const target = parsed.data.conversationId;
