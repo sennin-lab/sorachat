@@ -18,6 +18,7 @@ import { cachedMessages, saveMessages } from "./cache";
 import { clipLongWords } from "./clip";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
+import { startGroupCall } from "./groupCall";
 import { Icon } from "./Icon";
 import { ImageViewer } from "./ImageViewer";
 import { MessageMenu } from "./MessageMenu";
@@ -749,6 +750,18 @@ export function ChatView({
   const memberNames = new Map(memberList.map((m): [string, string] => [m.id, m.displayName]));
   const meName = memberList.find((m) => m.id === meId)?.username.toLowerCase() ?? "";
 
+  // グループ通話を始める（同じグループの全員に着信を送ります）
+  const startGroupVoiceCall = () => {
+    if (!conversation) return;
+    const self = memberList.find((m) => m.id === meId);
+    startGroupCall({
+      conversationId,
+      groupName: conversation.name,
+      memberIds: memberList.map((m) => m.id),
+      me: { id: meId, name: self?.displayName || self?.username || "", hasAvatar: self?.hasAvatar ?? false }
+    }).catch((e) => setError(e instanceof Error ? e.message : "通話を始められませんでした"));
+  };
+
   return (
     <section className={`chat${leaving ? " is-leaving" : ""}`}>
       <header className="chat-head">
@@ -766,9 +779,16 @@ export function ChatView({
           </span>
         </button>
         {conversation && isGroup && (
-          <button className="icon-btn" aria-label="グループ情報" onClick={() => setShowInfo(true)}>
-            <Icon name="info" size={22} />
-          </button>
+          <div className="head-actions">
+            <button className="icon-btn call-btn" aria-label="グループ通話" onClick={startGroupVoiceCall}>
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+                <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z" />
+              </svg>
+            </button>
+            <button className="icon-btn" aria-label="グループ情報" onClick={() => setShowInfo(true)}>
+              <Icon name="info" size={22} />
+            </button>
+          </div>
         )}
       </header>
 

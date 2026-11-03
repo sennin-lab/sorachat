@@ -3,6 +3,7 @@ import { api } from "./api";
 import { AuthScreen } from "./AuthScreen";
 import { BannedScreen } from "./Banned";
 import { clearCache } from "./cache";
+import { GroupCallHost } from "./GroupCallScreen";
 import { Home } from "./Home";
 import { Intro, hasSeenIntro, resetIntro } from "./Intro";
 import { MaintenanceScreen } from "./Maintenance";
@@ -59,13 +60,16 @@ export default function App() {
     );
 
   return (
-    <Home
-      me={me}
-      onMeChange={(next) => setMe(next)}
-      onLogout={() => {
-        clearCache();
-        setMe(null);
-      }}
-    />
+    <>
+      <Home
+        me={me}
+        onMeChange={(next) => setMe(next)}
+        onLogout={() => {
+          clearCache();
+          setMe(null);
+        }}
+      />
+      <GroupCallHost me={me} />
+    </>
   );
 }

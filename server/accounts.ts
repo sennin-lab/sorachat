@@ -3,7 +3,7 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { z } from "zod";
 import { config } from "./config.js";
 import { cookieBase, currentUserId, banOfUser, endSession, randomToken, requireAuth, sessionUserId, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
-import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
+import { cloudflareAvatarUrl, deleteCloudflareAvatar, isAllowedImage, readImage, removeImage, saveCloudflareAvatar, upload } from "./media.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
 import { disableAi, enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
@@ -281,11 +281,15 @@ accounts.post("/me/avatar", requireAuth, upload.single("file"), async (req, res)
     return;
   }
   const userId = currentUserId(res);
-  const path = await saveImage(req.file!, `avatars/${userId}`);
+  const path = await saveCloudflareAvatar(req.file!);
   const { data } = await sb.from("sc_users").select("avatar_path").eq("id", userId).maybeSingle();
   const { error } = await sb.from("sc_users").update({ avatar_path: path }).eq("id", userId);
   if (error) throw error;
-  await removeImage(data?.avatar_path ?? null);
+  if (data?.avatar_path?.startsWith("cf:")) {
+    await deleteCloudflareAvatar(data.avatar_path);
+  } else {
+    await removeImage(data?.avatar_path ?? null);
+  }
   res.json(await loadMe(userId));
 });
 
@@ -351,6 +355,12 @@ accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
   const { data } = await sb.from("sc_users").select("avatar_path").eq("id", id).maybeSingle();
   if (!data?.avatar_path) {
     res.status(404).end();
+    return;
+  }
+  const cloudflareUrl = cloudflareAvatarUrl(data.avatar_path);
+  if (cloudflareUrl) {
+    res.setHeader("cache-control", "private, max-age=300");
+    res.redirect(302, cloudflareUrl);
     return;
   }
   const image = await readImage(data.avatar_path);

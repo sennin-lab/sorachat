@@ -1980,3 +1980,60 @@ button, .bubble, .send-btn, .composer-icon, .chip { touch-action: manipulation; 
 @media (max-width: 480px) {
   .status-page { padding: 16px; }
 }
+
+/* ---- グループ電話（LINE のグループ通話に近い配置） ---- */
+.gcall {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(env(safe-area-inset-top, 0px) + 56px) 24px calc(env(safe-area-inset-bottom, 0px) + 40px);
+  color: #fff;
+  overflow: hidden;
+  animation: gcall-in 0.28s ease-out;
+}
+.gcall-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(170deg, #2b3a4a 0%, #1b2530 55%, #121a22 100%);
+}
+.gcall-top { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.gcall-name { margin: 14px 0 0; font-size: 22px; font-weight: 700; }
+.gcall-sub { margin: 0; font-size: 14px; opacity: 0.8; }
+.gcall-time { margin: 4px 0 0; font-size: 16px; font-variant-numeric: tabular-nums; opacity: 0.9; }
+.gcall-grid { display: grid; gap: 22px 16px; justify-items: center; width: 100%; max-width: 420px; }
+.gcall-grid-1 { grid-template-columns: 1fr; }
+.gcall-grid-2 { grid-template-columns: repeat(2, 1fr); }
+.gcall-grid-3, .gcall-grid-4 { grid-template-columns: repeat(2, 1fr); }
+.gcall-member { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 14px; max-width: 120px; }
+.gcall-member span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.gcall-actions { display: flex; gap: 36px; align-items: flex-start; justify-content: center; }
+.gcall-actions-two { gap: 64px; }
+.gcall-btn-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; }
+.gcall-circle {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  border: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.gcall-circle:active { transform: scale(0.94); }
+.gcall-circle.is-on { background: #fff; color: #1b2530; }
+.gcall-end { background: #ff3b30; transform: none; }
+.gcall-end svg { transform: rotate(135deg); }
+.gcall-accept { background: #06c755; }
+.gcall-incoming .gcall-top { margin-top: 24px; }
+@keyframes gcall-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .gcall { animation: none; } }
+.chat-head { grid-template-columns: 44px minmax(0, 1fr) minmax(44px, auto); }
+.head-actions { display: flex; justify-self: end; align-items: center; }
+.head-actions .icon-btn { justify-self: auto; }
