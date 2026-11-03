@@ -757,7 +757,6 @@ export function ChatView({
     startGroupCall({
       conversationId,
       groupName: conversation.name,
-      memberIds: memberList.map((m) => m.id),
       me: { id: meId, name: self?.displayName || self?.username || "", hasAvatar: self?.hasAvatar ?? false }
     }).catch((e) => setError(e instanceof Error ? e.message : "通話を始められませんでした"));
   };

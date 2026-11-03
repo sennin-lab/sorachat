@@ -17,6 +17,7 @@ import { openChats } from "./openchat.js";
 import { push } from "./push.js";
 import { senninai } from "./senninai.js";
 import { blocks } from "./blocks.js";
+import { calls } from "./calls.js";
 import { BlockedError } from "./messages.js";
 import { attachRealtime } from "./realtime.js";
 import { initializeMaintenanceSettings, maintenanceGate } from "./maintenance.js";
@@ -52,6 +53,7 @@ app.use("/api", openChats);
 app.use("/api", senninai);
 app.use("/api", stamps);
 app.use("/api", blocks);
+app.use("/api", calls);
 app.use("/api", admin);
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "見つかりません。" });

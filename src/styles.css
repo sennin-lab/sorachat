@@ -2037,3 +2037,32 @@ button, .bubble, .send-btn, .composer-icon, .chip { touch-action: manipulation; 
 .chat-head { grid-template-columns: 44px minmax(0, 1fr) minmax(44px, auto); }
 .head-actions { display: flex; justify-self: end; align-items: center; }
 .head-actions .icon-btn { justify-self: auto; }
+
+/* ---- グループ通話（上部バー・最小化） ---- */
+.gcall-header { width: 100%; display: flex; align-items: center; justify-content: space-between; }
+.gcall-icon-btn, .gcall-icon-spacer { width: 44px; height: 44px; display: grid; place-items: center; }
+.gcall-icon-btn { border: 0; background: transparent; color: #fff; cursor: pointer; border-radius: 50%; }
+.gcall-title { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.gcall-title strong { font-size: 17px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gcall-title span { font-size: 14px; opacity: 0.85; font-variant-numeric: tabular-nums; }
+.gcall-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 190;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px;
+  border: 0;
+  background: #06c755;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.gcall-bar-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: gcall-pulse 1.4s ease-in-out infinite; }
+.gcall-bar-hint { margin-left: auto; font-size: 13px; font-weight: 400; opacity: 0.9; }
+@keyframes gcall-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .gcall-bar-dot { animation: none; } }

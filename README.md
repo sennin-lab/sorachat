@@ -43,6 +43,7 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
    - `supabase/schema_v12.sql`（senninai（AIチャット）。ボットのアカウントも作ります）
    - `supabase/schema_v13.sql`（ブロック・トークごとの通知オフ・トークの削除。一覧の関数を作り直します）
    - `supabase/schema_v22.sql`（グループ電話のシグナリング用の Realtime 権限）
+   - `supabase/schema_v23.sql`（グループ通話のセキュリティ強化。呼び出しはサーバーだけが送ります）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。
@@ -83,7 +84,8 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
 - シグナリング（呼び出し・接続情報）は Supabase Realtime の broadcast で行い、音声は参加者どうしの WebRTC（メッシュ）で直接つなぎます。Render のサーバーは音声を中継しません。
 - 人数は最大6人です。接続は STUN のみを使うため、厳しい NAT の回線では繋がらないことがあります（TURN サーバーを追加すると改善します）。
 - 呼び出しは、アプリを開いている相手にだけ届きます（閉じている相手へのプッシュ通知はありません）。
-- 注意: `supabase/schema_v22.sql` の実行が必要です。実機での動作確認は未実施です。
+- 呼び出しは `POST /api/calls` でサーバーが送ります（1人あたり10分に8回まで）。シグナリングは通話ごとの鍵で署名します。
+- 注意: `supabase/schema_v22.sql` と `supabase/schema_v23.sql` の実行が必要です。実機での動作確認は未実施です。
 
 ## オープンチャット・管理者パネル
 

@@ -1,17 +1,9 @@
-// グループ電話の画面（LINE のグループ通話に近い配置：参加者のアバターを並べ、下に丸いボタンを置く）
+// グループ通話の画面（LINE のグループ通話に近い構成）
+// 上：最小化・グループ名・通話時間　中央：参加者のアバター　下：マイクと終了
+// 最小化すると、画面上部に緑のバーを出して、タップで通話画面に戻れます
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Avatar } from "./Avatar";
-import {
-  acceptCall,
-  declineCall,
-  getCallState,
-  leaveCall,
-  onCallState,
-  setIdentity,
-  toggleMute,
-  startCallInbox,
-  type CallPeer
-} from "./groupCall";
+import { acceptCall, declineCall, getCallState, leaveCall, onCallState, setIdentity, startCallInbox, toggleMute, type CallPeer } from "./groupCall";
 import type { Me } from "./types";
 
 const useCallState = () => useSyncExternalStore(onCallState, getCallState);
@@ -19,15 +11,15 @@ const useCallState = () => useSyncExternalStore(onCallState, getCallState);
 const formatElapsed = (ms: number) => {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const m = String(Math.floor((total % 3600) / 60)).padStart(h > 0 ? 2 : 1, "0");
   const s = String(total % 60).padStart(2, "0");
   return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 };
 
-// アプリ全体に1つだけ置く。着信の受付・通話画面の表示を担当
 export function GroupCallHost({ me }: { me: Me }) {
   const call = useCallState();
   const [now, setNow] = useState(Date.now());
+  const [minimized, setMinimized] = useState(false);
 
   useEffect(() => {
     const identity: CallPeer = { id: me.id, name: me.displayName || me.username, hasAvatar: me.hasAvatar };
@@ -36,7 +28,11 @@ export function GroupCallHost({ me }: { me: Me }) {
   }, [me.id, me.displayName, me.username, me.hasAvatar]);
 
   useEffect(() => {
-    if (call.status !== "active") return;
+    if (call.status !== "active") {
+      setMinimized(false);
+      return;
+    }
+    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [call.status]);
@@ -51,7 +47,7 @@ export function GroupCallHost({ me }: { me: Me }) {
         <div className="gcall-top">
           <Avatar userId={caller.id} hasAvatar={caller.hasAvatar} name={caller.name} size={120} />
           <p className="gcall-name">{caller.name}</p>
-          <p className="gcall-sub">{groupName}からグループ通話</p>
+          <p className="gcall-sub">{groupName}のグループ通話に招待されています</p>
         </div>
         <div className="gcall-actions gcall-actions-two">
           <div className="gcall-btn-wrap">
@@ -71,30 +67,42 @@ export function GroupCallHost({ me }: { me: Me }) {
     );
   }
 
-  const count = call.participants.length;
+  const elapsed = call.ringing ? "呼び出し中…" : formatElapsed(now - call.startedAt);
+
+  if (minimized) {
+    return (
+      <button className="gcall-bar" onClick={() => setMinimized(false)} aria-label="通話画面に戻る">
+        <span className="gcall-bar-dot" aria-hidden="true" />
+        <span>通話中 {elapsed}</span>
+        <span className="gcall-bar-hint">タップで戻る</span>
+      </button>
+    );
+  }
+
   return (
     <div className="gcall" role="dialog" aria-label="グループ通話">
       <div className="gcall-bg" aria-hidden="true" />
-      <div className="gcall-top">
-        <p className="gcall-sub">{call.groupName}</p>
-        <p className="gcall-time">{call.ringing ? "呼び出し中…" : formatElapsed(now - call.startedAt)}</p>
-      </div>
-      <div className={`gcall-grid gcall-grid-${Math.min(count, 4)}`}>
+      <header className="gcall-header">
+        <button className="gcall-icon-btn" onClick={() => setMinimized(true)} aria-label="最小化">
+          <ChevronIcon />
+        </button>
+        <div className="gcall-title">
+          <strong>{call.groupName}</strong>
+          <span>{elapsed}</span>
+        </div>
+        <span className="gcall-icon-spacer" aria-hidden="true" />
+      </header>
+      <div className={`gcall-grid gcall-grid-${Math.min(call.participants.length, 4)}`}>
         {call.participants.map((p) => (
           <div className="gcall-member" key={p.id}>
-            <Avatar userId={p.id} hasAvatar={p.hasAvatar} name={p.name} size={count > 2 ? 84 : 120} />
+            <Avatar userId={p.id} hasAvatar={p.hasAvatar} name={p.name} size={call.participants.length > 2 ? 84 : 120} />
             <span>{p.name}</span>
           </div>
         ))}
       </div>
       <div className="gcall-actions">
         <div className="gcall-btn-wrap">
-          <button
-            className={`gcall-circle${call.muted ? " is-on" : ""}`}
-            onClick={toggleMute}
-            aria-pressed={call.muted}
-            aria-label={call.muted ? "ミュート解除" : "ミュート"}
-          >
+          <button className={`gcall-circle${call.muted ? " is-on" : ""}`} onClick={toggleMute} aria-pressed={call.muted} aria-label={call.muted ? "ミュート解除" : "ミュート"}>
             <MicIcon off={call.muted} />
           </button>
           <span>{call.muted ? "解除" : "ミュート"}</span>
@@ -110,6 +118,14 @@ export function GroupCallHost({ me }: { me: Me }) {
   );
 }
 
+function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 function MicIcon({ off }: { off: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -122,7 +138,7 @@ function MicIcon({ off }: { off: boolean }) {
 
 function PhoneIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true" style={{ transform: "rotate(135deg)" }}>
+    <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true">
       <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z" />
     </svg>
   );
