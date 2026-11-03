@@ -127,7 +127,16 @@ export async function startCallInbox(meId: string) {
 // ---- 接続 ----
 
 async function openMic() {
-  stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+  } catch {
+    throw new Error("マイクを使えませんでした。ブラウザでマイクの許可を確認してください。");
+  }
+}
+
+function stopMic() {
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
 }
 
 function createPeer(info: CallPeer): Peer {
@@ -227,14 +236,25 @@ async function joinChannel(conversationId: string) {
 export async function startGroupCall(args: { conversationId: string; groupName: string; me: CallPeer }) {
   if (state.status !== "idle") return;
   me = args.me;
-  const started = await api<{ callId: string; secret: string }>("/api/calls", post({ conversationId: args.conversationId }));
+  await openMic(); // 先にマイクを確認。失敗したらサーバーで発信せず、相手を呼び出さない
+  let started: { callId: string; secret: string };
+  try {
+    started = await api<{ callId: string; secret: string }>("/api/calls", post({ conversationId: args.conversationId }));
+  } catch (error) {
+    stopMic();
+    throw error;
+  }
   callId = started.callId;
   activeConversationId = args.conversationId;
   await importSignKey(started.secret);
   startedAt = Date.now();
-  await openMic();
   setState({ status: "active", callId, conversationId: args.conversationId, groupName: args.groupName, participants: [me], muted: false, startedAt, ringing: true });
-  await joinChannel(args.conversationId);
+  try {
+    await joinChannel(args.conversationId);
+  } catch (error) {
+    await leaveCall(); // 接続に失敗したら通話を片付け、「呼び出し中…」のまま固まらないようにする
+    throw error;
+  }
 }
 
 // 着信に応答する
@@ -249,7 +269,12 @@ export async function acceptCall() {
   startedAt = Date.now();
   await openMic();
   setState({ status: "active", callId, conversationId: invite.conversationId, groupName: invite.groupName, participants: [me], muted: false, startedAt, ringing: false });
-  await joinChannel(invite.conversationId);
+  try {
+    await joinChannel(invite.conversationId);
+  } catch (error) {
+    await leaveCall();
+    throw error;
+  }
   void api(`/api/calls/${callId}/join`, post({ conversationId: invite.conversationId })).catch(() => {});
   refreshActive();
 }

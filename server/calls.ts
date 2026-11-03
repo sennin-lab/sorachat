@@ -59,7 +59,10 @@ async function sendRings(userIds: string[], payload: unknown) {
       },
       body: JSON.stringify({ messages })
     });
-    if (!response.ok) throw new Error(`broadcast failed: ${response.status}`);
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Realtime broadcast failed: ${response.status} ${detail}`);
+    }
   }
 }
 
@@ -82,7 +85,7 @@ calls.post("/calls", requireAuth, async (req, res) => {
     }
     const { data: conversation, error: convError } = await sb
       .from("sc_conversations")
-      .select("name, is_group")
+      .select("title, is_group")
       .eq("id", conversationId)
       .maybeSingle();
     if (convError) throw convError;
@@ -103,11 +106,14 @@ calls.post("/calls", requireAuth, async (req, res) => {
     active.set(callId, { conversationId, startedAt: Date.now(), participants: new Set([userId]) });
     const callerInfo = { id: userId, name: caller?.display_name ?? "", hasAvatar: Boolean(caller?.avatar_path) };
     const others = (await memberIds(conversationId)).filter((id) => id !== userId);
-    await sendRings(others, { callId, conversationId, groupName: conversation.name, caller: callerInfo, secret });
+    // グループ名は sc_conversations.title に入っている（名前がないグループは「グループ」と表示）
+    const groupName = conversation.title || "グループ";
+    await sendRings(others, { callId, conversationId, groupName, caller: callerInfo, secret });
     await postNotice(conversationId, userId, "通話が開始しています");
 
     res.json({ callId, secret });
-  } catch {
+  } catch (error) {
+    console.error("[calls] 発信に失敗:", error);
     res.status(500).json({ error: "通話を始められませんでした。" });
   }
 });
