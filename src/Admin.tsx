@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, api, delete_, post } from "./api";
 import { Avatar } from "./Avatar";
 import { formatRemaining } from "./Banned";
-import { AVATAR_OPTIONS, compressImage } from "./imageCompress";
 import { TEAM_ID } from "./team";
 import type { BanInfo } from "./types";
 
@@ -650,10 +649,8 @@ function AvatarPanel({ user, onChanged, onError }: { user: UserDetail; onChanged
   const [busy, setBusy] = useState(false);
 
   const upload = async (file: File) => {
-    // アイコンは送る前に圧縮する
-    const small = await compressImage(file, AVATAR_OPTIONS);
     const form = new FormData();
-    form.append("file", small, small.name);
+    form.append("file", file);
     setBusy(true);
     try {
       await adminApi(`/api/admin/users/${user.id}/avatar`, { method: "POST", body: form });

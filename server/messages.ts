@@ -1,4 +1,5 @@
 import { decryptText, encryptText } from "./crypto.js";
+import { normalizeStampRef } from "./stampRef.js";
 import { activeEndpoints, sendToUser } from "./hub.js";
 import { removeImage } from "./media.js";
 import { notifyRecipient } from "./push.js";
@@ -129,6 +130,13 @@ export function pollView(
   };
 }
 
+// スタンプの指定。stamp_ref が空の古い行は本文に名前が入っていることがあるので、そちらも見る
+function stampRefOf(row: { stamp_ref: string | null; body: string | null }): string | null {
+  const raw = row.stamp_ref ?? (row.body ? decryptText(row.body) : null);
+  if (!raw) return null;
+  return normalizeStampRef(raw);
+}
+
 export function toMessage(
   row: MessageRow,
   reactions: Reaction[] = [],
@@ -145,7 +153,8 @@ export function toMessage(
     senderId: row.sender_id,
     kind: row.kind,
     // 投票の本文は質問文にする（一覧・返信の表示用）
-    body: deleted ? null : row.kind === "poll" ? pollData?.question ?? null : decryptText(row.body),
+    // スタンプは本文を持たない（古い行では本文に名前が入っていることがあるので表示しない）
+    body: deleted ? null : row.kind === "poll" ? pollData?.question ?? null : row.kind === "stamp" ? null : decryptText(row.body),
     poll: deleted ? null : poll,
     game: deleted ? null : game,
     imageUrl: row.kind === "image" && !deleted ? `/api/dm/messages/${row.id}/image` : null,
@@ -153,7 +162,7 @@ export function toMessage(
     fileSize: row.kind === "file" && !deleted ? row.file_size : null,
     fileUrl: row.kind === "file" && !deleted ? `/api/dm/messages/${row.id}/file` : null,
     contact: row.kind === "contact" && !deleted ? contact : null,
-    stampRef: row.kind === "stamp" && !deleted ? row.stamp_ref : null,
+    stampRef: row.kind === "stamp" && !deleted ? stampRefOf(row) : null,
     createdAt: row.created_at,
     edited: row.edited_at !== null,
     deleted,

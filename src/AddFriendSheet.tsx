@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense, lazy } from "react";
 import { ApiError, api, post } from "./api";
 import { Avatar } from "./Avatar";
 import { Icon } from "./Icon";
-import { QrScanner } from "./QrScanner";
 import { makeQrImage, profileQrValue, usernameFromQr } from "./qr";
 import { UserRow } from "./UserRow";
 import type { Me } from "./types";
+
+// QR読み取り（jsQR）は開いたときだけ読み込む
+const QrScanner = lazy(() => import("./QrScanner").then((m) => ({ default: m.QrScanner })));
 
 type Mode = "search" | "qr";
 type Found = { id: string; username: string; displayName: string; hasAvatar: boolean; isFriend: boolean; isSelf?: boolean };
@@ -235,7 +237,9 @@ export function AddFriendSheet({
             </div>
           ) : (
             <>
-              <QrScanner key={scanKey} onDetect={(value) => void onQrDetect(value)} />
+              <Suspense fallback={null}>
+                <QrScanner key={scanKey} onDetect={(value) => void onQrDetect(value)} />
+              </Suspense>
               <p className="muted center small">相手のQRコードを枠内に映してください。</p>
             </>
           )}

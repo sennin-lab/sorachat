@@ -19,6 +19,7 @@ export const BUILTIN_STAMPS: Stamp[] = Object.entries(files)
 const urlByRef = new Map(BUILTIN_STAMPS.map((s) => [s.ref, s.url]));
 
 // 以前の名前（「#U3042#U308a…」のように文字コードで書かれた名前）で送られたスタンプを、今の名前に読み替える
+// サーバーと同じ変換（server/stampRef.ts と揃えておく）
 const decodeLegacyRef = (ref: string) => ref.replace(/#U([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 
 // スタンプの指定（ref）から表示する画像のURLを求める

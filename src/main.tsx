@@ -1,11 +1,13 @@
-import { StrictMode } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { BrowserRouter } from "react-router-dom";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { AdminApp } from "./Admin";
-import { StatusPage } from "./StatusPage";
 import { trackKeyboard } from "./keyboard";
 import "./styles.css";
+
+// 管理画面とステータス画面は、そのページを開いたときだけ読み込む（通常のチャット画面を軽くする）
+const AdminApp = lazy(() => import("./Admin").then((m) => ({ default: m.AdminApp })));
+const StatusPage = lazy(() => import("./StatusPage").then((m) => ({ default: m.StatusPage })));
 
 const isAdmin = window.location.pathname.startsWith("/admin");
 const isStatus = window.location.pathname.replace(/\/+$/, "") === "/status";
@@ -19,9 +21,13 @@ if (!isAdmin && !isStatus) {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {isAdmin ? (
-      <AdminApp />
+      <Suspense fallback={null}>
+        <AdminApp />
+      </Suspense>
     ) : isStatus ? (
-      <StatusPage />
+      <Suspense fallback={null}>
+        <StatusPage />
+      </Suspense>
     ) : (
       <BrowserRouter>
         <App />

@@ -35,7 +35,6 @@ import { FileViewer, viewerKindOf } from "./FileViewer";
 import { GameCard } from "./GameCard";
 import { GameSheet } from "./GameSheet";
 import { MentionText } from "./MentionText";
-import { CHAT_IMAGE_OPTIONS, compressImage } from "./imageCompress";
 import type { Conversation, FriendshipState, GameKind, Member, Message } from "./types";
 
 type ContactInfo = NonNullable<Message["contact"]>;
@@ -505,10 +504,8 @@ export function ChatView({
     setBusy(true);
     setError("");
     try {
-      // 写真は送る前に端末で圧縮する（ファイルはそのまま送る）
-      const payload = path === "image" ? await compressImage(file, CHAT_IMAGE_OPTIONS) : file;
       const form = new FormData();
-      form.append("file", payload);
+      form.append("file", file);
       if (replyId) form.append("replyToId", replyId);
       const message = await api<Message>(`/api/dm/${conversationId}/${path}`, { method: "POST", body: form });
       upsert([message]);
@@ -905,8 +902,17 @@ export function ChatView({
                         <p className="unsent">送信を取り消しました</p>
                       ) : showImage ? (
                         <img src={m.imageUrl!} alt="送信された画像" loading="lazy" draggable={false} />
-                      ) : m.kind === "stamp" && m.stampRef ? (
-                        <img className="stamp-img" src={stampUrlOf(m.stampRef) ?? undefined} alt="スタンプ" />
+                      ) : m.kind === "stamp" && m.stampRef && stampUrlOf(m.stampRef) ? (
+                        <img
+                          className="stamp-img"
+                          src={stampUrlOf(m.stampRef)!}
+                          alt="スタンプ"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : m.kind === "stamp" ? (
+                        // 画像が見つからない古いスタンプは、文字コードの名前を出さずに「スタンプ」と表示する
+                        <p className="stamp-missing">スタンプ</p>
                       ) : m.kind === "file" && m.fileUrl ? (
                         <a
                           className="file-card"

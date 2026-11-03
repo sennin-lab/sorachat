@@ -36,6 +36,7 @@ import {
 } from "./messages.js";
 import { aiEnabledFor, BOT_ID, senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { stampRefOk } from "./stamps.js";
+import { normalizeStampRef } from "./stampRef.js";
 import { createGame, gameAction, gameViewsFor } from "./games.js";
 import { GAME_KINDS, GameError } from "./gameLogic.js";
 import { sb } from "./supabase.js";
@@ -592,7 +593,7 @@ dm.post("/dm/:id/stamp", async (req, res) => {
     res.status(404).json({ error: "会話が見つかりません。" });
     return;
   }
-  const stampRef = typeof req.body?.stampRef === "string" ? req.body.stampRef : "";
+  const stampRef = normalizeStampRef(typeof req.body?.stampRef === "string" ? req.body.stampRef : "");
   if (!(await stampRefOk(stampRef, me))) {
     res.status(400).json({ error: "スタンプが見つかりません。" });
     return;
@@ -914,13 +915,14 @@ dm.post("/dm/messages/:messageId/forward", async (req, res) => {
     content = { kind: "file", filePath: source.file_path, fileName: source.file_name ?? "file", fileSize: Number(source.file_size ?? 0) };
   } else if (source.kind === "contact" && source.contact_user_id) {
     content = { kind: "contact", contactUserId: source.contact_user_id };
-  } else if (source.kind === "stamp" && source.stamp_ref) {
-    // スタンプは本文を持たないので、スタンプの参照をそのまま転送する
-    if (!(await stampRefOk(source.stamp_ref, me))) {
+  } else if (source.kind === "stamp" && (source.stamp_ref || source.body)) {
+    // スタンプは本文を持たないので、スタンプの参照をそのまま転送する（古い行は正規化してから）
+    const ref = normalizeStampRef(source.stamp_ref ?? decryptText(source.body) ?? "");
+    if (!(await stampRefOk(ref, me))) {
       res.status(400).json({ error: "このスタンプは送信できません。" });
       return;
     }
-    content = { kind: "stamp", stampRef: source.stamp_ref };
+    content = { kind: "stamp", stampRef: ref };
   }
   if (content.kind === "text" && !content.body) {
     res.status(400).json({ error: "このメッセージは送信できません。" });

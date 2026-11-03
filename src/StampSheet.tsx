@@ -32,7 +32,7 @@ export function StampSheet({ onPick, onClose }: { onPick: (ref: string) => void;
                   onClick={() => close(() => onPick(s.ref))}
                   aria-label={s.name}
                 >
-                  <img src={s.url} alt={s.name} />
+                  <img src={s.url} alt={s.name} loading="lazy" decoding="async" width={64} height={64} />
                 </button>
               ))}
             </div>
