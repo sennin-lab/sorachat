@@ -1,4 +1,4 @@
-import type { Conversation, Message } from "./types";
+import type { Conversation, Me, Message } from "./types";
 import { idbClear, idbGet, idbPut } from "./idb";
 
 // 保存先は2つ：
@@ -46,6 +46,22 @@ export const loadMessagesDb = async (id: string): Promise<Message[]> =>
 export const saveMessages = (id: string, list: Message[]) => {
   write(messageKey(id), list.slice(-LOCAL_MESSAGE_LIMIT));
   void idbPut("kv", messageKey(id), list.slice(-DB_MESSAGE_LIMIT));
+};
+
+// 自分の情報（名前・アイコンの版など）。IndexedDB に保存して、次に開くとき先に表示する
+const ME_KEY = "sorachat.me";
+export const loadMeDb = async (): Promise<Me | null> => (await idbGet<Me>("kv", ME_KEY)) ?? null;
+export const saveMeDb = (me: Me) => {
+  void idbPut("kv", ME_KEY, me);
+};
+
+// グループの送信者（名前・アイコン）。送った人が今のメンバーでなくても名前を出せるように、残しておく
+export type PersonInfo = { name: string; hasAvatar: boolean; avatarVersion?: string | null };
+const peopleKey = (conversationId: string) => `sorachat.people.${conversationId}`;
+export const loadPeopleDb = async (conversationId: string): Promise<Record<string, PersonInfo>> =>
+  (await idbGet<Record<string, PersonInfo>>("kv", peopleKey(conversationId))) ?? {};
+export const savePeopleDb = (conversationId: string, people: Record<string, PersonInfo>) => {
+  void idbPut("kv", peopleKey(conversationId), people);
 };
 
 export function clearCache() {

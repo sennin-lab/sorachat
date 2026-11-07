@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api, delete_, post } from "./api";
-import { cachedFriends, saveFriends, syncFriendAvatars } from "./avatarCache";
+import { cachedFriends, saveFriends, syncAvatars } from "./avatarCache";
 import { Avatar } from "./Avatar";
 import { Icon } from "./Icon";
 import { UserRow } from "./UserRow";
@@ -39,7 +39,7 @@ export function FriendsTab({
         setItems(next);
         setError("");
         saveFriends(next);
-        void syncFriendAvatars(next);
+        void syncAvatars([{ id: me.id, hasAvatar: me.hasAvatar, avatarVersion: me.avatarVersion }, ...next], { local: true });
       })
       .catch(() => setError("友だちを読み込めませんでした。"));
     api<Requests>("/api/friends/requests")

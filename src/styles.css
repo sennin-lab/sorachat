@@ -462,6 +462,11 @@ a { color: var(--accent); text-decoration: none; }
   -webkit-overflow-scrolling: touch;
 }
 .dm-divider { display: flex; justify-content: center; margin: 14px 0 8px; }
+/* 未読の始まり（ここから未読）。開いたときに、読んでいなかったメッセージの前に出す */
+.unread-line { display: flex; align-items: center; gap: 10px; margin: 14px 8px 8px; color: var(--accent-ink); font-size: 12px; font-weight: 600; }
+.unread-line::before,
+.unread-line::after { content: ""; flex: 1; height: 1px; background: var(--accent-ink); opacity: 0.35; }
+.unread-line span { white-space: nowrap; }
 .dm-divider span {
   padding: 3px 12px;
   border-radius: 999px;

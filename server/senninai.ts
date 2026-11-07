@@ -245,7 +245,10 @@ export async function askAi(messages: { role: "user" | "assistant"; content: str
     throw new Error(`senninai API がエラーを返しました（HTTP ${response.status}）: ${raw.slice(0, 200)}`);
   }
   // 応答の形（OpenAI互換・answer・text など）のどれでも回答を読む
-  const answer = (data ? pickAnswer(data) : raw).trim();
+  // 回答が改行を「\n」という文字として返してくることがあるため、改行を含まない回答だけ改行に戻す
+  // （コードの中の \n は、改行を含む回答ではそのまま残す）
+  const picked = (data ? pickAnswer(data) : raw).trim();
+  const answer = !picked.includes("\n") && picked.includes("\\n") ? picked.replace(/\\n/g, "\n") : picked;
   if (!answer) throw new Error(`senninai API の回答を読めませんでした: ${raw.slice(0, 200)}`);
   return answer.length > maxChars ? `${answer.slice(0, maxChars)}…` : answer;
 }

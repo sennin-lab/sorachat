@@ -8,6 +8,8 @@ export type Me = {
   contact: string;
   profileUrl: string;
   hasAvatar: boolean;
+  // 画像の版（変わったら値も変わる）。保存済みの画像を使うかの判断に使う
+  avatarVersion?: string | null;
   notifyDm: boolean;
   sennin: boolean;
   coverTheme: CoverTheme;
@@ -139,6 +141,7 @@ export type Member = {
   username: string;
   displayName: string;
   hasAvatar: boolean;
+  avatarVersion?: string | null;
   role: "owner" | "member";
 };
 

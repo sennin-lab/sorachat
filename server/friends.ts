@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { UUID, blockedBetween } from "./messages.js";
+import { avatarVersionOf } from "./avatarVersion.js";
 import { BOT_ID } from "./senninai.js";
 import { sb } from "./supabase.js";
 
@@ -40,7 +41,7 @@ const toInfo = (u: UserRow): FriendInfo => ({
   displayName: u.display_name,
   bio: u.bio ?? "",
   hasAvatar: Boolean(u.avatar_path),
-  avatarVersion: u.avatar_path ?? null,
+  avatarVersion: avatarVersionOf(u.avatar_path),
   coverTheme: u.cover_theme ?? "green"
 });
 

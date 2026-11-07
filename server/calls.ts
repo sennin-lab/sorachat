@@ -5,9 +5,8 @@ import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, randomToken, requireAuth } from "./auth.js";
-import { config } from "./config.js";
 import { activeCalls, findActiveCallIn, findCall, pruneCalls, type CallRecord } from "./callRegistry.js";
-import { activeEndpoints } from "./hub.js";
+import { activeEndpoints, sendToUser } from "./hub.js";
 import { UUID, blockersOf, displayNameOf, insertMessage, memberIds, membership, mutedIds, postNotice } from "./messages.js";
 import { notifyRecipient } from "./push.js";
 import { sb } from "./supabase.js";
@@ -40,24 +39,10 @@ function formatDuration(ms: number) {
   return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 }
 
-// Supabase Realtime の REST 経由で、呼び出しを相手ごとの private チャンネルに送る（サーバーのサービスキーを使用）
-async function sendRings(userIds: string[], payload: unknown) {
-  for (let i = 0; i < userIds.length; i += 100) {
-    const messages = userIds.slice(i, i + 100).map((id) => ({ topic: `callin:${id}`, event: "ring", payload, private: true }));
-    const response = await fetch(`${config.supabaseUrl}/realtime/v1/api/broadcast`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: config.supabaseServiceKey,
-        Authorization: `Bearer ${config.supabaseServiceKey}`
-      },
-      body: JSON.stringify({ messages })
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`Realtime broadcast failed: ${response.status} ${detail}`);
-    }
-  }
+// 呼び出しを、相手のアプリ（WebSocket・/ws）へ送る。アプリと同じ接続を使うので、どの端末でも届く。
+// 閉じている相手には、下の notifyCallStart で通知を送る。
+function sendRings(userIds: string[], invite: unknown) {
+  for (const id of userIds) sendToUser(id, { type: "ring", invite });
 }
 
 async function notifyCallStart(args: {
@@ -137,12 +122,7 @@ calls.post("/calls", requireAuth, async (req, res) => {
     const callerInfo = { id: userId, name: callerName, hasAvatar: Boolean(caller?.avatar_path) };
     const others = (await memberIds(conversationId)).filter((id) => id !== userId);
     const groupName = conversation.title || "グループ";
-    try {
-      await sendRings(others, { callId, conversationId, groupName, caller: callerInfo, secret });
-    } catch (error) {
-      activeCalls.delete(callId);
-      throw error;
-    }
+    sendRings(others, { callId, conversationId, groupName, caller: callerInfo, secret });
 
     void notifyCallStart({
       conversationId,

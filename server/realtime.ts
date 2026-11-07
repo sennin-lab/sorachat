@@ -5,7 +5,8 @@ import { z } from "zod";
 import { banOfUser, SESSION_COOKIE, sha256 } from "./auth.js";
 import { config } from "./config.js";
 import { getMaintenanceSettings } from "./maintenance.js";
-import { addSocket, removeSocket, setViewing } from "./hub.js";
+import { addSocket, removeSocket, sendToUser, setViewing } from "./hub.js";
+import { findCall } from "./callRegistry.js";
 import { BlockedError, UUID, insertMessage, membership, replyTargetOk, toMessage } from "./messages.js";
 import { senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { sb } from "./supabase.js";
@@ -18,6 +19,15 @@ const sendSchema = z.object({
   conversationId: z.string().regex(UUID),
   body: z.string().trim().min(1).max(1000),
   replyToId: z.string().regex(UUID).nullish()
+});
+
+// グループ通話の信号（参加・SDP・ICE・退出）。中身は通話ごとの鍵で署名されていて、サーバーは中身を読まずに中継するだけ。
+// 参加している人からの信号だけを、ほかの参加者へ送る（参加していない人には届かない）
+const callSignalSchema = z.object({
+  type: z.literal("call"),
+  callId: z.string().regex(UUID),
+  event: z.enum(["join", "offer", "answer", "ice", "leave"]),
+  payload: z.record(z.string(), z.unknown())
 });
 
 // 画面を見ているかどうかの通知（アプリを裏に回したら false になる）
@@ -117,6 +127,16 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
   if (data?.type === "presence") {
     const presence = presenceSchema.safeParse(data);
     if (presence.success) setViewing(ws, presence.data.visible, presence.data.endpoint ?? null);
+    return;
+  }
+  if (data?.type === "call") {
+    const signal = callSignalSchema.safeParse(data);
+    if (!signal.success) return;
+    const record = findCall(signal.data.callId);
+    if (!record || !record.participants.has(userId)) return;
+    for (const uid of record.participants) {
+      if (uid !== userId) sendToUser(uid, { type: "call", callId: signal.data.callId, event: signal.data.event, payload: signal.data.payload });
+    }
     return;
   }
   if (data?.type !== "send") return;

@@ -90,6 +90,28 @@ const pending = new Map<string, { resolve: (m: Message) => void; reject: (e: Err
 
 export const isSocketOpen = () => socket?.readyState === WebSocket.OPEN;
 
+// ---- 通話の信号（呼び出し・参加・SDP・ICE・退出）。アプリと同じ WebSocket で送受信する ----
+// Supabase Realtime の別の接続は使わない（一部の端末で接続できず、通話が始まらなかったため）
+export type SignalEvent =
+  | { type: "ring"; invite: unknown }
+  | { type: "call"; callId: string; event: string; payload: Record<string, unknown> };
+
+const signalListeners = new Set<(signal: SignalEvent) => void>();
+
+export function onSignal(listener: (signal: SignalEvent) => void) {
+  signalListeners.add(listener);
+  return () => {
+    signalListeners.delete(listener);
+  };
+}
+
+// 信号を送る。接続中でなければ false（呼び出し側で案内を出す）
+export function sendSignal(message: Record<string, unknown>): boolean {
+  if (!isSocketOpen()) return false;
+  socket!.send(JSON.stringify(message));
+  return true;
+}
+
 function rejectAll(reason: string) {
   for (const [clientId, entry] of pending) {
     window.clearTimeout(entry.timer);
@@ -141,6 +163,10 @@ function openSocket() {
     }
     if (data.type === "list") {
       emit({ kind: "change" });
+      return;
+    }
+    if (data.type === "ring" || data.type === "call") {
+      signalListeners.forEach((listener) => listener(data as SignalEvent));
       return;
     }
     emitChat(data as ChatEvent);

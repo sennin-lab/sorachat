@@ -1,9 +1,10 @@
 // グループ電話の通信部分。
-// 呼び出しはサーバーが送り（server/calls.ts）、シグナリングは Supabase Realtime、音声は参加者どうしの WebRTC（メッシュ）。
+// 呼び出しはサーバーが送り（server/calls.ts）、シグナリングはアプリと同じ WebSocket をサーバーが中継し（server/realtime.ts）、
+// 音声は参加者どうしの WebRTC（メッシュ）。
 // シグナリングの各メッセージは、通話ごとの鍵（HMAC-SHA256）で署名し、改ざんや別の通話への流用を防ぎます。
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { api, post } from "./api";
-import { getClient } from "./realtime";
+import { hmacSha256Hex, safeEqual } from "./hmac";
+import { connectRealtime, isSocketOpen, onSignal, sendSignal } from "./realtime";
 
 export type CallPeer = { id: string; name: string; hasAvatar: boolean };
 export type Invite = { callId: string; conversationId: string; groupName: string; caller: CallPeer; secret: string };
@@ -21,7 +22,6 @@ function iceServers(): RTCIceServer[] {
   }
   return servers;
 }
-const enc = new TextEncoder();
 
 type Peer = {
   info: CallPeer;
@@ -48,12 +48,14 @@ export type CallState =
 
 let me: CallPeer | null = null;
 let state: CallState = { status: "idle" };
-let inbox: RealtimeChannel | null = null;
-let channel: RealtimeChannel | null = null;
 let stream: MediaStream | null = null;
 let callId = "";
 let activeConversationId = "";
-let signKey: CryptoKey | null = null;
+let signSecret: string | null = null;
+// 信号の送受信を始めているか（参加の合図を送ってから true。退出で false に戻す）
+let joined = false;
+let signalOff: (() => void) | null = null;
+let inboxOn = false;
 let startedAt = 0;
 let ringTimer = 0;
 const peers = new Map<string, Peer>();
@@ -88,50 +90,43 @@ function refreshActive(patch: Partial<Extract<CallState, { status: "active" }>> 
 
 // ---- 署名（HMAC-SHA256、通話ごとの鍵）----
 
-const toHex = (buf: ArrayBuffer) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
-const fromHex = (hex: string) => new Uint8Array(hex.match(/.{2}/g)?.map((h) => parseInt(h, 16)) ?? []);
-
-async function importSignKey(secret: string) {
-  signKey = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
-}
-
 // 送るメッセージに、通話ID・送信者・時刻を含めて署名する
 function seal(event: string, payload: Record<string, unknown>) {
-  if (!signKey || !channel) return;
+  if (!signSecret || !joined) return;
   const msg = { callId, from: me?.id, ...payload, ts: Date.now(), event };
-  return crypto.subtle.sign("HMAC", signKey, enc.encode(JSON.stringify(msg))).then((sig) => {
-    channel?.send({ type: "broadcast", event, payload: { ...msg, sig: toHex(sig) } });
-  });
+  const sig = hmacSha256Hex(signSecret, JSON.stringify(msg));
+  if (!sendSignal({ type: "call", callId, event, payload: { ...msg, sig } })) {
+    console.error("[call] 信号を送れませんでした:", event);
+  }
 }
 
 // 受け取ったメッセージの署名・通話ID・時刻を確かめる
-async function verified(event: string, payload: Record<string, unknown>) {
+function verified(event: string, payload: Record<string, unknown>) {
   const { sig, ...rest } = payload as Record<string, unknown> & { sig?: unknown };
-  if (typeof sig !== "string" || !signKey) return false;
+  if (typeof sig !== "string" || !signSecret) return false;
   if (rest.callId !== callId || rest.event !== event) return false;
   if (typeof rest.ts !== "number" || Math.abs(Date.now() - rest.ts) > SIGNAL_MAX_AGE_MS) return false;
-  return crypto.subtle.verify("HMAC", signKey, fromHex(sig), enc.encode(JSON.stringify(rest)));
+  return safeEqual(sig, hmacSha256Hex(signSecret, JSON.stringify(rest)));
 }
 
-// ---- 着信の受け取り（ログイン中は常に自分の呼び出し用チャンネルを購読）----
+// ---- 着信の受け取り（ログイン中は常に呼び出しを待つ）----
 
-export async function startCallInbox(meId: string) {
-  if (inbox) return;
-  const client = await getClient();
-  inbox = client
-    .channel(`callin:${meId}`, { config: { private: true } })
-    .on("broadcast", { event: "ring" }, ({ payload }) => {
-      // 呼び出しはサーバーからだけ届く。形が合わないものは捨てる
-      const invite = payload as Invite;
-      if (typeof invite?.callId !== "string" || typeof invite?.secret !== "string" || invite.secret.length < 32) return;
-      if (state.status !== "idle") return;
-      setState({ status: "incoming", invite });
-      window.clearTimeout(ringTimer);
-      ringTimer = window.setTimeout(() => {
-        if (state.status === "incoming" && state.invite.callId === invite.callId) setState({ status: "idle" });
-      }, RING_TIMEOUT_MS);
-    });
-  inbox.subscribe();
+export async function startCallInbox(_meId: string) {
+  if (inboxOn) return;
+  inboxOn = true;
+  connectRealtime();
+  onSignal((signal) => {
+    if (signal.type !== "ring") return;
+    // 呼び出しはサーバーからだけ届く。形が合わないものは捨てる
+    const invite = signal.invite as Invite;
+    if (typeof invite?.callId !== "string" || typeof invite?.secret !== "string" || invite.secret.length < 32) return;
+    if (state.status !== "idle") return;
+    setState({ status: "incoming", invite });
+    window.clearTimeout(ringTimer);
+    ringTimer = window.setTimeout(() => {
+      if (state.status === "incoming" && state.invite.callId === invite.callId) setState({ status: "idle" });
+    }, RING_TIMEOUT_MS);
+  });
 }
 
 // ---- 接続 ----
@@ -160,7 +155,7 @@ function createPeer(info: CallPeer): Peer {
   const peer: Peer = { info, pc, audio, remoteSet: false, pendingIce: [], timer: 0 };
   stream?.getTracks().forEach((t) => pc.addTrack(t, stream!));
   pc.onicecandidate = (e) => {
-    if (e.candidate) void seal("ice", { to: info.id, candidate: e.candidate.toJSON() });
+    if (e.candidate) seal("ice", { to: info.id, candidate: e.candidate.toJSON() });
   };
   pc.ontrack = (e) => {
     audio.srcObject = e.streams[0];
@@ -206,66 +201,70 @@ async function initiate(info: CallPeer) {
   const peer = createPeer(info);
   const offer = await peer.pc.createOffer();
   await peer.pc.setLocalDescription(offer);
-  await seal("offer", { to: info.id, info: me, sdp: offer });
+  seal("offer", { to: info.id, info: me, sdp: offer });
 }
 
-async function joinChannel(conversationId: string) {
-  const client = await getClient();
-  const ch = client.channel(`call:${conversationId}`, { config: { private: true, broadcast: { self: false } } });
-  channel = ch;
-  // 署名が正しいものだけ処理する
-  const on = (event: string, fn: (p: Record<string, any>) => void | Promise<void>) =>
-    ch.on("broadcast", { event }, async ({ payload }) => {
-      if (await verified(event, payload)) await fn(payload);
-    });
+// WebSocket がつながるまで待つ（切れていれば再接続を始める）
+async function waitForSocket() {
+  connectRealtime();
+  for (let i = 0; i < 50; i++) {
+    if (isSocketOpen()) return;
+    await new Promise((resolve) => window.setTimeout(resolve, 200));
+  }
+  throw new Error("通話の接続に失敗しました。通信状態を確認して、もう一度お試しください。");
+}
 
-  on("join", async (p) => {
-    if (p.from === me?.id) return;
-    const info = p.info as CallPeer;
-    if (peers.has(info.id)) dropPeer(info.id);
-    if (peers.size + 1 > MAX_CALL_PEERS) return;
-    await initiate(info);
-    refreshActive();
+// 通話の信号の受け取りを始め、参加の合図を送る
+async function joinChannel() {
+  await waitForSocket();
+  joined = true;
+  // 署名が正しく、同じ通話のものだけ処理する
+  const handlers: Record<string, (p: Record<string, any>) => void | Promise<void>> = {
+    join: async (p) => {
+      if (p.from === me?.id) return;
+      const info = p.info as CallPeer;
+      if (peers.has(info.id)) dropPeer(info.id);
+      if (peers.size + 1 > MAX_CALL_PEERS) return;
+      await initiate(info);
+      refreshActive();
+    },
+    offer: async (p) => {
+      if (p.to !== me?.id) return;
+      const info = p.info as CallPeer;
+      if (peers.has(info.id)) dropPeer(info.id);
+      if (peers.size + 1 > MAX_CALL_PEERS) return;
+      const peer = createPeer(info);
+      await peer.pc.setRemoteDescription(p.sdp);
+      peer.remoteSet = true;
+      await flushIce(peer);
+      const answer = await peer.pc.createAnswer();
+      await peer.pc.setLocalDescription(answer);
+      seal("answer", { to: info.id, sdp: answer });
+      refreshActive();
+    },
+    answer: async (p) => {
+      const peer = p.to === me?.id ? peers.get(p.from) : undefined;
+      if (!peer) return;
+      await peer.pc.setRemoteDescription(p.sdp);
+      peer.remoteSet = true;
+      await flushIce(peer);
+    },
+    ice: async (p) => {
+      const peer = p.to === me?.id ? peers.get(p.from) : undefined;
+      if (!peer) return;
+      if (!peer.remoteSet) peer.pendingIce.push(p.candidate);
+      else await peer.pc.addIceCandidate(p.candidate).catch(() => {});
+    },
+    leave: (p) => dropPeer(p.from)
+  };
+  signalOff?.();
+  signalOff = onSignal((signal) => {
+    if (signal.type !== "call" || signal.callId !== callId) return;
+    const handler = handlers[signal.event];
+    if (!handler || !verified(signal.event, signal.payload)) return;
+    void handler(signal.payload);
   });
-  on("offer", async (p) => {
-    if (p.to !== me?.id) return;
-    const info = p.info as CallPeer;
-    if (peers.has(info.id)) dropPeer(info.id);
-    if (peers.size + 1 > MAX_CALL_PEERS) return;
-    const peer = createPeer(info);
-    await peer.pc.setRemoteDescription(p.sdp);
-    peer.remoteSet = true;
-    await flushIce(peer);
-    const answer = await peer.pc.createAnswer();
-    await peer.pc.setLocalDescription(answer);
-    await seal("answer", { to: info.id, sdp: answer });
-    refreshActive();
-  });
-  on("answer", async (p) => {
-    const peer = p.to === me?.id ? peers.get(p.from) : undefined;
-    if (!peer) return;
-    await peer.pc.setRemoteDescription(p.sdp);
-    peer.remoteSet = true;
-    await flushIce(peer);
-  });
-  on("ice", async (p) => {
-    const peer = p.to === me?.id ? peers.get(p.from) : undefined;
-    if (!peer) return;
-    if (!peer.remoteSet) peer.pendingIce.push(p.candidate);
-    else await peer.pc.addIceCandidate(p.candidate).catch(() => {});
-  });
-  on("leave", (p) => dropPeer(p.from));
-
-  await new Promise<void>((resolve, reject) => {
-    ch.subscribe((status, err) => {
-      if (status === "SUBSCRIBED") resolve();
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        console.error("[call] チャンネル接続に失敗:", status, err);
-        reject(new Error(`通話の接続に失敗しました（${status}${err ? `: ${err.message}` : ""}）`));
-      }
-    });
-  });
-  await seal("join", { info: me });
+  seal("join", { info: me });
 }
 
 // 発信：サーバーに発信を頼むと、サーバーが同じグループの全員に着信を送ります
@@ -282,28 +281,31 @@ export async function startGroupCall(args: { conversationId: string; groupName: 
   }
   callId = started.callId;
   activeConversationId = args.conversationId;
-  await importSignKey(started.secret);
+  signSecret = started.secret;
   startedAt = Date.now();
   setState({ status: "active", callId, conversationId: args.conversationId, groupName: args.groupName, participants: [me], muted: false, startedAt, ringing: true });
   try {
-    await joinChannel(args.conversationId);
+    await joinChannel();
   } catch (error) {
     await leaveCall(); // 接続に失敗したら通話を片付け、「呼び出し中…」のまま固まらないようにする
     throw error;
   }
 }
 
-// 通話に入る（着信への応答・トークの「電話に参加」で共通）
-async function enterCall(target: { callId: string; conversationId: string; groupName: string; secret: string }) {
+// 通話に入る（着信への応答・トークの「電話に参加」で共通）。micReady は、マイクを先に確かめ済みのとき
+async function enterCall(
+  target: { callId: string; conversationId: string; groupName: string; secret: string },
+  micReady = false
+) {
   if (!me) throw new Error("ユーザー情報がありません");
   callId = target.callId;
   activeConversationId = target.conversationId;
-  await importSignKey(target.secret);
-  await openMic();
+  signSecret = target.secret;
+  if (!micReady) await openMic();
   startedAt = Date.now();
   setState({ status: "active", callId, conversationId: target.conversationId, groupName: target.groupName, participants: [me], muted: false, startedAt, ringing: false });
   try {
-    await joinChannel(target.conversationId);
+    await joinChannel();
   } catch (error) {
     await leaveCall(); // 接続に失敗したら片付ける（「呼び出し中…」のまま固まらないように）
     throw error;
@@ -311,22 +313,29 @@ async function enterCall(target: { callId: string; conversationId: string; group
   refreshActive();
 }
 
-// 着信に応答する
+// 着信に応答する。先に参加を記録してから入る（相手の側が、参加した人を必ず見つけられるように）
 export async function acceptCall() {
   if (state.status !== "incoming") return;
   const { invite } = state;
   window.clearTimeout(ringTimer);
-  await enterCall({ callId: invite.callId, conversationId: invite.conversationId, groupName: invite.groupName, secret: invite.secret });
-  void api(`/api/calls/${callId}/join`, post({ conversationId: invite.conversationId })).catch(() => {});
+  await openMic();
+  let joinedInfo: { secret: string };
+  try {
+    joinedInfo = await api<{ secret: string }>(`/api/calls/${invite.callId}/join`, post({ conversationId: invite.conversationId }));
+  } catch (error) {
+    stopMic();
+    throw error;
+  }
+  await enterCall({ callId: invite.callId, conversationId: invite.conversationId, groupName: invite.groupName, secret: joinedInfo.secret }, true);
 }
 
 // トークの「電話に参加」から入る。サーバーが参加を記録し、通話に入るための鍵を返す
 export async function joinCallFromChat(args: { callId: string; conversationId: string; groupName: string }) {
   if (state.status !== "idle") return;
   if (!me) throw new Error("ユーザー情報がありません");
-  const joined = await api<{ secret: string }>(`/api/calls/${args.callId}/join`, post({ conversationId: args.conversationId }));
+  const joinedInfo = await api<{ secret: string }>(`/api/calls/${args.callId}/join`, post({ conversationId: args.conversationId }));
   try {
-    await enterCall({ ...args, secret: joined.secret });
+    await enterCall({ ...args, secret: joinedInfo.secret });
   } catch (error) {
     void api(`/api/calls/${args.callId}/leave`, post({ conversationId: args.conversationId })).catch(() => {});
     throw error;
@@ -353,20 +362,19 @@ export function toggleMute() {
 export async function leaveCall() {
   if (state.status === "incoming") return declineCall();
   if (state.status !== "active") return;
-  await seal("leave", {}); // 退出の合図を送り終えてから、チャンネルを閉じる
+  seal("leave", {}); // 退出の合図を送ってから、信号の受け取りを止める
+  joined = false;
+  signalOff?.();
+  signalOff = null;
   void api(`/api/calls/${callId}/leave`, post({ conversationId: activeConversationId })).catch(() => {});
-  const client = await getClient().catch(() => null);
-  if (channel && client) client.removeChannel(channel);
-  channel = null;
   peers.forEach((p) => {
     window.clearTimeout(p.timer);
     p.pc.close();
     p.audio.srcObject = null;
   });
   peers.clear();
-  stream?.getTracks().forEach((t) => t.stop());
-  stream = null;
-  signKey = null;
+  stopMic();
+  signSecret = null;
   callId = "";
   setState({ status: "idle" });
 }

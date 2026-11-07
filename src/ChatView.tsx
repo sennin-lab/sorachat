@@ -14,7 +14,8 @@ import { Avatar } from "./Avatar";
 import { SenninaiConfirm } from "./SenninaiConfirm";
 import { RoomSettingsSheet } from "./RoomSettingsSheet";
 import { SENNIN_BOT_ID } from "./robot";
-import { cachedMessages, loadMessagesDb, saveMessages } from "./cache";
+import { cachedMessages, loadMessagesDb, loadPeopleDb, saveMessages, savePeopleDb, type PersonInfo } from "./cache";
+import { rememberAvatars, syncAvatars } from "./avatarCache";
 import { clipLongWords } from "./clip";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
@@ -178,7 +179,11 @@ export function ChatView({
   // 相手が既読にした時刻（1対1は1人分、グループは全員分）
   const [readers, setReaders] = useState<Reader[]>([]);
   // メンバーの名前（グループで送った人の名前を表示する）
-  const [people, setPeople] = useState<Map<string, { name: string; hasAvatar: boolean }>>(new Map());
+  const [people, setPeople] = useState<Map<string, PersonInfo>>(new Map());
+  const peopleRef = useRef<Map<string, PersonInfo>>(new Map());
+  // 開く前に読んでいた時刻（この後のメッセージが未読）。undefined は未確認、null は分からない
+  const [unreadFrom, setUnreadFrom] = useState<string | null | undefined>(undefined);
+  const initialPositioned = useRef(false);
   // 新しく届いた・送った吹き出しだけ、出現アニメーションを付ける
   const enterIds = useRef(new Set<string>());
   // ハートを送ったときに浮かぶハートの一覧
@@ -256,19 +261,32 @@ export function ChatView({
   const markRead = () => api(`/api/dm/${conversationId}/read`, post()).catch(() => undefined);
 
   // 既読状況（相手がどこまで読んだか）とメンバーの名前を取得する
-  const loadReaders = async () => {
+  const loadReaders = async (): Promise<void> => {
     try {
       const info = await api<{
         readBy: Reader[];
         members: Member[];
         friendship: FriendshipState | null;
+        myLastReadAt: string | null;
       }>(`/api/dm/${conversationId}`);
       setReaders(info.readBy);
       setFriendship(info.friendship);
       setMemberList(info.members);
-      setPeople(new Map(info.members.map((m) => [m.id, { name: m.displayName, hasAvatar: m.hasAvatar }])));
+      // 送信者の名前・アイコンは保存しておく（今のメンバーの分を更新し、抜けた人の分も残す）
+      const next = new Map(peopleRef.current);
+      for (const m of info.members) {
+        next.set(m.id, { name: m.displayName, hasAvatar: m.hasAvatar, avatarVersion: m.avatarVersion });
+      }
+      peopleRef.current = next;
+      setPeople(next);
+      savePeopleDb(conversationId, Object.fromEntries(next));
+      // アイコンは版が変わったときだけ取りに行く（保存済みならサーバーに問い合わせない）
+      rememberAvatars(info.members);
+      void syncAvatars(info.members, { local: false });
+      // 未読の区切りは、最初に開いたときの値を使う（あとの既読更新で動かさない）
+      setUnreadFrom((current) => (current === undefined ? info.myLastReadAt : current));
     } catch {
-      return;
+      setUnreadFrom((current) => (current === undefined ? null : current));
     }
   };
 
@@ -311,10 +329,20 @@ export function ChatView({
     }
   };
 
+  // 保存済みの送信者（名前・アイコン）を、通信より先に出す
+  useEffect(() => {
+    void loadPeopleDb(conversationId).then((stored) => {
+      if (Object.keys(stored).length === 0) return;
+      const merged = new Map<string, PersonInfo>([...Object.entries(stored), ...peopleRef.current]);
+      peopleRef.current = merged;
+      setPeople(merged);
+    });
+  }, [conversationId]);
+
   useEffect(() => {
     load();
-    loadReaders();
-    markRead();
+    // 前回読んだ時刻を取ってから既読にする（未読の区切りを正しく出すため）
+    void loadReaders().then(() => markRead());
     // IndexedDB に保存してある過去分を先に出す（最新は load() で取り直す）
     void loadMessagesDb(conversationId).then((stored) => {
       if (stored.length > 0) commit(mergeById(stored, messagesRef.current));
@@ -335,6 +363,7 @@ export function ChatView({
       }
       if (event.type === "message" && event.message.conversationId === conversationId) {
         upsert([event.message], event.message.clientId);
+        if (!peopleRef.current.has(event.message.senderId) && event.message.senderId !== meId) void loadReaders();
         if (event.message.senderId !== meId) markRead();
         onActivity();
         return;
@@ -371,8 +400,17 @@ export function ChatView({
   // 新しいメッセージが増えたときだけ最下部へ。過去分の追加では動かさない
   const lastId = messages[messages.length - 1]?.id;
   useEffect(() => {
+    if (!initialPositioned.current) {
+      if (!loaded || unreadFrom === undefined) return;
+      initialPositioned.current = true;
+      const line = document.getElementById("unread-line");
+      if (line) {
+        line.scrollIntoView({ block: "start" });
+        return;
+      }
+    }
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [lastId]);
+  }, [lastId, loaded, unreadFrom]);
 
   // senninai とのトークでは、送信の確認待ちがあればモーダルで聞く（新しい発言のたびに確かめる）
   const botDm = !conversation?.isGroup && conversation?.otherId === SENNIN_BOT_ID;
@@ -729,6 +767,12 @@ export function ChatView({
   const pollViewingMessage = pollViewingId ? messages.find((x) => x.id === pollViewingId) ?? null : null;
   const hasText = text.trim().length > 0;
   const byId = new Map(messages.map((m): [string, Message] => [m.id, m]));
+  // 未読の区切り：開く前に読み終えていた時刻より後の、相手からのメッセージ
+  const unreadTime = unreadFrom ? Date.parse(unreadFrom) : Number.NaN;
+  const isUnread = (m: Message) =>
+    !Number.isNaN(unreadTime) && !m.status && !m.deleted && m.kind !== "system" && m.senderId !== meId && Date.parse(m.createdAt) > unreadTime;
+  const unreadCount = messages.filter(isUnread).length;
+  const firstUnreadId = messages.find(isUnread)?.id ?? null;
   const nameOf = (senderId: string) =>
     senderId === meId ? "自分" : isGroup ? people.get(senderId)?.name ?? "メンバー" : conversation?.name ?? "相手";
   const scrollToMessage = (id: string) =>
@@ -857,10 +901,17 @@ export function ChatView({
           // 設定で非表示にしたときは、取り消されたメッセージを出さない
           if (m.deleted && !showUnsent) return null;
           const info = threadInfo(messages, index);
+          const unreadLine =
+            m.id === firstUnreadId ? (
+              <div className="unread-line" id="unread-line">
+                <span>ここから未読 {unreadCount > 0 ? `${unreadCount}件` : ""}</span>
+              </div>
+            ) : null;
           // グループのお知らせ（参加・退出・削除・名前の変更）は中央に小さく出す
           if (m.kind === "system") {
             return (
               <Fragment key={m.id}>
+                {unreadLine}
                 {info.divider && (
                   <div className="dm-divider">
                     <span>{info.divider}</span>
@@ -896,6 +947,7 @@ export function ChatView({
           );
           return (
             <Fragment key={m.clientId ?? m.id}>
+              {unreadLine}
               {info.divider && (
                 <div className="dm-divider">
                   <span>{info.divider}</span>

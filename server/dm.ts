@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
+import { avatarVersionOf } from "./avatarVersion.js";
 import { decryptText, encryptText } from "./crypto.js";
 import { fileNameOf, FILE_LIMIT, isAllowedImage, readImage, removeImage, saveFile, saveImage, upload, uploadFile } from "./media.js";
 import {
@@ -267,6 +268,7 @@ dm.get("/dm/:id", async (req, res) => {
     username: row.sc_users.username,
     displayName: row.sc_users.display_name,
     hasAvatar: Boolean(row.sc_users.avatar_path),
+    avatarVersion: avatarVersionOf(row.sc_users.avatar_path),
     role: row.role as Role
   }));
   // 既読の表示用：自分以外のメンバーがどこまで読んだか（last_read_at）
@@ -277,8 +279,11 @@ dm.get("/dm/:id", async (req, res) => {
   // 1対1の会話では、相手とのフレンド状態も返す（申請の許可・拒否バナーに使う）
   const other = members.find((m) => m.id !== viewer);
   const friendship = conv.is_group || !other ? null : await friendshipOf(viewer, other.id);
-  const muted = Boolean((rows ?? []).find((row: any) => row.sc_users.id === viewer)?.muted);
-  res.json({ id, isGroup: conv.is_group, isOpen: Boolean(conv.is_open), title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, muted, members, readBy, friendship });
+  const mine = (rows ?? []).find((row: any) => row.sc_users.id === viewer);
+  const muted = Boolean(mine?.muted);
+  // 未読の区切り：この人が前回読み終えた時刻（このあとの既読更新より前の値を返す）
+  const myLastReadAt = (mine?.last_read_at as string | undefined) ?? null;
+  res.json({ id, isGroup: conv.is_group, isOpen: Boolean(conv.is_open), title: conv.title, hasAvatar: Boolean(conv.avatar_path), myRole: me.role, muted, members, readBy, friendship, myLastReadAt });
 });
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(40) });

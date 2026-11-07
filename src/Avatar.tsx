@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { avatarObjectUrl, cachedAvatar, onAvatarCacheChange } from "./avatarCache";
+import { avatarObjectUrl, cachedAvatar, knownAvatarVersion, onAvatarCacheChange } from "./avatarCache";
 import { RobotFace, SENNIN_BOT_ID } from "./robot";
 
 // 写真があれば写真、なければ名前の1文字。src を渡すとグループなど別の画像URLを使う
@@ -63,8 +63,10 @@ export function Avatar({
   }
   // 優先順：指定された画像 → localStorage → IndexedDB → 通常の読み込み（確かめ終わってから）
   const fromDb = dbUrl === undefined ? null : dbUrl;
-  const url =
-    src ?? saved ?? fromDb ?? (userId && dbUrl !== undefined ? `/api/users/${userId}/avatar` : "");
+  // 版（?v=）を付けると、画像が変わっていないあいだはブラウザに保存された分を使い、サーバーに取りに行かない
+  const version = knownAvatarVersion(userId);
+  const remote = `/api/users/${userId}/avatar${version ? `?v=${encodeURIComponent(version)}` : ""}`;
+  const url = src ?? saved ?? fromDb ?? (userId && dbUrl !== undefined ? remote : "");
   if (!url || !hasAvatar || failed) {
     return (
       <span className="avatar" style={style} aria-hidden="true">

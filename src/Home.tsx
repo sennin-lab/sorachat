@@ -19,7 +19,7 @@ import { UserProfileSheet } from "./UserProfileSheet";
 import { Avatar } from "./Avatar";
 import { SENNIN_BOT_ID } from "./robot";
 import type { Conversation, Friend, Me } from "./types";
-import { saveFriends, syncFriendAvatars } from "./avatarCache";
+import { saveFriends, syncAvatars } from "./avatarCache";
 
 type Tab = "talk" | "friends" | "more";
 
@@ -179,7 +179,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     api<Friend[]>("/api/friends")
       .then((next) => {
         saveFriends(next);
-        void syncFriendAvatars(next);
+        // 自分の画像も残すため、自分を含めて同期する（版が同じなら取りに行かない）
+        void syncAvatars([{ id: me.id, hasAvatar: me.hasAvatar, avatarVersion: me.avatarVersion }, ...next], { local: true });
       })
       .catch(() => undefined);
   }, [me.id, friendsVersion]);

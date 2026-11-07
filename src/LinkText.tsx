@@ -54,9 +54,12 @@ function LinkButton({ url }: { url: string }) {
   );
 }
 
+// 改行が「\n」という文字のまま届いた本文を、改行に直す（改行を含む本文はそのまま使う）
+const unescapeNewlines = (text: string) => (!text.includes("\n") && text.includes("\\n") ? text.replace(/\\n/g, "\n") : text);
+
 export function RichText({ text, users, meName }: { text: string; users: Set<string>; meName: string }) {
   // split の結果は「文字・URL・文字・URL…」の順。奇数番目が URL
-  const parts = text.split(SPLIT);
+  const parts = unescapeNewlines(text).split(SPLIT);
   return (
     <>
       {parts.map((part, i) => {

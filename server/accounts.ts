@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { cookieBase, currentUserId, banOfUser, endSession, randomToken, requireAuth, sessionUserId, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
 import { cloudflareAvatarUrl, deleteCloudflareAvatar, isAllowedImage, readImage, removeImage, saveCloudflareAvatar, upload } from "./media.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
+import { avatarVersionOf } from "./avatarVersion.js";
 import { disableAi, enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
 import { befriendTeam } from "./team.js";
@@ -76,6 +77,7 @@ async function loadMe(userId: string) {
     contact: (data.contact ?? "") as string,
     profileUrl: (data.profile_url ?? "") as string,
     hasAvatar: Boolean(data.avatar_path),
+    avatarVersion: avatarVersionOf(data.avatar_path as string | null),
     notifyDm: data.notify_dm as boolean,
     sennin: Boolean(data.sennin_id),
     coverTheme: (data.cover_theme ?? "green") as string,
@@ -357,9 +359,12 @@ accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
     res.status(404).end();
     return;
   }
+  // 版（?v=）が今の画像と同じなら、URL が変わらない限りブラウザに保存させる（同じ版はもう取りに来ない）
+  const versioned = typeof req.query.v === "string" && req.query.v === avatarVersionOf(data.avatar_path);
+  const cacheControl = versioned ? "private, max-age=31536000, immutable" : "private, no-cache";
   const cloudflareUrl = cloudflareAvatarUrl(data.avatar_path);
   if (cloudflareUrl) {
-    res.setHeader("cache-control", "private, max-age=300");
+    res.setHeader("cache-control", versioned ? cacheControl : "private, max-age=300");
     res.redirect(302, cloudflareUrl);
     return;
   }
@@ -369,7 +374,7 @@ accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
     return;
   }
   res.setHeader("content-type", image.type);
-  res.setHeader("cache-control", "private, no-cache");
+  res.setHeader("cache-control", cacheControl);
   res.send(image.buffer);
 });
 

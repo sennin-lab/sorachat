@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import { AuthScreen } from "./AuthScreen";
 import { BannedScreen } from "./Banned";
-import { clearCache } from "./cache";
+import { clearCache, loadMeDb, saveMeDb } from "./cache";
 import { GroupCallHost } from "./GroupCallScreen";
 import { Home } from "./Home";
 import { Intro, hasSeenIntro, resetIntro } from "./Intro";
 import { MaintenanceScreen } from "./Maintenance";
 import type { BanInfo, Me } from "./types";
+import { syncAvatars } from "./avatarCache";
 
 export default function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -19,13 +20,34 @@ export default function App() {
   // 初めて起動したときは、ウェルカムと機能紹介を出す（見終わると二度と自動では出ない）
   const [introOpen, setIntroOpen] = useState(() => !hasSeenIntro());
 
+  // 自分の情報は保存したものを先に表示し、サーバーで確かめ直す（ログインや利用停止の確認はサーバーで行う）
+  const applyMe = useCallback((next: Me) => {
+    setMe(next);
+    saveMeDb(next);
+    // 自分のアイコンは版が変わったときだけ取りに行く（保存済みならサーバーに問い合わせない）
+    void syncAvatars([{ id: next.id, hasAvatar: next.hasAvatar, avatarVersion: next.avatarVersion }], { local: true });
+  }, []);
+
   const loadMe = useCallback(() => {
     api<Me>("/api/me")
       .then((data) => {
         setBan(null);
-        setMe(data);
+        applyMe(data);
       })
-      .catch(() => setMe(null));
+      .catch((error) => {
+        // 通信できないだけのときは、保存した情報のまま表示する（ログアウトにはしない）
+        if (error instanceof ApiError && error.status === 0) {
+          setMe((current) => current ?? null);
+          return;
+        }
+        setMe(null);
+      });
+  }, [applyMe]);
+
+  useEffect(() => {
+    void loadMeDb().then((cached) => {
+      if (cached) setMe((current) => (current === undefined ? cached : current));
+    });
   }, []);
 
   useEffect(() => {
@@ -63,7 +85,7 @@ export default function App() {
     <>
       <Home
         me={me}
-        onMeChange={(next) => setMe(next)}
+        onMeChange={(next) => applyMe(next)}
         onLogout={() => {
           clearCache();
           setMe(null);
