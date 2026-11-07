@@ -1,9 +1,30 @@
-import { BUILTIN_STAMPS } from "./stamps";
+import { useEffect, useState } from "react";
+import { api } from "./api";
+import { Icon } from "./Icon";
+import { BUILTIN_STAMPS, canonicalStampRef } from "./stamps";
 import { useExitClose } from "./useExitClose";
+import type { StoreView } from "./types";
 
 // スタンプの一覧（src/stamps/ の画像）。選ぶと閉じてから送る
+// 仙人ストアのパックに入っているスタンプは、買っていないと送れない（鍵の印を付ける）
 export function StampSheet({ onPick, onClose }: { onPick: (ref: string) => void; onClose: () => void }) {
   const { closing, close } = useExitClose(onClose);
+  // 未購入のパックに入っているスタンプ（正規化した名前）
+  const [locked, setLocked] = useState<Set<string>>(() => new Set());
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    api<StoreView>("/api/store")
+      .then((view) => {
+        const next = new Set<string>();
+        for (const item of view.items) {
+          if (item.kind === "stamp_pack" && !item.owned) for (const ref of item.stamps ?? []) next.add(ref);
+        }
+        setLocked(next);
+      })
+      .catch(() => undefined);
+  }, []);
+
   return (
     <div className={`sheet-backdrop${closing ? " is-closing" : ""}`} onClick={() => close()}>
       <div
@@ -24,19 +45,34 @@ export function StampSheet({ onPick, onClose }: { onPick: (ref: string) => void;
             <p className="stamp-empty">src/stamps/ に画像を入れると、ここに出ます。</p>
           ) : (
             <div className="stamp-grid">
-              {BUILTIN_STAMPS.map((s) => (
-                <button
-                  key={s.ref}
-                  type="button"
-                  className="stamp-btn"
-                  onClick={() => close(() => onPick(s.ref))}
-                  aria-label={s.name}
-                >
-                  <img src={s.url} alt={s.name} loading="lazy" decoding="async" width={64} height={64} />
-                </button>
-              ))}
+              {BUILTIN_STAMPS.map((s) => {
+                const isLocked = locked.has(canonicalStampRef(s.ref));
+                return (
+                  <button
+                    key={s.ref}
+                    type="button"
+                    className={`stamp-btn${isLocked ? " is-locked" : ""}`}
+                    onClick={() => {
+                      if (isLocked) {
+                        setNote("このスタンプは、仙人ストアのスタンプパックに入っています。購入すると送れます。");
+                        return;
+                      }
+                      close(() => onPick(s.ref));
+                    }}
+                    aria-label={isLocked ? `${s.name}（ストアで購入）` : s.name}
+                  >
+                    <img src={s.url} alt={s.name} loading="lazy" decoding="async" width={64} height={64} />
+                    {isLocked && (
+                      <span className="stamp-lock" aria-hidden="true">
+                        <Icon name="lock" size={14} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
+          {note && <p className="stamp-note" role="status">{note}</p>}
         </div>
       </div>
     </div>

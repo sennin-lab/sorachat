@@ -9,6 +9,7 @@ import { avatarVersionOf } from "./avatarVersion.js";
 import { disableAi, enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
 import { befriendTeam } from "./team.js";
+import { attachSenninAccount, SenninError } from "./senninPoints.js";
 
 export const accounts = Router();
 
@@ -64,7 +65,7 @@ const patchSchema = z.object({
 async function loadMe(userId: string) {
   const { data, error } = await sb
     .from("sc_users")
-    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme, ai_enabled")
+    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme, ai_enabled, store_theme")
     .eq("id", userId)
     .maybeSingle();
   if (error) throw error;
@@ -81,7 +82,8 @@ async function loadMe(userId: string) {
     notifyDm: data.notify_dm as boolean,
     sennin: Boolean(data.sennin_id),
     coverTheme: (data.cover_theme ?? "green") as string,
-    aiEnabled: Boolean(data.ai_enabled)
+    aiEnabled: Boolean(data.ai_enabled),
+    storeTheme: (data.store_theme ?? null) as string | null
   };
 }
 
@@ -150,7 +152,7 @@ accounts.get("/auth/sennin/login", (_req, res) => {
   res.redirect(url.toString());
 });
 
-async function fetchSenninProfile(accessToken: string) {
+export async function fetchSenninProfile(accessToken: string) {
   const headers = { authorization: `Bearer ${accessToken}`, accept: "application/json" };
   const fetchJson = (url: string) =>
     fetch(url, { headers }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -178,11 +180,69 @@ async function upsertSenninUser(senninId: string, name: string) {
   return inserted.data.id as string;
 }
 
+// 仙人アカウントを連携する（ストア用）。ログイン中の人が押すと、仙人アカウントの許可画面へ進む
+accounts.get("/auth/sennin/link", requireAuth, (_req, res) => {
+  const { clientId, authorizationUrl, redirectUri, storeScope } = config.sennin;
+  if (!clientId || !authorizationUrl) {
+    res.redirect(`${config.appOrigin}/more?store_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
+    return;
+  }
+  const state = randomToken(24);
+  const verifier = randomToken(48);
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  res.cookie("sc_oauth", `${state}.${verifier}`, { ...cookieBase, maxAge: 10 * 60 * 1000 });
+  res.cookie("sc_oauth_link", "1", { ...cookieBase, maxAge: 10 * 60 * 1000 });
+  const url = new URL(authorizationUrl);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", storeScope);
+  url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  res.redirect(url.toString());
+});
+
+// 認可コードをトークンに交換する（ログインと連携で共通）
+async function exchangeSenninCode(code: string, verifier: string) {
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+    accept: "application/json"
+  };
+  if (config.sennin.clientSecret) {
+    headers.authorization = `Basic ${Buffer.from(`${config.sennin.clientId}:${config.sennin.clientSecret}`).toString("base64")}`;
+  }
+  const tokenResponse = await fetch(config.sennin.tokenUrl, {
+    method: "POST",
+    headers,
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: config.sennin.redirectUri,
+      client_id: config.sennin.clientId,
+      code_verifier: verifier
+    })
+  });
+  const tokenData: any = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || typeof tokenData.access_token !== "string") {
+    throw new Error("トークンを取得できませんでした。");
+  }
+  return tokenData as { access_token: string; refresh_token?: unknown };
+}
+
 accounts.get("/auth/sennin/callback", async (req, res) => {
+  // 連携のときは、ログイン中のアカウントへ戻る（/more に結果を出す）
+  const linking = req.cookies?.sc_oauth_link === "1";
   const fail = (message: string) => {
     res.clearCookie("sc_oauth", cookieBase);
-    res.redirect(`${config.appOrigin}/?auth_error=${encodeURIComponent(message)}`);
+    res.clearCookie("sc_oauth_link", cookieBase);
+    const target = linking ? `${config.appOrigin}/more?store_error=` : `${config.appOrigin}/?auth_error=`;
+    res.redirect(`${target}${encodeURIComponent(message)}`);
   };
+  if (typeof req.query.error === "string") {
+    fail(linking ? "仙人アカウントで許可されませんでした。ポイントの利用を許可してください。" : "仙人アカウントでの認証がキャンセルされました。");
+    return;
+  }
   const code = typeof req.query.code === "string" ? req.query.code : "";
   const returned = typeof req.query.state === "string" ? req.query.state : "";
   const [state, verifier] = String(req.cookies?.sc_oauth ?? "").split(".");
@@ -191,35 +251,35 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
     return;
   }
   try {
-    const headers: Record<string, string> = {
-      "content-type": "application/x-www-form-urlencoded",
-      accept: "application/json"
-    };
-    if (config.sennin.clientSecret) {
-      headers.authorization = `Basic ${Buffer.from(`${config.sennin.clientId}:${config.sennin.clientSecret}`).toString("base64")}`;
-    }
-    const tokenResponse = await fetch(config.sennin.tokenUrl, {
-      method: "POST",
-      headers,
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: config.sennin.redirectUri,
-        client_id: config.sennin.clientId,
-        code_verifier: verifier
-      })
-    });
-    const tokenData: any = await tokenResponse.json().catch(() => ({}));
-    if (!tokenResponse.ok || typeof tokenData.access_token !== "string") {
-      throw new Error("トークンを取得できませんでした。");
-    }
+    const tokenData = await exchangeSenninCode(code, verifier);
     const profile = await fetchSenninProfile(tokenData.access_token);
+    if (linking) {
+      const userId = await sessionUserId(req.cookies?.[SESSION_COOKIE]);
+      if (!userId) {
+        fail("ログインし直してから、もう一度お試しください。");
+        return;
+      }
+      if (typeof tokenData.refresh_token !== "string") {
+        fail("仙人アカウントから更新用の情報を受け取れませんでした。もう一度お試しください。");
+        return;
+      }
+      await attachSenninAccount(userId, profile.id, tokenData.refresh_token);
+      res.clearCookie("sc_oauth", cookieBase);
+      res.clearCookie("sc_oauth_link", cookieBase);
+      res.redirect(`${config.appOrigin}/more?store=linked`);
+      return;
+    }
     const userId = await upsertSenninUser(profile.id, profile.name);
     await befriendTeam(userId).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
     res.clearCookie("sc_oauth", cookieBase);
+    res.clearCookie("sc_oauth_link", cookieBase);
     await startSession(res, userId);
     res.redirect(`${config.appOrigin}/`);
   } catch (error) {
+    if (error instanceof SenninError) {
+      fail(error.message.slice(0, 180));
+      return;
+    }
     fail(error instanceof Error ? error.message.slice(0, 180) : "仙人アカウントへの接続に失敗しました。");
   }
 });
@@ -364,8 +424,17 @@ accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
   const cacheControl = versioned ? "private, max-age=31536000, immutable" : "private, no-cache";
   const cloudflareUrl = cloudflareAvatarUrl(data.avatar_path);
   if (cloudflareUrl) {
-    res.setHeader("cache-control", versioned ? cacheControl : "private, max-age=300");
-    res.redirect(302, cloudflareUrl);
+    // 別サイトへリダイレクトさせると、画面の CSP（画像の読み込み先の制限）で表示できないことがあるため、ここで中継する
+    const upstream = await fetch(cloudflareUrl, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    if (!upstream?.ok) {
+      res.setHeader("cache-control", "no-store");
+      res.status(502).end();
+      return;
+    }
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader("content-type", upstream.headers.get("content-type") ?? "image/jpeg");
+    res.setHeader("cache-control", cacheControl);
+    res.send(bytes);
     return;
   }
   const image = await readImage(data.avatar_path);

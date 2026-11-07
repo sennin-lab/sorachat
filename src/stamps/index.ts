@@ -57,6 +57,10 @@ function undoMojibake(text: string): string {
 const decodeLegacyRef = (ref: string) =>
   undoMojibake(ref.replace(/#U([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))));
 
+// スタンプの指定を、サーバーと同じ名前（builtin:おめでとう.png のような形）に直す。ストアのパックの判定に使う
+export const canonicalStampRef = (ref: string): string =>
+  ref.startsWith("builtin:") ? decodeLegacyRef(ref) : ref;
+
 // スタンプの指定（ref）から表示する画像のURLを求める
 export const stampUrlOf = (ref: string): string | null => {
   if (ref.startsWith("builtin:")) return urlByRef.get(ref) ?? urlByRef.get(decodeLegacyRef(ref)) ?? null;

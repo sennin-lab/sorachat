@@ -22,6 +22,7 @@ import { BlockedError } from "./messages.js";
 import { attachRealtime } from "./realtime.js";
 import { initializeMaintenanceSettings, maintenanceGate } from "./maintenance.js";
 import { getStatus } from "./status.js";
+import { store } from "./store.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -54,6 +55,7 @@ app.use("/api", senninai);
 app.use("/api", stamps);
 app.use("/api", blocks);
 app.use("/api", calls);
+app.use("/api", store);
 app.use("/api", admin);
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "見つかりません。" });

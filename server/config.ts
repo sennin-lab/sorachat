@@ -6,6 +6,16 @@ const need = (name: string) => {
   return value;
 };
 
+// 仙人アカウントのAPIの場所は、トークンのURL（同じサーバー）から決める。個別に指定することもできる
+const senninApi = (path: string, override: string | undefined) => {
+  if (override) return override;
+  try {
+    return process.env.SENNIN_TOKEN_URL ? new URL(path, process.env.SENNIN_TOKEN_URL).toString() : "";
+  } catch {
+    return "";
+  }
+};
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || "development",
@@ -25,7 +35,12 @@ export const config = {
     tokenUrl: process.env.SENNIN_TOKEN_URL || "",
     userinfoUrl: process.env.SENNIN_USERINFO_URL || "",
     meUrl: process.env.SENNIN_ME_URL || "",
-    scope: process.env.SENNIN_SCOPE || "profile email"
+    scope: process.env.SENNIN_SCOPE || "profile email",
+    // ストア（ポイント）用の許可。ログインとは別に、「連携」のときだけ要求する
+    // points:write は管理者の承認が必要。承認されていないと連携画面でエラーになる
+    storeScope: process.env.SENNIN_STORE_SCOPE || "profile points:read points:write",
+    pointsUrl: senninApi("/api/v1/points", process.env.SENNIN_POINTS_URL),
+    pointsAdjustUrl: senninApi("/api/v1/points/adjust", process.env.SENNIN_POINTS_ADJUST_URL)
   },
   // senninai（AIチャット）の回答元（UserLocal の senninai API）。既定は作者の公開エンドポイント
   senninAi: {

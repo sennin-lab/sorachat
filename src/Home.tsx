@@ -9,6 +9,7 @@ import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { refreshPush } from "./push";
 import { NotifyPrompt } from "./NotifyPrompt";
 import { OpenChatSheet } from "./OpenChatSheet";
+import { StoreSheet } from "./StoreSheet";
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -74,6 +75,9 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const [showSettings, setShowSettings] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showOpenChats, setShowOpenChats] = useState(false);
+  // 仙人ストア。連携の戻りには、結果（連携できた・できなかった）を表示する
+  const [showStore, setShowStore] = useState(false);
+  const [storeFlash, setStoreFlash] = useState<{ ok: boolean; text: string } | null>(null);
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(() => shouldAskNotify(me));
   const [showAdd, setShowAdd] = useState(false);
   // 友だちが増えた・減ったときに友だち一覧を取り直すための番号
@@ -88,6 +92,24 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("sorachat-theme", theme);
   }, [theme]);
+
+  // 仙人ストアで選んだ外観（吹き出し・背景の色）を、自分の画面に反映する
+  useEffect(() => {
+    if (me.storeTheme) document.documentElement.dataset.storeTheme = me.storeTheme;
+    else delete document.documentElement.dataset.storeTheme;
+  }, [me.storeTheme]);
+
+  // 仙人アカウントの連携から戻ってきたら、ストアを開いて結果を出す（URL の印は消す）
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const linked = params.get("store") === "linked";
+    const error = params.get("store_error");
+    if (!linked && !error) return;
+    setStoreFlash(linked ? { ok: true, text: "仙人アカウントと連携しました。ストアで買い物できます。" } : { ok: false, text: error ?? "" });
+    setShowStore(true);
+    setTab("more");
+    navigate("/more", { replace: true });
+  }, []);
 
   // URL に合わせてタブと選択中のトークを更新する
   useEffect(() => {
@@ -281,6 +303,18 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => setShowStore(true)}>
+                    <span className="option-icon">
+                      <Icon name="store" size={20} />
+                    </span>
+                    <span className="more-text">
+                      仙人ストア
+                      <small>外観・スタンプ・拡張機能をポイントで購入</small>
+                    </span>
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => setShowSettings(true)}>
                     <span className="option-icon">
                       <Icon name="settings" size={20} />
@@ -389,6 +423,17 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           onClose={closeProfile}
           onMessage={(username) => void openDmWith(username)}
           onFriendsChanged={bumpFriends}
+        />
+      )}
+      {showStore && (
+        <StoreSheet
+          me={me}
+          flash={storeFlash}
+          onClose={() => {
+            setShowStore(false);
+            setStoreFlash(null);
+          }}
+          onMeChange={onMeChange}
         />
       )}
       {showOpenChats && (

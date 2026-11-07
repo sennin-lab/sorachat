@@ -2264,3 +2264,174 @@ button[aria-busy="true"] { animation: sc-soft-pulse 1.4s ease-in-out infinite; }
 .bubble:has(.ai-code-block) { width: min(100%, 520px); }
 .bubble .ai-code-block { max-width: 100%; box-shadow: none; }
 .bubble .ai-code-block pre { max-height: 360px; }
+
+/* ---- デザインの調整（全体）---- */
+:root {
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+:root[data-theme="dark"] {
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+.btn-primary { box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 30%, transparent); }
+.btn-primary:not(:disabled):hover { filter: brightness(1.04); }
+.more-list .option-icon { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.more-list button:hover { background: var(--raised); }
+.profile-card { background: linear-gradient(180deg, var(--raised) 0%, var(--panel) 100%); }
+.sheet { box-shadow: 0 -8px 32px rgba(15, 23, 42, 0.12); }
+.more-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.more-text small { font-size: 12px; font-weight: 400; color: var(--muted); }
+
+/* ---- 仙人ストアの外観（data-store-theme は、買った外観の商品ID。自分の画面だけに効く） ---- */
+:root[data-store-theme="theme-sakura"] { --mine: #ffd6e5; --chat-bg: #fff7fa; --accent: #e0789f; --accent-ink: #c4577f; }
+:root[data-store-theme="theme-matcha"] { --mine: #d4efc9; --chat-bg: #f5fbf2; --accent: #5ea46b; --accent-ink: #3f8a50; }
+:root[data-store-theme="theme-sora"] { --mine: #cfe9ff; --chat-bg: #f2f8ff; --accent: #4f9fe0; --accent-ink: #2b78bd; }
+:root[data-store-theme="theme-yuyake"] { --mine: #ffd7b8; --chat-bg: #fff8f2; --accent: #e8834a; --accent-ink: #c4642c; }
+:root[data-theme="dark"][data-store-theme="theme-sakura"] { --mine: #6b3550; --chat-bg: #2a1f26; --accent: #e88fb3; --accent-ink: #f5b3cc; }
+:root[data-theme="dark"][data-store-theme="theme-matcha"] { --mine: #2f5a3a; --chat-bg: #1b2a20; --accent: #7cc08a; --accent-ink: #a6dcb0; }
+:root[data-theme="dark"][data-store-theme="theme-sora"] { --mine: #2c4f72; --chat-bg: #17232f; --accent: #79b9ef; --accent-ink: #9bd0ff; }
+:root[data-theme="dark"][data-store-theme="theme-yuyake"] { --mine: #7a4a2c; --chat-bg: #2a1f18; --accent: #f0a06a; --accent-ink: #ffc49a; }
+
+/* ---- 仙人ストア ---- */
+.store-sheet { max-height: 92dvh; background: var(--bg-soft); }
+.store-sheet .sheet-title-row { background: var(--panel); }
+.store-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 6px; }
+.store-wallet {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-ink) 100%);
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.store-wallet-icon {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.22);
+}
+.store-wallet-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.store-wallet-label { font-size: 12px; opacity: 0.88; }
+.store-wallet-points { font-size: 26px; font-weight: 700; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+.store-wallet-points small { font-size: 14px; font-weight: 600; }
+.store-refresh {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+}
+.store-refresh:disabled { opacity: 0.5; }
+.store-link-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px 16px;
+  border-radius: var(--radius-card, 18px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--card-shadow);
+}
+.store-link-card strong { font-size: 16px; }
+.store-link-card p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.store-link-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.store-link-btn { display: block; width: 100%; margin-top: 4px; padding: 12px 16px; text-align: center; }
+.store-error { margin: 0; font-size: 13px; color: var(--danger); }
+.store-notice { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+.store-notice.is-ok { background: rgba(46, 160, 67, 0.12); color: #1f7a36; }
+.store-notice.is-ng { background: rgba(229, 72, 77, 0.12); color: var(--danger); }
+.store-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--raised);
+}
+.store-tab { padding: 9px 6px; border-radius: 11px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.store-tab.on { background: var(--panel); color: var(--text); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+.store-tab-text { margin: -4px 4px 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.store-empty { padding: 24px 0; text-align: center; font-size: 14px; color: var(--muted); }
+.store-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.store-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius-card, 18px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--card-shadow);
+}
+.store-card.is-owned { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.store-card-top { display: flex; align-items: center; gap: 12px; }
+.store-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.store-card-text strong { font-size: 15px; }
+.store-card-text small { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.store-swatch { position: relative; flex: none; display: block; width: 56px; height: 56px; border-radius: 16px; }
+.store-swatch-bubble { position: absolute; left: 8px; bottom: 8px; width: 26px; height: 14px; border-radius: 10px 10px 10px 3px; }
+.store-icon {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.store-stamps { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: var(--bg-soft); }
+.store-stamps img { width: 44px; height: 44px; object-fit: contain; }
+.store-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.store-price { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.store-price.is-owned { font-size: 13px; color: var(--accent-ink); }
+.store-short { display: block; font-size: 11px; font-weight: 500; color: var(--danger); }
+.store-badge { padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.store-link-inline { text-decoration: none; }
+.store-unlink { align-self: center; padding: 8px; font-size: 13px; color: var(--muted); text-decoration: underline; }
+.store-foot { margin: 4px 4px 12px; font-size: 11px; line-height: 1.6; text-align: center; color: var(--muted); }
+
+/* ---- 鍵（買っていないスタンプ・ミニゲーム）---- */
+.stamp-btn { position: relative; }
+.stamp-btn.is-locked img { opacity: 0.35; filter: grayscale(0.4); }
+.stamp-lock {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-ink);
+  background: var(--panel);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+.stamp-note, .game-note { margin: 10px 6px 4px; font-size: 13px; line-height: 1.6; text-align: center; color: var(--muted); }
+.game-list button.is-locked { opacity: 0.7; }
+.game-lock {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  vertical-align: middle;
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--raised);
+}

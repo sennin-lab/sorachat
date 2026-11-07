@@ -5,6 +5,7 @@ import { decryptText } from "./crypto.js";
 import { sendToUser } from "./hub.js";
 import { BlockedError, COLUMNS, broadcastList, findOrCreateDm, insertMessage, membership, pollDataOf, postNotice, type MessageRow } from "./messages.js";
 import { sb } from "./supabase.js";
+import { featureAllowed } from "./storeAccess.js";
 
 // senninai（AIチャット）
 // sc_users に固定IDのボットとして登録する（schema_v12.sql。パスワードがないのでログインはできない）。
@@ -191,7 +192,13 @@ export async function senninaiPrecheck(conversationId: string, userId: string, b
   if (!(await aiEnabledFor(userId))) return AI_OFF_MESSAGE;
   const command = parseGroupCommand(body);
   if (!command) return "使い方: /senninai add（グループに参加）／ /senninai ask 質問（AIに質問）／ /senninai delete（グループから外す）";
-  if (command.kind === "add") return conv.botMember ? "senninaiはすでにこのグループにいます。" : null;
+  if (command.kind === "add") {
+    if (conv.botMember) return "senninaiはすでにこのグループにいます。";
+    if (!(await featureAllowed(userId, "bot:group"))) {
+      return "senninaiをグループに入れるには、仙人ストアの拡張機能（senninaiをグループに入れる）を購入してください。";
+    }
+    return null;
+  }
   if (command.kind === "delete") return conv.botMember ? null : "senninaiはこのグループにいません。";
   if (!conv.botMember) return "senninaiはまだこのグループにいません。先に /senninai add を送ってください。";
   if (!command.question) return "質問を入力してください。例: /senninai ask 今日の予定は？";
@@ -496,6 +503,8 @@ export async function senninaiAfterMessage(conversationId: string, userId: strin
       if (!command) return;
       if (command.kind === "add") {
         if (conv.botMember) return;
+        // 送信の前に確かめているが、念のため（拡張機能を持っていなければ何もしない）
+        if (!(await featureAllowed(userId, "bot:group"))) return;
         const { error } = await sb
           .from("sc_members")
           .upsert({ conversation_id: conversationId, user_id: BOT_ID, role: "member" }, { onConflict: "conversation_id,user_id", ignoreDuplicates: true });

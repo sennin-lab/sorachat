@@ -37,6 +37,7 @@ import {
 } from "./messages.js";
 import { aiEnabledFor, BOT_ID, senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { stampRefOk } from "./stamps.js";
+import { featureAllowed, stampLocked } from "./storeAccess.js";
 import { normalizeStampRef } from "./stampRef.js";
 import { createGame, gameAction, gameViewsFor } from "./games.js";
 import { GAME_KINDS, GameError } from "./gameLogic.js";
@@ -599,6 +600,10 @@ dm.post("/dm/:id/stamp", async (req, res) => {
     return;
   }
   const stampRef = normalizeStampRef(typeof req.body?.stampRef === "string" ? req.body.stampRef : "");
+  if (await stampLocked(stampRef, me)) {
+    res.status(403).json({ error: "このスタンプは仙人ストアのスタンプパックに入っています。購入すると送れます。" });
+    return;
+  }
   if (!(await stampRefOk(stampRef, me))) {
     res.status(400).json({ error: "スタンプが見つかりません。" });
     return;
@@ -792,6 +797,11 @@ dm.post("/dm/:id/game", async (req, res) => {
   const parsed = gameCreateSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "ゲームを選んでください。" });
+    return;
+  }
+  // 拡張機能として売っているゲームは、買った人だけ作れる
+  if (!(await featureAllowed(me, `game:${parsed.data.kind}`))) {
+    res.status(403).json({ error: "このミニゲームは仙人ストアの拡張機能です。ストアで購入すると遊べます。" });
     return;
   }
   const row = await createGame(id, me, parsed.data.kind);

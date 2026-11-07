@@ -1,5 +1,5 @@
 // グループ通話の発信・参加・退出。呼び出しはサーバーだけが送ります。
-// 発信するとトークに「電話に参加」のカードを出し、参加・退出・終了はお知らせとして残します。
+// 発信するとトークに「電話に参加」のカードを1つ出します。参加・退出のお知らせは出しません（トークが散らからないように）。
 // 身元はログインのセッションから決め、表示名などはDBから取るため、クライアントの申告は信用しません。
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
@@ -7,7 +7,7 @@ import { z } from "zod";
 import { currentUserId, randomToken, requireAuth } from "./auth.js";
 import { activeCalls, findActiveCallIn, findCall, pruneCalls, type CallRecord } from "./callRegistry.js";
 import { activeEndpoints, sendToUser } from "./hub.js";
-import { UUID, blockersOf, displayNameOf, insertMessage, memberIds, membership, mutedIds, postNotice } from "./messages.js";
+import { UUID, blockersOf, insertMessage, memberIds, membership, mutedIds } from "./messages.js";
 import { notifyRecipient } from "./push.js";
 import { sb } from "./supabase.js";
 
@@ -29,14 +29,6 @@ function allow(key: string, max: number, windowMs: number) {
   recent.push(now);
   hits.set(key, recent);
   return true;
-}
-
-function formatDuration(ms: number) {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = String(Math.floor((total % 3600) / 60)).padStart(h > 0 ? 2 : 1, "0");
-  const s = String(total % 60).padStart(2, "0");
-  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 }
 
 // 呼び出しを、相手のアプリ（WebSocket・/ws）へ送る。アプリと同じ接続を使うので、どの端末でも届く。
@@ -98,10 +90,7 @@ calls.post("/calls", requireAuth, async (req, res) => {
 
     const ongoing = findActiveCallIn(conversationId);
     if (ongoing) {
-      if (!ongoing.record.participants.has(userId)) {
-        ongoing.record.participants.add(userId);
-        await postNotice(conversationId, userId, `${await displayNameOf(userId)}さんが参加しました`);
-      }
+      ongoing.record.participants.add(userId);
       res.json({ callId: ongoing.callId, secret: ongoing.record.secret });
       return;
     }
@@ -170,10 +159,7 @@ calls.post("/calls/:callId/join", requireAuth, async (req, res) => {
       res.status(403).json({ error: "このトークには参加していません。" });
       return;
     }
-    if (!record.participants.has(userId)) {
-      record.participants.add(userId);
-      await postNotice(record.conversationId, userId, `${await displayNameOf(userId)}さんが参加しました`);
-    }
+    record.participants.add(userId);
     res.json({ ok: true, secret: record.secret });
   } catch (error) {
     console.error("[calls] 参加に失敗:", error);
@@ -181,7 +167,7 @@ calls.post("/calls/:callId/join", requireAuth, async (req, res) => {
   }
 });
 
-// 通話から退出したとき。最後の1人が抜けると、通話時間つきで終了をお知らせします
+// 通話から退出したとき。最後の1人が抜けると、通話を終える（お知らせは出さない）
 calls.post("/calls/:callId/leave", requireAuth, async (req, res) => {
   try {
     const userId = currentUserId(res);
@@ -202,11 +188,8 @@ calls.post("/calls/:callId/leave", requireAuth, async (req, res) => {
       return;
     }
     record.participants.delete(userId);
-    await postNotice(record.conversationId, userId, `${await displayNameOf(userId)}さんが退出しました`);
-    if (record.participants.size === 0) {
-      activeCalls.delete(callId.data);
-      await postNotice(record.conversationId, userId, `通話が終了しました（通話時間 ${formatDuration(Date.now() - record.startedAt)}）`);
-    }
+    // 最後の1人が抜けたら通話を終える（お知らせは出さない。トークの通話カードは「通話は終了しました」に変わる）
+    if (record.participants.size === 0) activeCalls.delete(callId.data);
     res.json({ ok: true });
   } catch (error) {
     console.error("[calls] 退出に失敗:", error);

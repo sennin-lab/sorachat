@@ -15,6 +15,27 @@ export type Me = {
   coverTheme: CoverTheme;
   // senninai（AIチャット）を使うか。既定はオフ
   aiEnabled: boolean;
+  // 仙人ストアで選んでいる外観（商品ID）。なければ null
+  storeTheme?: string | null;
+};
+
+// 仙人ストアの商品（サーバーの一覧と同じ形）
+export type StoreItemView = {
+  id: string;
+  kind: "theme" | "stamp_pack" | "extension";
+  name: string;
+  description: string;
+  price: number;
+  stamps?: string[];
+  feature?: string;
+  owned: boolean;
+  selected: boolean;
+};
+
+export type StoreView = {
+  linked: boolean;
+  selectedTheme: string | null;
+  items: StoreItemView[];
 };
 
 export type Conversation = {
