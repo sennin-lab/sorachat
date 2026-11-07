@@ -461,6 +461,7 @@ accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
   }
   const { data } = await sb.from("sc_users").select("avatar_path").eq("id", id).maybeSingle();
   if (!data?.avatar_path) {
+    res.setHeader("cache-control", "no-store");
     res.status(404).end();
     return;
   }
@@ -484,6 +485,7 @@ accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
   }
   const image = await readImage(data.avatar_path);
   if (!image) {
+    res.setHeader("cache-control", "no-store");
     res.status(404).end();
     return;
   }

@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { avatarObjectUrl, cachedAvatar, knownAvatarVersion, onAvatarCacheChange } from "./avatarCache";
 import { RobotFace, SENNIN_BOT_ID } from "./robot";
 
 // 一時的に読めなかった画像は、少し待って読み直す（ネットワークの一瞬の失敗で文字のアイコンに戻らないように）
 const MAX_RETRY = 2;
+// それでも読めなかったときは、文字のアイコンを出したまま、間を空けて何度か読み直す（リロードしなくても表示されるように）
+const RECOVER_MS = [4_000, 10_000, 20_000, 40_000, 60_000];
+const MAX_RECOVER = 8;
 
 // 写真があれば写真、なければ名前の1文字。src を渡すとグループなど別の画像URLを使う
 // 友だちの画像は、保存済みのもの（localStorage → IndexedDB）があればデータベースに問い合わせる前に表示する
@@ -23,6 +26,8 @@ export function Avatar({
   const [failed, setFailed] = useState(false);
   // 読み直しの回数（増えると、URL に付けた印が変わり、ブラウザが取り直す）
   const [retry, setRetry] = useState(0);
+  // 失敗したあとの、間を空けた読み直しの回数
+  const recovered = useRef(0);
   const [saved, setSaved] = useState<string | null>(() => (!src && userId && hasAvatar ? cachedAvatar(userId) : null));
   // IndexedDB から読んだ画像。undefined は「まだ確かめていない」、null は「保存なし」
   const [dbUrl, setDbUrl] = useState<string | null | undefined>(undefined);
@@ -59,7 +64,35 @@ export function Avatar({
   useEffect(() => {
     setFailed(false);
     setRetry(0);
+    recovered.current = 0;
   }, [userId, src, saved, dbUrl, hasAvatar]);
+
+  // 読めなかったあとも、あきらめない。間を空けて読み直し、回線が戻った・画面に戻ってきたときはすぐ読み直す
+  useEffect(() => {
+    if (!failed) return;
+    const revive = () => {
+      setFailed(false);
+      setRetry((n) => n + 1);
+    };
+    let timer: number | undefined;
+    if (recovered.current < MAX_RECOVER) {
+      const wait = RECOVER_MS[Math.min(recovered.current, RECOVER_MS.length - 1)];
+      timer = window.setTimeout(() => {
+        recovered.current += 1;
+        revive();
+      }, wait);
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") revive();
+    };
+    window.addEventListener("online", revive);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("online", revive);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [failed]);
 
   const initial = name.trim().charAt(0).toUpperCase() || "?";
   const style = { width: size, height: size, fontSize: Math.round(size * 0.42) };
@@ -94,6 +127,9 @@ export function Avatar({
       style={style}
       src={url}
       alt=""
+      onLoad={() => {
+        recovered.current = 0;
+      }}
       onError={() => {
         if (retry < MAX_RETRY) {
           // 少し待ってから読み直す（一時的な失敗なら、次の読み込みで表示される）

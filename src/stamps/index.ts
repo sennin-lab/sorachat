@@ -18,7 +18,9 @@ export type Stamp = { ref: string; name: string; url: string };
 const safeUrl = (url: string) => url.replace(/#/g, "%23").replace(/\?/g, "%3F");
 
 // 名前は日本語に戻して表示する（#U… のままだと、画像が出ないときに文字として見えてしまうため）
+// 「#」の入った古いファイル名（#U3042…）は、Vite の import で読めず画像が出ないため、一覧から外す（_u3042… の名前を使う）
 export const BUILTIN_STAMPS: Stamp[] = Object.entries(files)
+  .filter(([path]) => !path.includes("#"))
   .map(([path, url]) => {
     const file = path.replace(/^\.\//, "");
     return { ref: `builtin:${file}`, name: decodeStampName(file.replace(/\.[^.]+$/, "")), url: safeUrl(url) };

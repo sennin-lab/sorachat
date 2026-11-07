@@ -58,9 +58,10 @@ export const cachedAvatar = (userId: string): string | null => {
 // 画面に表示するためのオブジェクトURL（IndexedDB の画像から作る）
 const blobUrls = new Map<string, { version: string; url: string }>();
 
+// 古いオブジェクトURLは、すぐには無効にしない（表示中の画像が、差し替えの途中で壊れて見えないように）
 const forgetBlobUrl = (userId: string) => {
   const entry = blobUrls.get(userId);
-  if (entry) URL.revokeObjectURL(entry.url);
+  if (entry) window.setTimeout(() => URL.revokeObjectURL(entry.url), 60_000);
   blobUrls.delete(userId);
 };
 
@@ -113,14 +114,30 @@ const toDataUrl = (blob: Blob) =>
 // 人の画像を保存する。版が同じなら取りに行かない（サーバーにもDBにも問い合わせない）。
 // local が true のときは localStorage にも置く（自分と友だち）。
 // 友だちの一覧にない人の localStorage の分は消す（local のときだけ）。
-export async function syncAvatars(people: AvatarPerson[], options: { local?: boolean } = {}): Promise<void> {
+// 画像が保存されたことを、まとめて1回だけ画面に知らせる（人数が多くても、画面の更新を何度も走らせない）
+let notifyTimer: number | undefined;
+const notifySoon = () => {
+  window.clearTimeout(notifyTimer);
+  notifyTimer = window.setTimeout(() => window.dispatchEvent(new Event(AVATAR_EVENT)), 120);
+};
+
+// 取れなかった人の画像は、少し待って取り直す（通信の一時的な失敗で、リロードするまで出ないことがないように）
+const RETRY_SYNC_MS = [8_000, 30_000, 90_000];
+
+export async function syncAvatars(
+  people: AvatarPerson[],
+  options: { local?: boolean; attempt?: number } = {}
+): Promise<void> {
   rememberAvatars(people);
   // 非公開ブラウズ中は画像をまとめて保存・取得しない（データベースの転送量を抑える）
   if (await isPrivateBrowsing()) return;
 
   let changed = false;
+  const failed: AvatarPerson[] = [];
+  const attempt = options.attempt ?? 0;
   const local = Boolean(options.local);
-  if (local) {
+  // 取り直しのときは、一覧にない人の保存分を消さない（一部の人だけを渡しているため）
+  if (local && attempt === 0) {
     try {
       const keep = new Set(people.map((p) => p.id));
       for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -162,7 +179,10 @@ export async function syncAvatars(people: AvatarPerson[], options: { local?: boo
         const res = await fetch(`/api/users/${person.id}/avatar${version ? `?v=${encodeURIComponent(version)}` : ""}`, {
           credentials: "same-origin"
         });
-        if (!res.ok) continue;
+        if (!res.ok) {
+          failed.push(person);
+          continue;
+        }
         blob = await res.blob();
         if (blob.size <= MAX_DB_AVATAR_BYTES) {
           await idbPut("avatars", person.id, { v: version, blob } satisfies AvatarRecord);
@@ -178,8 +198,14 @@ export async function syncAvatars(people: AvatarPerson[], options: { local?: boo
       }
     } catch {
       // この人の画像だけ保存できなくても、残りは続ける
+      failed.push(person);
     }
+    // 1人ずつ保存できたら、すぐ画面に知らせる（全員ぶんが終わるのを待たない）
+    if (changed) notifySoon();
   }
 
-  if (changed) window.dispatchEvent(new Event(AVATAR_EVENT));
+  if (changed) notifySoon();
+  if (failed.length > 0 && attempt < RETRY_SYNC_MS.length) {
+    window.setTimeout(() => void syncAvatars(failed, { local: options.local, attempt: attempt + 1 }), RETRY_SYNC_MS[attempt]);
+  }
 }
