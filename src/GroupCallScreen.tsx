@@ -46,7 +46,7 @@ export function GroupCallHost({ me }: { me: Me }) {
         <div className="gcall-bg" aria-hidden="true" />
         <div className="gcall-top">
           <Avatar userId={caller.id} hasAvatar={caller.hasAvatar} name={caller.name} size={120} />
-          <p className="gcall-name">{caller.name}</p>
+          <p className="gcall-name">{caller.name || "メンバー"}</p>
           <p className="gcall-sub">{groupName}のグループ通話に招待されています</p>
         </div>
         <div className="gcall-actions gcall-actions-two">
@@ -68,6 +68,7 @@ export function GroupCallHost({ me }: { me: Me }) {
   }
 
   const elapsed = call.ringing ? "呼び出し中…" : formatElapsed(now - call.startedAt);
+  const avatarSize = call.participants.length <= 2 ? 120 : call.participants.length <= 4 ? 96 : 72;
 
   if (minimized) {
     return (
@@ -92,13 +93,15 @@ export function GroupCallHost({ me }: { me: Me }) {
         </div>
         <span className="gcall-icon-spacer" aria-hidden="true" />
       </header>
-      <div className={`gcall-grid gcall-grid-${Math.min(call.participants.length, 4)}`}>
-        {call.participants.map((p) => (
-          <div className="gcall-member" key={p.id}>
-            <Avatar userId={p.id} hasAvatar={p.hasAvatar} name={p.name} size={call.participants.length > 2 ? 84 : 120} />
-            <span>{p.name}</span>
-          </div>
-        ))}
+      <div className="gcall-stage">
+        <div className="gcall-grid">
+          {call.participants.map((p) => (
+            <div className="gcall-member" key={p.id}>
+              <Avatar userId={p.id} hasAvatar={p.hasAvatar} name={p.name} size={avatarSize} />
+              <span>{p.name || "メンバー"}</span>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="gcall-actions">
         <div className="gcall-btn-wrap">

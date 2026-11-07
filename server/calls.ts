@@ -6,8 +6,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, randomToken, requireAuth } from "./auth.js";
 import { config } from "./config.js";
-import { activeCalls, findCall, pruneCalls } from "./callRegistry.js";
-import { UUID, displayNameOf, insertMessage, memberIds, membership, postNotice } from "./messages.js";
+import { activeCalls, findActiveCallIn, findCall, pruneCalls, type CallRecord } from "./callRegistry.js";
+import { activeEndpoints } from "./hub.js";
+import { UUID, blockersOf, displayNameOf, insertMessage, memberIds, membership, mutedIds, postNotice } from "./messages.js";
+import { notifyRecipient } from "./push.js";
 import { sb } from "./supabase.js";
 
 export const calls = Router();
@@ -58,6 +60,29 @@ async function sendRings(userIds: string[], payload: unknown) {
   }
 }
 
+async function notifyCallStart(args: {
+  conversationId: string;
+  callId: string;
+  callerId: string;
+  callerName: string;
+  groupName: string;
+  recipients: string[];
+  inCall: Set<string>;
+}) {
+  const [muted, blockers] = await Promise.all([mutedIds(args.conversationId), blockersOf(args.callerId)]);
+  for (const uid of args.recipients) {
+    if (muted.has(uid) || blockers.has(uid) || args.inCall.has(uid)) continue;
+    void notifyRecipient({
+      recipientId: uid,
+      senderName: args.groupName,
+      preview: `${args.callerName || "メンバー"}さんから電話がかかっています`,
+      conversationId: args.conversationId,
+      tag: `call-${args.callId}`,
+      skipEndpoints: activeEndpoints(uid)
+    });
+  }
+}
+
 calls.post("/calls", requireAuth, async (req, res) => {
   try {
     const userId = currentUserId(res);
@@ -85,6 +110,17 @@ calls.post("/calls", requireAuth, async (req, res) => {
       res.status(400).json({ error: "グループでのみ通話できます。" });
       return;
     }
+
+    const ongoing = findActiveCallIn(conversationId);
+    if (ongoing) {
+      if (!ongoing.record.participants.has(userId)) {
+        ongoing.record.participants.add(userId);
+        await postNotice(conversationId, userId, `${await displayNameOf(userId)}さんが参加しました`);
+      }
+      res.json({ callId: ongoing.callId, secret: ongoing.record.secret });
+      return;
+    }
+
     const { data: caller, error: callerError } = await sb
       .from("sc_users")
       .select("id, display_name, avatar_path")
@@ -93,16 +129,31 @@ calls.post("/calls", requireAuth, async (req, res) => {
     if (callerError) throw callerError;
 
     const callId = randomUUID();
-    const secret = randomToken(32); // この通話の署名鍵（参加者だけに届く）
+    const secret = randomToken(32);
     pruneCalls();
-    activeCalls.set(callId, { conversationId, startedAt: Date.now(), secret, participants: new Set([userId]) });
-    const callerInfo = { id: userId, name: caller?.display_name ?? "", hasAvatar: Boolean(caller?.avatar_path) };
+    const record: CallRecord = { conversationId, startedAt: Date.now(), secret, participants: new Set([userId]) };
+    activeCalls.set(callId, record);
+    const callerName = caller?.display_name ?? "";
+    const callerInfo = { id: userId, name: callerName, hasAvatar: Boolean(caller?.avatar_path) };
     const others = (await memberIds(conversationId)).filter((id) => id !== userId);
-    // グループ名は sc_conversations.title に入っている（名前がないグループは「グループ」と表示）
     const groupName = conversation.title || "グループ";
-    await sendRings(others, { callId, conversationId, groupName, caller: callerInfo, secret });
+    try {
+      await sendRings(others, { callId, conversationId, groupName, caller: callerInfo, secret });
+    } catch (error) {
+      activeCalls.delete(callId);
+      throw error;
+    }
 
-    // トークに「電話に参加」のカードを出す（保存に失敗しても発信自体は続ける）
+    void notifyCallStart({
+      conversationId,
+      callId,
+      callerId: userId,
+      callerName,
+      groupName,
+      recipients: others,
+      inCall: record.participants
+    }).catch((error) => console.error("[calls] 通話の通知に失敗:", error));
+
     try {
       await insertMessage(conversationId, userId, { kind: "call", callId }, "通話が始まりました");
     } catch (error) {

@@ -3,6 +3,7 @@ import { ApiError, api, delete_, patch } from "./api";
 import { Icon } from "./Icon";
 import { disablePush, enablePush, testPush } from "./push";
 import { getShowUnsent, setShowUnsent } from "./prefs";
+import { getLiquidIcon, setLiquidIcon } from "./iconPrefs";
 import type { Me } from "./types";
 
 // 設定（LINE の設定画面のように、項目をグループ分けして表示する）
@@ -24,6 +25,7 @@ export function SettingsSheet({
   const [notify, setNotify] = useState(me.notifyDm);
   const [ai, setAi] = useState(me.aiEnabled);
   const [showUnsent, setShowUnsentState] = useState(getShowUnsent);
+  const [liquidIcon, setLiquidIconState] = useState(getLiquidIcon);
   const [status, setStatus] = useState("");
   const [testMessage, setTestMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -119,6 +121,23 @@ export function SettingsSheet({
         <label className="page-row">
           <span className="row-label">
             <span className="option-icon">
+              <Icon name="image" size={18} />
+            </span>
+            Liquid Glass アイコン
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={liquidIcon}
+            onChange={(e) => {
+              setLiquidIcon(e.target.checked);
+              setLiquidIconState(e.target.checked);
+            }}
+          />
+        </label>
+        <label className="page-row">
+          <span className="row-label">
+            <span className="option-icon">
               <Icon name="unsend" size={18} />
             </span>
             送信取り消しの表示
@@ -134,6 +153,7 @@ export function SettingsSheet({
           />
         </label>
       </div>
+      <p className="notice center small">Liquid Glass アイコンをオフにすると通常アイコンに戻ります。初期設定は通常アイコンです。</p>
       <p className="notice center small">オフにすると、取り消されたメッセージはトークに表示されません（この端末の設定です）。</p>
 
       <div className="section-label flush">

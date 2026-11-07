@@ -20,3 +20,11 @@ export function findCall(callId: string): CallRecord | undefined {
   }
   return record;
 }
+
+export function findActiveCallIn(conversationId: string): { callId: string; record: CallRecord } | undefined {
+  pruneCalls();
+  for (const [callId, record] of activeCalls) {
+    if (record.conversationId === conversationId) return { callId, record };
+  }
+  return undefined;
+}

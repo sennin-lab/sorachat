@@ -81,6 +81,7 @@ export async function notifyRecipient(args: {
   senderName: string;
   preview: string;
   conversationId: string;
+  tag?: string;
   // この端末では画面が開いているので送らない（端末ごとの通知先）
   skipEndpoints?: Set<string>;
 }) {
@@ -96,7 +97,7 @@ export async function notifyRecipient(args: {
       title: args.senderName,
       body: args.preview,
       url: `/?dm=${args.conversationId}`,
-      tag: `dm-${args.conversationId}`
+      tag: args.tag ?? `dm-${args.conversationId}`
     });
     await Promise.all(
       ((subs ?? []) as Sub[])

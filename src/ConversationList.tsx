@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { Avatar } from "./Avatar";
 import { Icon } from "./Icon";
+import { Dots } from "./Loading";
 import { formatTime } from "./format";
 import type { Conversation } from "./types";
 
@@ -14,12 +15,18 @@ export function ConversationList({
   list,
   selectedId,
   onSelect,
-  onCompose
+  onCompose,
+  loaded = true,
+  loadingIds
 }: {
   list: Conversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onCompose: () => void;
+  // 一覧を取り終えたか（取り終えるまでは仮の行を出す）
+  loaded?: boolean;
+  // メッセージを先読み中のトーク（その行に読み込み表示を出す）
+  loadingIds?: Set<string>;
 }) {
   const [query, setQuery] = useState("");
   const shown = useMemo(() => {
@@ -44,7 +51,16 @@ export function ConversationList({
         </label>
       </div>
 
-      {!list.length && (
+      {!loaded && !list.length && (
+        <ul className="skeleton-list" aria-label="読み込み中">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <li key={i}>
+              <div className="skeleton-row" />
+            </li>
+          ))}
+        </ul>
+      )}
+      {loaded && !list.length && (
         <div className="tab-empty">
           <p>まだトークはありません。</p>
           <button className="btn-primary" onClick={onCompose}>
@@ -80,7 +96,13 @@ export function ConversationList({
                     <time>{formatTime(c.lastMessageAt)}</time>
                   </span>
                   <span className="conv-bottom">
-                    <span className="preview">{previewOf(c)}</span>
+                    {loadingIds?.has(c.id) ? (
+                      <span className="preview loading-text">
+                        <Dots />
+                      </span>
+                    ) : (
+                      <span className="preview">{previewOf(c)}</span>
+                    )}
                     {c.unread > 0 && (
                       <span className="badge-count" key={c.unread}>
                         {c.unread > 99 ? "99+" : c.unread}

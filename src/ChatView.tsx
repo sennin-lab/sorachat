@@ -14,7 +14,7 @@ import { Avatar } from "./Avatar";
 import { SenninaiConfirm } from "./SenninaiConfirm";
 import { RoomSettingsSheet } from "./RoomSettingsSheet";
 import { SENNIN_BOT_ID } from "./robot";
-import { cachedMessages, saveMessages } from "./cache";
+import { cachedMessages, loadMessagesDb, saveMessages } from "./cache";
 import { clipLongWords } from "./clip";
 import { ForwardSheet } from "./ForwardSheet";
 import { GroupSheet } from "./GroupSheet";
@@ -36,7 +36,9 @@ import { PollScreen } from "./PollScreen";
 import { FileViewer, viewerKindOf } from "./FileViewer";
 import { GameCard } from "./GameCard";
 import { GameSheet } from "./GameSheet";
-import { MentionText } from "./MentionText";
+import { RichText } from "./LinkText";
+import { CodeMessage } from "./CodeMessage";
+import { ThreadSkeleton } from "./Loading";
 import type { Conversation, FriendshipState, GameKind, Member, Message } from "./types";
 
 type ContactInfo = NonNullable<Message["contact"]>;
@@ -164,6 +166,8 @@ export function ChatView({
   onActivity: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>(() => cachedMessages(conversationId));
+  // 最新の読み込みが終わったか（終わるまで、中身がなければ読み込み表示を出す）
+  const [loaded, setLoaded] = useState(false);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -280,6 +284,8 @@ export function ChatView({
     } catch (err) {
       // 読み込みに失敗したら、空の画面のまま黙らず理由を表示する
       setError(err instanceof ApiError ? err.message : "メッセージを読み込めませんでした。通信状態を確認してください。");
+    } finally {
+      setLoaded(true);
     }
   };
 
@@ -309,6 +315,10 @@ export function ChatView({
     load();
     loadReaders();
     markRead();
+    // IndexedDB に保存してある過去分を先に出す（最新は load() で取り直す）
+    void loadMessagesDb(conversationId).then((stored) => {
+      if (stored.length > 0) commit(mergeById(stored, messagesRef.current));
+    });
     return onChatEvent((event) => {
       if (event.type === "hello") {
         load();
@@ -828,6 +838,7 @@ export function ChatView({
       )}
 
       <div className="thread" ref={threadRef}>
+        {!loaded && messages.length === 0 && <ThreadSkeleton />}
         {hasOlder && messages.length > 0 && (
           <button
             type="button"
@@ -984,7 +995,7 @@ export function ChatView({
                         )
                       ) : (
                         <p>
-                          <MentionText text={clipLongWords(m.body ?? "")} users={mentionable} meName={meName} />
+                          <CodeMessage text={m.body ?? ""} users={mentionable} meName={meName} />
                         </p>
                       )}
                       {hasStatus && (

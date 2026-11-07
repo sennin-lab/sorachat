@@ -16,6 +16,7 @@ export const BOT_NAME = "senninai";
 
 const PERSONA = "あなたは「senninai」というチャットアプリのAIです。日本語で、簡潔に答えてください。";
 const MAX_REPLY = 900;
+const MAX_CODE_REPLY = 12000;
 const MAX_CONTEXT_CHARS = 1000;
 const MAX_MEMBER_CHARS = 300;
 const MAX_QUESTION_CHARS = 300;
@@ -292,7 +293,7 @@ function pickAnswer(data: any): string {
 }
 
 async function say(conversationId: string, body: string, replyToId: string | null = null) {
-  const text = body.slice(0, 1000);
+  const text = body.slice(0, 14000);
   await insertMessage(conversationId, BOT_ID, { kind: "text", body: text }, text, { replyToId });
 }
 
@@ -733,7 +734,11 @@ async function handleChat(conversationId: string, text: string, row: MessageRow)
     .filter((m) => m.content);
   // 履歴は合計の文字数も上限まで（古いものから落とす）
   while (history.reduce((sum, m) => sum + m.content.length, 0) > MAX_HISTORY_CHARS && history.length > 1) history.shift();
-  const answer = await askAi([...history, { role: "user", content: `${PERSONA}\n\n${text.slice(0, 1000)}` }]);
+  const codeRequest = /(コード|プログラム|ソース|html|css|javascript|typescript|python|react|sql|json)/i.test(text);
+  const userPrompt = codeRequest
+    ? `${PERSONA}\n\nユーザーの依頼に合わせて、実行可能なコードを生成してください。コードは必ず言語名付きのMarkdownコードフェンス（例: \`\`\`html）で囲み、コードを省略せずに出力してください。必要な説明はコードの前後に短く書いてください。複数ファイルが必要な場合はファイル名を明記して各ファイルを個別のコードブロックにしてください。\n\n依頼: ${text.slice(0, 1000)}`
+    : `${PERSONA}\n\n${text.slice(0, 1000)}`;
+  const answer = await askAi([...history, { role: "user", content: userPrompt }], codeRequest ? MAX_CODE_REPLY : MAX_REPLY);
   return say(conversationId, answer);
 }
 

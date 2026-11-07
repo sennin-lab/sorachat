@@ -512,7 +512,7 @@ export async function insertMessage(
     sendToUser(uid, { type: "list" });
   }
   // 参加・退出などのお知らせは、通知（プッシュ）を送らない
-  if (content.kind !== "system") void notifyOffline(conversationId, senderId, members, shortPreview, skip);
+  if (content.kind !== "system" && content.kind !== "call") void notifyOffline(conversationId, senderId, members, shortPreview, skip);
   return row;
 }
 

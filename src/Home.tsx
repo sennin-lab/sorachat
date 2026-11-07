@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { api, post } from "./api";
 import { ChatView } from "./ChatView";
-import { cachedConversations, saveConversations } from "./cache";
+import { cachedConversations, loadConversationsDb, saveConversations } from "./cache";
+import { prefetchMessages } from "./prefetch";
 import { ConversationList } from "./ConversationList";
 import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { refreshPush } from "./push";
@@ -57,6 +58,9 @@ const TABS: { id: Tab; label: string; icon: "chat" | "users" | "menu" }[] = [
 
 export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me) => void; onLogout: () => void }) {
   const [list, setList] = useState<Conversation[]>(cachedConversations);
+  // 一覧を取り終えたか・メッセージを先読み中のトーク（読み込み表示に使う）
+  const [listLoaded, setListLoaded] = useState(false);
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(() => new Set());
   // 画面の状態は URL から決める（/home, /friends, /more, /dm/:id, /groupchat/:id, /profile/:id）
   const navigate = useNavigate();
   const location = useLocation();
@@ -105,6 +109,17 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       const next = await api<Conversation[]>("/api/dm/conversations");
       setList(next);
       saveConversations(next);
+      setListLoaded(true);
+      // 未読のトークから順に、開く前のメッセージを先に保存しておく
+      void prefetchMessages(next, {
+        start: (id) => setLoadingIds((s) => new Set(s).add(id)),
+        done: (id) =>
+          setLoadingIds((s) => {
+            const copy = new Set(s);
+            copy.delete(id);
+            return copy;
+          })
+      });
     } catch {
       return;
     }
@@ -114,6 +129,14 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(refresh, 400);
   }, [refresh]);
+
+  // 保存済みの一覧が localStorage に無いときは IndexedDB から読む
+  useEffect(() => {
+    if (list.length) return;
+    void loadConversationsDb().then((stored) => {
+      if (stored.length) setList((current) => (current.length ? current : stored));
+    });
+  }, []);
 
   // AI機能の設定が変わったら一覧を取り直す
   useEffect(() => {
@@ -203,7 +226,14 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       <aside className="sidebar">
         <div className="sidebar-body" key={tab}>
           {tab === "talk" && (
-            <ConversationList list={visibleList} selectedId={selectedId} onSelect={select} onCompose={() => setShowNew(true)} />
+            <ConversationList
+              list={visibleList}
+              selectedId={selectedId}
+              onSelect={select}
+              onCompose={() => setShowNew(true)}
+              loaded={listLoaded}
+              loadingIds={loadingIds}
+            />
           )}
           {tab === "friends" && (
             <FriendsTab

@@ -4,6 +4,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { trackKeyboard } from "./keyboard";
 import "./styles.css";
+import { applyAppIcon } from "./iconPrefs";
+
+applyAppIcon();
 
 // 管理画面とステータス画面は、そのページを開いたときだけ読み込む（通常のチャット画面を軽くする）
 const AdminApp = lazy(() => import("./Admin").then((m) => ({ default: m.AdminApp })));

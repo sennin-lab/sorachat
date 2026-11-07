@@ -11,7 +11,16 @@ export type Invite = { callId: string; conversationId: string; groupName: string
 export const MAX_CALL_PEERS = 6; // メッシュ方式のため、通話の人数に上限を設けます
 const RING_TIMEOUT_MS = 45_000;
 const SIGNAL_MAX_AGE_MS = 5 * 60_000;
-const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+const DISCONNECT_GRACE_MS = 6_000;
+
+function iceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+  const urls = (import.meta.env.VITE_TURN_URLS ?? "").split(",").map((u: string) => u.trim()).filter(Boolean);
+  if (urls.length) {
+    servers.push({ urls, username: import.meta.env.VITE_TURN_USERNAME ?? "", credential: import.meta.env.VITE_TURN_CREDENTIAL ?? "" });
+  }
+  return servers;
+}
 const enc = new TextEncoder();
 
 type Peer = {
@@ -20,6 +29,7 @@ type Peer = {
   audio: HTMLAudioElement;
   remoteSet: boolean;
   pendingIce: RTCIceCandidateInit[];
+  timer: number;
 };
 
 export type CallState =
@@ -139,29 +149,47 @@ function stopMic() {
   stream = null;
 }
 
+function armAudioUnlock() {
+  document.addEventListener("pointerdown", () => peers.forEach((p) => void p.audio.play().catch(() => {})), { once: true });
+}
+
 function createPeer(info: CallPeer): Peer {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const pc = new RTCPeerConnection({ iceServers: iceServers() });
   const audio = new Audio();
   audio.autoplay = true;
-  const peer: Peer = { info, pc, audio, remoteSet: false, pendingIce: [] };
+  const peer: Peer = { info, pc, audio, remoteSet: false, pendingIce: [], timer: 0 };
   stream?.getTracks().forEach((t) => pc.addTrack(t, stream!));
   pc.onicecandidate = (e) => {
     if (e.candidate) void seal("ice", { to: info.id, candidate: e.candidate.toJSON() });
   };
   pc.ontrack = (e) => {
     audio.srcObject = e.streams[0];
-    audio.play().catch(() => {});
+    audio.play().catch(() => armAudioUnlock());
   };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "failed" || pc.connectionState === "closed") dropPeer(info.id);
+    window.clearTimeout(peer.timer);
+    if (pc.connectionState === "failed") recover(peer);
+    if (pc.connectionState === "disconnected") peer.timer = window.setTimeout(() => recover(peer), DISCONNECT_GRACE_MS);
   };
   peers.set(info.id, peer);
   return peer;
 }
 
+// 接続が切れた相手との通信をつなぎ直す。ID の小さい側だけが新しい offer を出す（両方から出て衝突するのを防ぐ）
+function recover(peer: Peer) {
+  if (state.status !== "active" || peers.get(peer.info.id) !== peer) return;
+  if (peer.pc.connectionState === "connected") return;
+  if (me && me.id < peer.info.id) {
+    void initiate(peer.info).then(() => refreshActive());
+  } else if (peer.pc.connectionState === "failed") {
+    dropPeer(peer.info.id);
+  }
+}
+
 function dropPeer(id: string) {
   const peer = peers.get(id);
   if (!peer) return;
+  window.clearTimeout(peer.timer);
   peer.pc.close();
   peer.audio.srcObject = null;
   peers.delete(id);
@@ -171,6 +199,14 @@ function dropPeer(id: string) {
 async function flushIce(peer: Peer) {
   for (const c of peer.pendingIce) await peer.pc.addIceCandidate(c).catch(() => {});
   peer.pendingIce = [];
+}
+
+async function initiate(info: CallPeer) {
+  if (peers.has(info.id)) dropPeer(info.id);
+  const peer = createPeer(info);
+  const offer = await peer.pc.createOffer();
+  await peer.pc.setLocalDescription(offer);
+  await seal("offer", { to: info.id, info: me, sdp: offer });
 }
 
 async function joinChannel(conversationId: string) {
@@ -188,10 +224,7 @@ async function joinChannel(conversationId: string) {
     const info = p.info as CallPeer;
     if (peers.has(info.id)) dropPeer(info.id);
     if (peers.size + 1 > MAX_CALL_PEERS) return;
-    const peer = createPeer(info);
-    const offer = await peer.pc.createOffer();
-    await peer.pc.setLocalDescription(offer);
-    await seal("offer", { to: info.id, info: me, sdp: offer });
+    await initiate(info);
     refreshActive();
   });
   on("offer", async (p) => {
@@ -326,6 +359,7 @@ export async function leaveCall() {
   if (channel && client) client.removeChannel(channel);
   channel = null;
   peers.forEach((p) => {
+    window.clearTimeout(p.timer);
     p.pc.close();
     p.audio.srcObject = null;
   });

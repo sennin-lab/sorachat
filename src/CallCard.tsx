@@ -5,7 +5,7 @@ type Props = { call: NonNullable<Message["call"]>; onJoin: () => void };
 
 export function CallCard({ call, onJoin }: Props) {
   return (
-    <div className="call-card">
+    <div className={`call-card${call.active ? "" : " is-ended"}`}>
       <div className="call-card-head">
         <span className={`call-card-icon${call.active ? " is-live" : ""}`} aria-hidden="true">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">

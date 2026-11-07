@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { cachedAvatar, onAvatarCacheChange } from "./avatarCache";
+import { avatarObjectUrl, cachedAvatar, onAvatarCacheChange } from "./avatarCache";
 import { RobotFace, SENNIN_BOT_ID } from "./robot";
 
 // 写真があれば写真、なければ名前の1文字。src を渡すとグループなど別の画像URLを使う
-// 友だちの画像は、保存済みのものがあればデータベースに問い合わせる前にすぐ表示する
+// 友だちの画像は、保存済みのもの（localStorage → IndexedDB）があればデータベースに問い合わせる前に表示する
 export function Avatar({
   userId,
   hasAvatar,
@@ -19,6 +19,8 @@ export function Avatar({
 }) {
   const [failed, setFailed] = useState(false);
   const [saved, setSaved] = useState<string | null>(() => (!src && userId && hasAvatar ? cachedAvatar(userId) : null));
+  // IndexedDB から読んだ画像。undefined は「まだ確かめていない」、null は「保存なし」
+  const [dbUrl, setDbUrl] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (src || !userId) return;
@@ -27,7 +29,28 @@ export function Avatar({
     return onAvatarCacheChange(update);
   }, [userId, hasAvatar, src]);
 
-  useEffect(() => setFailed(false), [userId, src, saved]);
+  // localStorage に無いときだけ IndexedDB を見る
+  useEffect(() => {
+    setDbUrl(undefined);
+    if (src || !userId || !hasAvatar || userId === SENNIN_BOT_ID) {
+      setDbUrl(null);
+      return;
+    }
+    let alive = true;
+    const update = () => {
+      avatarObjectUrl(userId).then((url) => {
+        if (alive) setDbUrl(url);
+      });
+    };
+    update();
+    const off = onAvatarCacheChange(update);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [userId, hasAvatar, src]);
+
+  useEffect(() => setFailed(false), [userId, src, saved, dbUrl]);
 
   const initial = name.trim().charAt(0).toUpperCase() || "?";
   const style = { width: size, height: size, fontSize: Math.round(size * 0.42) };
@@ -38,7 +61,10 @@ export function Avatar({
       </span>
     );
   }
-  const url = src ?? saved ?? (userId ? `/api/users/${userId}/avatar` : "");
+  // 優先順：指定された画像 → localStorage → IndexedDB → 通常の読み込み（確かめ終わってから）
+  const fromDb = dbUrl === undefined ? null : dbUrl;
+  const url =
+    src ?? saved ?? fromDb ?? (userId && dbUrl !== undefined ? `/api/users/${userId}/avatar` : "");
   if (!url || !hasAvatar || failed) {
     return (
       <span className="avatar" style={style} aria-hidden="true">
