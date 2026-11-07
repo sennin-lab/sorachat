@@ -28,7 +28,7 @@ import { isSocketOpen, onChatEvent, sendChat } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { AttachSheet } from "./AttachSheet";
 import { StampSheet } from "./StampSheet";
-import { stampUrlOf } from "./stamps";
+import { stampNameOf, stampUrlOf } from "./stamps";
 import { PREFS_EVENT, getShowUnsent } from "./prefs";
 import { ContactSheet } from "./ContactSheet";
 import { PollCard } from "./PollCard";
@@ -1011,7 +1011,7 @@ export function ChatView({
                         />
                       ) : m.kind === "stamp" ? (
                         // 画像が見つからない古いスタンプは、文字コードの名前を出さずに「スタンプ」と表示する
-                        <p className="stamp-missing">スタンプ</p>
+                        <p className="stamp-missing">{m.stampRef?.startsWith("builtin:") ? `スタンプ（${stampNameOf(m.stampRef)}）` : "スタンプ"}</p>
                       ) : m.kind === "file" && m.fileUrl ? (
                         <a
                           className="file-card"

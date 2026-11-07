@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
-import { config } from "./config.js";
+import { config, missingSenninSettings } from "./config.js";
 import { cookieBase, currentUserId, banOfUser, endSession, randomToken, requireAuth, sessionUserId, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
 import { cloudflareAvatarUrl, deleteCloudflareAvatar, isAllowedImage, readImage, removeImage, saveCloudflareAvatar, upload } from "./media.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
@@ -74,14 +74,29 @@ async function studioPaletteOf(themeId: string | null): Promise<{ mine: string; 
   return payload?.mine && payload.bg && payload.accent ? { mine: payload.mine, bg: payload.bg, accent: payload.accent } : null;
 }
 
+// 仙人ストアの情報（任意の機能）。マイグレーション未実行などで読めなくても、ログインは止めない
+async function optionalStoreFields(userId: string): Promise<{ storeTheme: string | null; storeThemePalette: { mine: string; bg: string; accent: string } | null }> {
+  try {
+    const { data, error } = await sb.from("sc_users").select("store_theme").eq("id", userId).maybeSingle();
+    if (error) throw error;
+    const storeTheme = (data?.store_theme ?? null) as string | null;
+    return { storeTheme, storeThemePalette: await studioPaletteOf(storeTheme).catch(() => null) };
+  } catch (error) {
+    console.error("[me] 仙人ストアの情報を読めませんでした（ログインには影響しません）:", error);
+    return { storeTheme: null, storeThemePalette: null };
+  }
+}
+
 async function loadMe(userId: string) {
+  // ログインに必要な列だけで読む（ここが失敗するとログインできなくなるため、新しい列は含めない）
   const { data, error } = await sb
     .from("sc_users")
-    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme, ai_enabled, store_theme")
+    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme, ai_enabled")
     .eq("id", userId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
+  const store = await optionalStoreFields(userId);
   return {
     id: data.id as string,
     username: data.username as string,
@@ -95,8 +110,8 @@ async function loadMe(userId: string) {
     sennin: Boolean(data.sennin_id),
     coverTheme: (data.cover_theme ?? "green") as string,
     aiEnabled: Boolean(data.ai_enabled),
-    storeTheme: (data.store_theme ?? null) as string | null,
-    storeThemePalette: await studioPaletteOf((data.store_theme ?? null) as string | null)
+    storeTheme: store.storeTheme,
+    storeThemePalette: store.storeThemePalette
   };
 }
 
@@ -147,6 +162,7 @@ accounts.post("/auth/login", authLimit, async (req, res) => {
 accounts.get("/auth/sennin/login", (_req, res) => {
   const { clientId, authorizationUrl, redirectUri, scope } = config.sennin;
   if (!clientId || !authorizationUrl) {
+    console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、")}`);
     res.redirect(`${config.appOrigin}/?auth_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
     return;
   }
@@ -194,17 +210,29 @@ async function upsertSenninUser(senninId: string, name: string) {
 }
 
 // 仙人アカウントを連携する（ストア用）。ログイン中の人が押すと、仙人アカウントの許可画面へ進む
-accounts.get("/auth/sennin/link", requireAuth, (_req, res) => {
+// ログイン画面に出す方法（仙人アカウントは設定があるときだけ）
+accounts.get("/auth/options", (_req, res) => {
+  const { clientId, authorizationUrl, tokenUrl, redirectUri } = config.sennin;
+  res.set("Cache-Control", "no-store");
+  res.json({ sennin: Boolean(clientId && authorizationUrl && tokenUrl && redirectUri) });
+});
+
+// 連携の後に戻るページ（仙人ストア・senninstudio は、それぞれ専用のページ）
+const linkReturnPath = (value: unknown) => (value === "studio" ? "/studio" : "/store");
+
+accounts.get("/auth/sennin/link", requireAuth, (req, res) => {
   const { clientId, authorizationUrl, redirectUri, storeScope } = config.sennin;
+  const from = req.query.from === "studio" ? "studio" : "store";
   if (!clientId || !authorizationUrl) {
-    res.redirect(`${config.appOrigin}/more?store_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
+    console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、")}`);
+    res.redirect(`${config.appOrigin}${linkReturnPath(from)}?store_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
     return;
   }
   const state = randomToken(24);
   const verifier = randomToken(48);
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
   res.cookie("sc_oauth", `${state}.${verifier}`, { ...cookieBase, maxAge: 10 * 60 * 1000 });
-  res.cookie("sc_oauth_link", "1", { ...cookieBase, maxAge: 10 * 60 * 1000 });
+  res.cookie("sc_oauth_link", from, { ...cookieBase, maxAge: 10 * 60 * 1000 });
   const url = new URL(authorizationUrl);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);
@@ -244,12 +272,14 @@ async function exchangeSenninCode(code: string, verifier: string) {
 }
 
 accounts.get("/auth/sennin/callback", async (req, res) => {
-  // 連携のときは、ログイン中のアカウントへ戻る（/more に結果を出す）
-  const linking = req.cookies?.sc_oauth_link === "1";
+  // 連携のときは、連携を始めたページ（仙人ストアか senninstudio）へ戻って、結果を出す
+  const linkCookie = req.cookies?.sc_oauth_link;
+  const linking = typeof linkCookie === "string" && linkCookie !== "";
+  const returnPath = linkReturnPath(linkCookie);
   const fail = (message: string) => {
     res.clearCookie("sc_oauth", cookieBase);
     res.clearCookie("sc_oauth_link", cookieBase);
-    const target = linking ? `${config.appOrigin}/more?store_error=` : `${config.appOrigin}/?auth_error=`;
+    const target = linking ? `${config.appOrigin}${returnPath}?store_error=` : `${config.appOrigin}/?auth_error=`;
     res.redirect(`${target}${encodeURIComponent(message)}`);
   };
   if (typeof req.query.error === "string") {
@@ -281,7 +311,7 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
       void retryCreatorPayouts(userId).catch((error) => console.error("[studio] 支払いの再送に失敗:", error));
       res.clearCookie("sc_oauth", cookieBase);
       res.clearCookie("sc_oauth_link", cookieBase);
-      res.redirect(`${config.appOrigin}/more?store=linked`);
+      res.redirect(`${config.appOrigin}${returnPath}?store=linked`);
       return;
     }
     const userId = await upsertSenninUser(profile.id, profile.name);

@@ -2291,120 +2291,7 @@ button[aria-busy="true"] { animation: sc-soft-pulse 1.4s ease-in-out infinite; }
 :root[data-theme="dark"][data-store-theme="theme-sora"] { --mine: #2c4f72; --chat-bg: #17232f; --accent: #79b9ef; --accent-ink: #9bd0ff; }
 :root[data-theme="dark"][data-store-theme="theme-yuyake"] { --mine: #7a4a2c; --chat-bg: #2a1f18; --accent: #f0a06a; --accent-ink: #ffc49a; }
 
-/* ---- 仙人ストア ---- */
-.store-sheet { max-height: 92dvh; background: var(--bg-soft); }
-.store-sheet .sheet-title-row { background: var(--panel); }
-.store-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 6px; }
-.store-wallet {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  border-radius: 20px;
-  color: #fff;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-ink) 100%);
-  box-shadow: 0 12px 26px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.store-wallet-icon {
-  width: 44px;
-  height: 44px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.22);
-}
-.store-wallet-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.store-wallet-label { font-size: 12px; opacity: 0.88; }
-.store-wallet-points { font-size: 26px; font-weight: 700; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
-.store-wallet-points small { font-size: 14px; font-weight: 600; }
-.store-refresh {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.2);
-}
-.store-refresh:disabled { opacity: 0.5; }
-.store-link-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 18px 16px;
-  border-radius: var(--radius-card, 18px);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  box-shadow: var(--card-shadow);
-}
-.store-link-card strong { font-size: 16px; }
-.store-link-card p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
-.store-link-icon {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  color: var(--accent-ink);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-.store-link-btn { display: block; width: 100%; margin-top: 4px; padding: 12px 16px; text-align: center; }
-.store-error { margin: 0; font-size: 13px; color: var(--danger); }
-.store-notice { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
-.store-notice.is-ok { background: rgba(46, 160, 67, 0.12); color: #1f7a36; }
-.store-notice.is-ng { background: rgba(229, 72, 77, 0.12); color: var(--danger); }
-.store-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  padding: 4px;
-  border-radius: 14px;
-  background: var(--raised);
-}
-.store-tab { padding: 9px 6px; border-radius: 11px; font-size: 14px; font-weight: 600; color: var(--muted); }
-.store-tab.on { background: var(--panel); color: var(--text); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
-.store-tab-text { margin: -4px 4px 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
-.store-empty { padding: 24px 0; text-align: center; font-size: 14px; color: var(--muted); }
-.store-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.store-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  border-radius: var(--radius-card, 18px);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  box-shadow: var(--card-shadow);
-}
-.store-card.is-owned { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.store-card-top { display: flex; align-items: center; gap: 12px; }
-.store-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.store-card-text strong { font-size: 15px; }
-.store-card-text small { font-size: 12px; line-height: 1.5; color: var(--muted); }
-.store-swatch { position: relative; flex: none; display: block; width: 56px; height: 56px; border-radius: 16px; }
-.store-swatch-bubble { position: absolute; left: 8px; bottom: 8px; width: 26px; height: 14px; border-radius: 10px 10px 10px 3px; }
-.store-icon {
-  width: 44px;
-  height: 44px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  color: var(--accent-ink);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-.store-stamps { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: var(--bg-soft); }
-.store-stamps img { width: 44px; height: 44px; object-fit: contain; }
-.store-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
-.store-price { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.store-price.is-owned { font-size: 13px; color: var(--accent-ink); }
-.store-short { display: block; font-size: 11px; font-weight: 500; color: var(--danger); }
-.store-badge { padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.store-link-inline { text-decoration: none; }
-.store-unlink { align-self: center; padding: 8px; font-size: 13px; color: var(--muted); text-decoration: underline; }
-.store-foot { margin: 4px 4px 12px; font-size: 11px; line-height: 1.6; text-align: center; color: var(--muted); }
+/* ---- 仙人ストア・senninstudio の専用ページは、このファイルの末尾にあります ---- */
 
 /* ---- 鍵（買っていないスタンプ・ミニゲーム）---- */
 .stamp-btn { position: relative; }
@@ -2436,43 +2323,6 @@ button[aria-busy="true"] { animation: sc-soft-pulse 1.4s ease-in-out infinite; }
   background: var(--raised);
 }
 
-/* ---- senninstudio（作者の画面・作品の表示）---- */
-.store-thumb { flex: none; width: 56px; height: 56px; border-radius: 14px; object-fit: cover; background: var(--bg-soft); }
-.store-creator { color: var(--accent-ink) !important; font-weight: 600; }
-.studio-sheet { max-height: 92dvh; background: var(--bg-soft); }
-.studio-sheet .sheet-title-row { background: var(--panel); }
-.studio-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; }
-.studio-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.studio-summary > div { display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--card-shadow); }
-.studio-summary span { font-size: 12px; color: var(--muted); }
-.studio-summary strong { font-size: 20px; font-variant-numeric: tabular-nums; }
-.studio-hint { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
-.studio-new { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 16px; border-radius: 14px; }
-.studio-new:disabled { opacity: 0.45; }
-.studio-heading { margin: 8px 2px 0; font-size: 14px; color: var(--muted); }
-.studio-thumb { flex: none; width: 56px; height: 56px; border-radius: 14px; object-fit: cover; }
-.studio-status { font-weight: 600; }
-.studio-status.is-ok { color: #1f7a36; }
-.studio-status.is-ng { color: var(--danger); }
-.studio-status.is-muted { color: var(--muted); }
-.studio-card-actions { display: flex; justify-content: flex-end; }
-.studio-form { display: flex; flex-direction: column; gap: 12px; }
-.studio-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
-.studio-field textarea.auth-input { resize: vertical; }
-.studio-thumb-preview { width: 96px; height: 96px; object-fit: cover; border-radius: 14px; border: 1px solid var(--line); }
-.studio-colors { display: flex; flex-direction: column; gap: 8px; }
-.studio-color { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--text); }
-.studio-color input[type="color"] { width: 48px; height: 32px; border: 0; background: none; padding: 0; }
-.studio-color-preview { position: relative; height: 92px; border-radius: 16px; border: 1px solid var(--line); overflow: hidden; }
-.studio-bubble { position: absolute; left: 14px; top: 16px; padding: 8px 12px; border-radius: 14px 14px 14px 4px; font-size: 14px; color: #111; }
-.studio-accent { position: absolute; right: 14px; bottom: 14px; width: 40px; height: 22px; border-radius: 999px; }
-.studio-quiz, .studio-style { display: flex; flex-direction: column; gap: 10px; }
-.studio-question { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); }
-.studio-question legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
-.studio-option { display: flex; align-items: center; gap: 8px; }
-.studio-option .auth-input { flex: 1; }
-.studio-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.studio-form-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
 .admin-studio { display: flex; flex-direction: column; gap: 12px; }
 .admin-toolbar { display: flex; gap: 8px; }
 .admin-toolbar select, .admin-toolbar input { height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 0 10px; }
@@ -2499,4 +2349,117 @@ button[aria-busy="true"] { animation: sc-soft-pulse 1.4s ease-in-out infinite; }
 .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .admin-error { color: var(--danger) !important; }
 
-.store-report { align-self: flex-end; font-size: 12px; color: var(--muted); text-decoration: underline; padding: 2px 4px; }
+/* ---- 専用ページ（仙人ストア /store ・ senninstudio /studio） ----
+   ふだんのトーク画面と同じく、白い面に細い区切り線だけで組む。影・グラデーション・色付きの面は使わない */
+.page {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  animation: page-in 0.22s var(--ease-out) both;
+}
+@keyframes page-in { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+.page-head {
+  flex: none;
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  min-height: 52px;
+  padding: env(safe-area-inset-top, 0px) max(6px, calc((100% - 640px) / 2)) 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.page-head h1 { margin: 0; text-align: center; font-size: 16px; font-weight: 700; }
+.page-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.page-body { width: min(640px, 100%); margin: 0 auto; padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
+.page .btn-primary { box-shadow: none; }
+.page .btn-primary:not(:disabled):hover { filter: none; }
+
+.store-body, .studio-body { display: flex; flex-direction: column; }
+.store-body > .store-error, .studio-body > .store-error { margin: 14px 16px 0; }
+.store-error { margin: 0; font-size: 13px; line-height: 1.6; color: var(--danger); }
+.store-notice { margin: 14px 16px 0; padding: 0 0 0 10px; border-left: 3px solid var(--line); font-size: 13px; line-height: 1.7; }
+.store-notice.is-ok { border-left-color: #2ea043; }
+.store-notice.is-ng { border-left-color: var(--danger); color: var(--danger); }
+.store-empty { padding: 36px 16px; text-align: center; font-size: 14px; color: var(--muted); }
+
+/* ポイント残高と、連携の案内 */
+.store-balance { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 20px 16px 16px; border-bottom: 1px solid var(--line); }
+.store-balance-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.store-balance-label { font-size: 12px; color: var(--muted); }
+.store-balance-points { font-size: 30px; font-weight: 700; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.store-balance-points small { font-size: 14px; font-weight: 600; color: var(--muted); }
+.store-refresh { flex: none; padding: 6px 4px; font-size: 14px; font-weight: 600; color: var(--accent-ink); }
+.store-refresh:disabled { opacity: 0.5; }
+.store-link { display: flex; flex-direction: column; gap: 8px; padding: 20px 16px; border-bottom: 1px solid var(--line); }
+.store-link strong { font-size: 16px; }
+.store-link p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.store-link-btn { display: block; margin-top: 6px; padding: 12px 16px; text-align: center; text-decoration: none; }
+.store-link-inline { text-decoration: none; }
+
+/* 種類の切り替え（下線で今いる場所を示す） */
+.store-tabs { position: sticky; top: 0; z-index: 1; display: flex; border-bottom: 1px solid var(--line); background: var(--panel); }
+.store-tab { flex: 1; padding: 13px 6px 11px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 14px; font-weight: 600; color: var(--muted); }
+.store-tab.on { border-bottom-color: var(--accent); color: var(--text); }
+.store-tab-text { margin: 0; padding: 10px 16px 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+
+/* 商品・作品の一覧（1件ずつ、細い線で区切る） */
+.store-list { list-style: none; margin: 0; padding: 0; }
+.store-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.store-card-top { display: flex; align-items: flex-start; gap: 12px; }
+.store-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.store-card-text strong { font-size: 15px; }
+.store-card-text small { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.store-card-text .store-creator { color: var(--text); }
+.store-thumb, .studio-thumb { flex: none; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--bg-soft); }
+.store-swatch { position: relative; flex: none; display: block; width: 56px; height: 56px; border-radius: 8px; border: 1px solid var(--line); overflow: hidden; }
+.store-swatch-bubble { position: absolute; right: 8px; bottom: 10px; width: 28px; height: 14px; border-radius: 8px 8px 2px 8px; }
+.store-icon { flex: none; width: 56px; height: 56px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--bg-soft); }
+.store-stamps { display: flex; flex-wrap: wrap; gap: 4px; }
+.store-stamps img { width: 40px; height: 40px; object-fit: contain; }
+.store-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.store-price { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.store-price.is-owned { font-size: 13px; font-weight: 500; color: var(--muted); }
+.store-short { display: block; font-size: 11px; font-weight: 500; color: var(--danger); }
+.store-badge { font-size: 12px; color: var(--muted); }
+.store-report { align-self: flex-start; padding: 0; font-size: 12px; color: var(--muted); text-decoration: underline; }
+.store-unlink { display: block; margin: 20px auto 0; padding: 8px; font-size: 13px; color: var(--muted); text-decoration: underline; }
+.store-foot { margin: 8px 16px 0; font-size: 11px; line-height: 1.7; text-align: center; color: var(--muted); }
+
+/* senninstudio */
+.studio-summary { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+.studio-summary > div { display: flex; flex-direction: column; gap: 2px; padding: 18px 16px 16px; }
+.studio-summary > div + div { border-left: 1px solid var(--line); }
+.studio-summary span { font-size: 12px; color: var(--muted); }
+.studio-summary strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.studio-hint { margin: 0; padding: 10px 16px 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.studio-new { display: block; width: calc(100% - 32px); margin: 16px; padding: 12px 16px; text-align: center; }
+.studio-new:disabled { opacity: 0.45; }
+.studio-heading { margin: 0; padding: 12px 16px 8px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--muted); }
+.studio-status { font-weight: 600; }
+.studio-status.is-ok { color: color-mix(in srgb, #2ea043 70%, var(--text)); }
+.studio-status.is-ng { color: var(--danger); }
+.studio-status.is-muted { color: var(--muted); }
+.studio-card-actions { display: flex; justify-content: flex-end; }
+.studio-form { display: flex; flex-direction: column; gap: 14px; padding: 0 16px; }
+.studio-form .studio-hint { padding: 12px 0 0; }
+.studio-form .store-tabs { margin: 0 -16px; }
+.studio-form .store-tab-text { padding: 0; margin-top: -4px; }
+.studio-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.studio-field textarea.auth-input { resize: vertical; }
+.studio-thumb-preview { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.studio-colors { display: flex; flex-direction: column; gap: 8px; }
+.studio-color { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--text); }
+.studio-color input[type="color"] { width: 48px; height: 32px; border: 0; background: none; padding: 0; }
+.studio-color-preview { position: relative; height: 92px; border-radius: 8px; border: 1px solid var(--line); overflow: hidden; }
+.studio-bubble { position: absolute; left: 14px; top: 16px; padding: 8px 12px; border-radius: 14px 14px 14px 4px; font-size: 14px; color: #111; }
+.studio-accent { position: absolute; right: 14px; bottom: 14px; width: 40px; height: 22px; border-radius: 999px; }
+.studio-quiz, .studio-style { display: flex; flex-direction: column; gap: 10px; }
+.studio-question { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 12px 0 4px; border: 0; border-top: 1px solid var(--line); }
+.studio-question legend { padding: 0; font-size: 13px; color: var(--muted); }
+.studio-option { display: flex; align-items: center; gap: 8px; }
+.studio-option .auth-input { flex: 1; }
+.studio-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.studio-form-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }

@@ -9,8 +9,8 @@ import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { refreshPush } from "./push";
 import { NotifyPrompt } from "./NotifyPrompt";
 import { OpenChatSheet } from "./OpenChatSheet";
-import { StoreSheet } from "./StoreSheet";
-import { StudioSheet } from "./StudioSheet";
+import { StorePage } from "./StorePage";
+import { StudioPage } from "./StudioPage";
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -45,7 +45,7 @@ const shouldAskNotify = (me: Me) => {
 // URL とタブの対応。プロフィールなどの重ねて表示する画面では null（直前のタブを保つ）
 const tabOfPath = (path: string): Tab | null => {
   if (path.startsWith("/friends")) return "friends";
-  if (path.startsWith("/more")) return "more";
+  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio")) return "more";
   if (path === "/" || path.startsWith("/home") || path.startsWith("/dm/") || path.startsWith("/groupchat/")) return "talk";
   return null;
 };
@@ -69,6 +69,9 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const path = location.pathname;
   const chatId = (matchPath("/dm/:id", path) ?? matchPath("/groupchat/:id", path))?.params.id ?? null;
   const viewUser = matchPath("/profile/:id", path)?.params.id ?? null;
+  // 仙人ストア（/store）と senninstudio（/studio）は、専用のページとして開く
+  const onStorePage = Boolean(matchPath("/store", path));
+  const onStudioPage = Boolean(matchPath("/studio", path));
 
   const [selectedId, setSelectedId] = useState<string | null>(chatId);
   const [tab, setTab] = useState<Tab>(() => tabOfPath(path) ?? "talk");
@@ -76,10 +79,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const [showSettings, setShowSettings] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showOpenChats, setShowOpenChats] = useState(false);
-  // 仙人ストア。連携の戻りには、結果（連携できた・できなかった）を表示する
-  const [showStore, setShowStore] = useState(false);
+  // 仙人アカウントの連携から戻ったときの結果（連携できた・できなかった）。ストアと senninstudio のページに表示する
   const [storeFlash, setStoreFlash] = useState<{ ok: boolean; text: string } | null>(null);
-  const [showStudio, setShowStudio] = useState(false);
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(() => shouldAskNotify(me));
   const [showAdd, setShowAdd] = useState(false);
   // 友だちが増えた・減ったときに友だち一覧を取り直すための番号
@@ -112,17 +113,28 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     }
   }, [me.storeTheme, JSON.stringify(me.storeThemePalette ?? null)]);
 
-  // 仙人アカウントの連携から戻ってきたら、ストアを開いて結果を出す（URL の印は消す）
+  // 仙人アカウントの連携から戻ってきたら（/store か /studio に戻る）、結果を出す（URL の印は消す）
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const linked = params.get("store") === "linked";
     const error = params.get("store_error");
     if (!linked && !error) return;
-    setStoreFlash(linked ? { ok: true, text: "仙人アカウントと連携しました。ストアで買い物できます。" } : { ok: false, text: error ?? "" });
-    setShowStore(true);
+    const studioPage = path.startsWith("/studio");
+    setStoreFlash(
+      linked
+        ? { ok: true, text: studioPage ? "仙人アカウントと連携しました。作品を公開できます。" : "仙人アカウントと連携しました。ストアで買い物できます。" }
+        : { ok: false, text: error ?? "" }
+    );
     setTab("more");
-    navigate("/more", { replace: true });
+    navigate(studioPage ? "/studio" : "/store", { replace: true });
   }, []);
+
+  // 専用ページを閉じる（開いた元の画面へ戻る。直接開いたときは「その他」へ）
+  const closePage = () => {
+    setStoreFlash(null);
+    if ((window.history.state?.idx ?? 0) > 0) navigate(-1);
+    else navigate("/more", { replace: true });
+  };
 
   // URL に合わせてタブと選択中のトークを更新する
   useEffect(() => {
@@ -316,7 +328,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
-                  <button onClick={() => setShowStudio(true)}>
+                  <button onClick={() => navigate("/studio")}>
                     <span className="option-icon">
                       <Icon name="edit" size={20} />
                     </span>
@@ -328,7 +340,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
-                  <button onClick={() => setShowStore(true)}>
+                  <button onClick={() => navigate("/store")}>
                     <span className="option-icon">
                       <Icon name="store" size={20} />
                     </span>
@@ -450,18 +462,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           onFriendsChanged={bumpFriends}
         />
       )}
-      {showStudio && <StudioSheet onClose={() => setShowStudio(false)} />}
-      {showStore && (
-        <StoreSheet
-          me={me}
-          flash={storeFlash}
-          onClose={() => {
-            setShowStore(false);
-            setStoreFlash(null);
-          }}
-          onMeChange={onMeChange}
-        />
-      )}
+      {onStudioPage && <StudioPage flash={storeFlash} onBack={closePage} />}
+      {onStorePage && <StorePage me={me} flash={storeFlash} onBack={closePage} onMeChange={onMeChange} />}
       {showOpenChats && (
         <OpenChatSheet
           onClose={() => setShowOpenChats(false)}

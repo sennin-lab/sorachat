@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, api, post } from "./api";
 import { Icon } from "./Icon";
 import { RobotFace } from "./robot";
@@ -70,6 +70,13 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
   const [error, setError] = useState(initialError ?? "");
   const [errorKey, setErrorKey] = useState(0);
   const [busy, setBusy] = useState(false);
+  // 仙人アカウントでログインできるか（サーバーの設定がある場合だけ、ボタンを出す）
+  const [senninOn, setSenninOn] = useState(false);
+  useEffect(() => {
+    api<{ sennin: boolean }>("/api/auth/options")
+      .then((data) => setSenninOn(Boolean(data.sennin)))
+      .catch(() => setSenninOn(false));
+  }, []);
 
   const isRegister = mode === "register";
   const normalizedName = username.trim().toLowerCase();
@@ -121,6 +128,7 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
               {error}
             </p>
           )}
+          {senninOn && (
           <a className="auth-sennin" href="/api/auth/sennin/login">
             <span className="auth-sennin-icon">
               <RobotFace />
@@ -131,9 +139,12 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
             </span>
             <Icon name="chevron" size={20} />
           </a>
-          <div className="divider">
-            <span>または</span>
-          </div>
+          )}
+          {senninOn && (
+            <div className="divider">
+              <span>または</span>
+            </div>
+          )}
           <button className="btn-primary wide auth-cta" onClick={() => setMode("login")}>
             ログイン
           </button>

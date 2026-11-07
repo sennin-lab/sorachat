@@ -132,7 +132,7 @@ export async function gameAction(messageId: string, me: string, input: GameActio
       !row.state.cancelled &&
       row.state.players.length >= GAME_CONFIG.quiz.min;
     // 始めた人が買った問題集があれば、そこから出題する。なければ senninai が作る（それも失敗なら固定の問題）
-    const quizQuestions = startingQuiz ? (await studioQuizFor(me, QUIZ_ROUNDS)) ?? (await generateQuizQuestions()) : null;
+    const quizQuestions = startingQuiz ? (await studioQuizFor(me, QUIZ_ROUNDS).catch(() => null)) ?? (await generateQuizQuestions()) : null;
     const next = reduce(row.kind, row.creator_id, row.state, me, input, Math.random, quizQuestions ?? undefined, Date.now());
     const { error } = await sb
       .from("sc_games")

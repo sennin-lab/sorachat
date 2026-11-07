@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api, post } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Icon } from "./Icon";
+import { Page } from "./Page";
 import { BUILTIN_STAMPS, canonicalStampRef } from "./stamps";
-import { useExitClose } from "./useExitClose";
 import type { Me, StoreItemView, StoreView } from "./types";
 
 // 通報の対象（作品）
@@ -13,7 +13,7 @@ type Flash = { ok: boolean; text: string };
 type Kind = StoreItemView["kind"];
 
 // 仙人アカウントの連携は、今のソラチャットアカウントに紐づける（ユーザー名・パスワードで作った人も可）
-const LINK_HREF = "/api/auth/sennin/link";
+const LINK_HREF = "/api/auth/sennin/link?from=store";
 
 const TABS: { kind: Kind; label: string; text: string }[] = [
   { kind: "theme", label: "外観", text: "トークの吹き出しと背景の色を変えます。自分の画面だけに出ます。" },
@@ -32,19 +32,18 @@ const THEME_PREVIEW: Record<string, { mine: string; bg: string }> = {
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}`;
 const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
-// 仙人ストア。ポイントで外観・スタンプパック・拡張機能を買う。未連携のときは、まず連携を案内する
-export function StoreSheet({
+// 仙人ストア（専用ページ /store）。ポイントで外観・スタンプパック・拡張機能を買う。未連携のときは、まず連携を案内する
+export function StorePage({
   me,
   flash,
-  onClose,
+  onBack,
   onMeChange
 }: {
   me: Me;
   flash?: Flash | null;
-  onClose: () => void;
+  onBack: () => void;
   onMeChange: (next: Me) => void;
 }) {
-  const { closing, close } = useExitClose(onClose);
   const [view, setView] = useState<StoreView | null>(null);
   const [loadError, setLoadError] = useState("");
   const [points, setPoints] = useState<number | null>(null);
@@ -56,6 +55,11 @@ export function StoreSheet({
   const [notice, setNotice] = useState<Flash | null>(flash ?? null);
   const [unlinking, setUnlinking] = useState(false);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
+
+  // 連携から戻った結果は、ページが開いたあとに届くことがあるので、届いたら表示する
+  useEffect(() => {
+    if (flash) setNotice(flash);
+  }, [flash]);
 
   const loadView = useCallback(async (): Promise<StoreView | null> => {
     try {
@@ -172,54 +176,34 @@ export function StoreSheet({
 
   return (
     <>
-      <div className={`sheet-backdrop${closing ? " is-closing" : ""}`} onClick={() => close()}>
-        <div
-          className={`sheet store-sheet${closing ? " is-closing" : ""}`}
-          role="dialog"
-          aria-label="仙人ストア"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="sheet-title-row">
-            <span />
-            <strong>仙人ストア</strong>
-            <button type="button" className="icon-btn modal-x" onClick={() => close()} aria-label="閉じる">
-              ×
-            </button>
-          </div>
-
-          <div className="store-body">
-            {linked ? (
-              <section className="store-wallet">
-                <span className="store-wallet-icon">
-                  <Icon name="card" size={22} />
-                </span>
-                <div className="store-wallet-main">
-                  <span className="store-wallet-label">保有ポイント（仙人アカウント）</span>
-                  <strong className="store-wallet-points">
-                    {points === null ? (pointsBusy ? "取得中…" : "—") : yen(points)}
-                    {points !== null && <small> pt</small>}
-                  </strong>
-                  {pointsError && <p className="store-error">{pointsError}</p>}
-                </div>
-                <button type="button" className="store-refresh" onClick={() => void loadPoints()} disabled={pointsBusy} aria-label="ポイントを更新">
-                  <Icon name="refresh" size={18} />
-                </button>
-              </section>
-            ) : (
-              <section className="store-link-card">
-                <span className="store-link-icon">
-                  <Icon name="link2" size={22} />
-                </span>
-                <strong>まず、仙人アカウントと連携しましょう</strong>
-                <p>
-                  ポイントでストアの商品を買うには、仙人アカウントとの連携が必要です。いま使っているソラチャットのアカウントに
-                  連携するので、トークや友だちはそのままです。
-                </p>
-                <a className="btn-primary store-link-btn" href={LINK_HREF}>
-                  仙人アカウントと連携する
-                </a>
-              </section>
-            )}
+      <Page title="仙人ストア" onBack={onBack}>
+        <div className="store-body">
+          {linked ? (
+            <section className="store-balance">
+              <div className="store-balance-main">
+                <span className="store-balance-label">保有ポイント（仙人アカウント）</span>
+                <strong className="store-balance-points">
+                  {points === null ? (pointsBusy ? "取得中…" : "—") : yen(points)}
+                  {points !== null && <small> pt</small>}
+                </strong>
+                {pointsError && <p className="store-error">{pointsError}</p>}
+              </div>
+              <button type="button" className="store-refresh" onClick={() => void loadPoints()} disabled={pointsBusy}>
+                更新
+              </button>
+            </section>
+          ) : (
+            <section className="store-link">
+              <strong>まず、仙人アカウントと連携しましょう</strong>
+              <p>
+                ポイントでストアの商品を買うには、仙人アカウントとの連携が必要です。いま使っているソラチャットのアカウントに
+                連携するので、トークや友だちはそのままです。
+              </p>
+              <a className="btn-primary store-link-btn" href={LINK_HREF}>
+                仙人アカウントと連携する
+              </a>
+            </section>
+          )}
 
             {loadError && <p className="store-error">{loadError}</p>}
             {notice && (
@@ -263,14 +247,7 @@ export function StoreSheet({
                         {item.thumbUrl ? (
                           <img className="store-thumb" src={item.thumbUrl} alt="" width={56} height={56} />
                         ) : item.kind === "theme" ? (
-                          <span
-                            className="store-swatch"
-                            aria-hidden="true"
-                            style={{
-                              background: THEME_PREVIEW[item.id]?.mine,
-                              boxShadow: `inset 0 0 0 10px ${THEME_PREVIEW[item.id]?.bg ?? "#fff"}`
-                            }}
-                          >
+                          <span className="store-swatch" aria-hidden="true" style={{ background: THEME_PREVIEW[item.id]?.bg ?? "#fff" }}>
                             <span className="store-swatch-bubble" style={{ background: THEME_PREVIEW[item.id]?.mine }} />
                           </span>
                         ) : (
@@ -375,9 +352,8 @@ export function StoreSheet({
             <p className="store-foot">
               ポイントは仙人アカウントで管理されます。購入した商品はこのアカウントに残ります。
             </p>
-          </div>
         </div>
-      </div>
+      </Page>
 
       {reportTarget && (
         <ConfirmDialog

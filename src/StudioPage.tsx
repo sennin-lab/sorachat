@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, post } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Icon } from "./Icon";
-import { useExitClose } from "./useExitClose";
+import { Page } from "./Page";
 import type { StudioMeView, StudioWorkView } from "./types";
 
-// senninstudio（作者の画面）。作品の公開と、自分の作品の削除（削除だけできる）
-const LINK_HREF = "/api/auth/sennin/link";
+// senninstudio（作者の専用ページ /studio）。作品の公開と、自分の作品の削除（削除だけできる）
+const LINK_HREF = "/api/auth/sennin/link?from=studio";
 type Kind = StudioWorkView["kind"];
 
 const KINDS: { kind: Kind; label: string; text: string }[] = [
@@ -31,14 +31,18 @@ const blankQuestion = (): Question => ({ q: "", options: ["", "", "", ""], answe
 
 const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
-export function StudioSheet({ onClose }: { onClose: () => void }) {
-  const { closing, close } = useExitClose(onClose);
+export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: string } | null; onBack: () => void }) {
   const [data, setData] = useState<StudioMeView | null>(null);
   const [loadError, setLoadError] = useState("");
   const [view, setView] = useState<"list" | "create">("list");
-  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(flash ?? null);
   const [toDelete, setToDelete] = useState<StudioWorkView | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 連携から戻った結果は、ページが開いたあとに届くことがあるので、届いたら表示する
+  useEffect(() => {
+    if (flash) setNotice(flash);
+  }, [flash]);
 
   const load = useCallback(async () => {
     try {
@@ -72,23 +76,8 @@ export function StudioSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className={`sheet-backdrop${closing ? " is-closing" : ""}`} onClick={() => close()}>
-        <div className={`sheet studio-sheet${closing ? " is-closing" : ""}`} role="dialog" aria-label="senninstudio" onClick={(e) => e.stopPropagation()}>
-          <div className="sheet-title-row">
-            {view === "create" ? (
-              <button type="button" className="icon-btn" onClick={() => setView("list")} aria-label="戻る">
-                <Icon name="back" size={22} />
-              </button>
-            ) : (
-              <span />
-            )}
-            <strong>senninstudio</strong>
-            <button type="button" className="icon-btn modal-x" onClick={() => close()} aria-label="閉じる">
-              ×
-            </button>
-          </div>
-
-          <div className="studio-body">
+      <Page title={view === "create" ? "作品を作る" : "senninstudio"} onBack={() => (view === "create" ? setView("list") : onBack())}>
+        <div className="studio-body">
             {loadError && <p className="store-error">{loadError}</p>}
             {notice && (
               <p className={`store-notice ${notice.ok ? "is-ok" : "is-ng"}`} role="status">
@@ -101,10 +90,7 @@ export function StudioSheet({ onClose }: { onClose: () => void }) {
             {data && view === "list" && (
               <>
                 {!data.linked ? (
-                  <section className="store-link-card">
-                    <span className="store-link-icon">
-                      <Icon name="link2" size={22} />
-                    </span>
+                  <section className="store-link">
                     <strong>作者になるには、仙人アカウントと連携</strong>
                     <p>
                       作品を公開して売るには、仙人アカウントとの連携が必要です。売上は仙人アカウントのポイントで受け取ります（手数料はかかりません）。
@@ -136,7 +122,7 @@ export function StudioSheet({ onClose }: { onClose: () => void }) {
                 )}
 
                 <button type="button" className="btn-primary studio-new" disabled={!canCreate} onClick={() => setView("create")}>
-                  <Icon name="plus" size={18} /> 作品を作る
+                  作品を作る
                 </button>
 
                 <h3 className="studio-heading">作品</h3>
@@ -189,9 +175,8 @@ export function StudioSheet({ onClose }: { onClose: () => void }) {
                 onCancel={() => setView("list")}
               />
             )}
-          </div>
         </div>
-      </div>
+      </Page>
 
       {toDelete && (
         <ConfirmDialog

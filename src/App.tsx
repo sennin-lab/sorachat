@@ -35,11 +35,12 @@ export default function App() {
         applyMe(data);
       })
       .catch((error) => {
-        // 通信できないだけのときは、保存した情報のまま表示する（ログアウトにはしない）
-        if (error instanceof ApiError && error.status === 0) {
+        // 通信できないだけ・サーバーの一時的なエラーのときは、保存した情報のまま表示する（ログアウトにはしない）
+        if (error instanceof ApiError && (error.status === 0 || error.status >= 500)) {
           setMe((current) => current ?? null);
           return;
         }
+        // ログインが切れている（401）ときだけ、ログイン画面に戻す
         setMe(null);
       });
   }, [applyMe]);

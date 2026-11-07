@@ -6,20 +6,42 @@ const need = (name: string) => {
   return value;
 };
 
-// 仙人アカウントのAPIの場所は、トークンのURL（同じサーバー）から決める。個別に指定することもできる
-const senninApi = (path: string, override: string | undefined) => {
+// 環境変数を読む。前後の空白・改行や、貼り付けで入った引用符（"..." / '...'）は取り除く。
+// （ホスティングの画面に貼ったとき、末尾の改行や引用符が入って、IDやシークレットが合わなくなるのを防ぐ）
+const env = (name: string): string => {
+  let value = (process.env[name] ?? "").trim();
+  if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value[value.length - 1] === value[0]) {
+    value = value.slice(1, -1).trim();
+  }
+  return value;
+};
+
+// 仙人アカウントの場所（例: https://account.example.com）。末尾のスラッシュは取り除く
+const senninBase = env("SENNIN_BASE_URL").replace(/\/+$/, "");
+
+// 仙人アカウントの各URL。個別の環境変数があればそれを使い、なければ SENNIN_BASE_URL から決める
+const senninUrl = (override: string, path: string) => {
   if (override) return override;
+  return senninBase ? `${senninBase}${path}` : "";
+};
+
+// 仙人アカウントのAPI（ポイント）の場所は、個別指定 → トークンのURLと同じサーバー → SENNIN_BASE_URL の順で決める
+const senninApi = (path: string, override: string) => {
+  if (override) return override;
+  const tokenUrl = senninUrl(env("SENNIN_TOKEN_URL"), "/oauth/token");
   try {
-    return process.env.SENNIN_TOKEN_URL ? new URL(path, process.env.SENNIN_TOKEN_URL).toString() : "";
+    return tokenUrl ? new URL(path, tokenUrl).toString() : "";
   } catch {
     return "";
   }
 };
 
+const appOrigin = env("APP_ORIGIN") || "http://localhost:5173";
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || "development",
-  appOrigin: process.env.APP_ORIGIN || "http://localhost:5173",
+  appOrigin,
   supabaseUrl: need("SUPABASE_URL"),
   supabaseServiceKey: need("SUPABASE_SERVICE_ROLE_KEY"),
   supabaseAnonKey: need("SUPABASE_ANON_KEY"),
@@ -28,19 +50,20 @@ export const config = {
   tursoUrl: need("TURSO_DATABASE_URL"),
   tursoAuthToken: need("TURSO_AUTH_TOKEN"),
   sennin: {
-    clientId: process.env.SENNIN_CLIENT_ID || "",
-    clientSecret: process.env.SENNIN_CLIENT_SECRET || "",
-    redirectUri: process.env.SENNIN_REDIRECT_URI || "",
-    authorizationUrl: process.env.SENNIN_AUTHORIZATION_URL || "",
-    tokenUrl: process.env.SENNIN_TOKEN_URL || "",
-    userinfoUrl: process.env.SENNIN_USERINFO_URL || "",
-    meUrl: process.env.SENNIN_ME_URL || "",
-    scope: process.env.SENNIN_SCOPE || "profile email",
+    clientId: env("SENNIN_CLIENT_ID"),
+    clientSecret: env("SENNIN_CLIENT_SECRET"),
+    // 空のときは、このアプリの戻り先（/api/auth/sennin/callback）を使う。仙人アカウントに登録したリダイレクトURIと完全一致させること
+    redirectUri: env("SENNIN_REDIRECT_URI") || `${appOrigin.replace(/\/+$/, "")}/api/auth/sennin/callback`,
+    authorizationUrl: senninUrl(env("SENNIN_AUTHORIZATION_URL"), "/oauth/authorize"),
+    tokenUrl: senninUrl(env("SENNIN_TOKEN_URL"), "/oauth/token"),
+    userinfoUrl: senninUrl(env("SENNIN_USERINFO_URL"), "/oauth/userinfo"),
+    meUrl: senninUrl(env("SENNIN_ME_URL"), "/api/v1/me"),
+    scope: env("SENNIN_SCOPE") || "profile email",
     // ストア（ポイント）用の許可。ログインとは別に、「連携」のときだけ要求する
     // points:write は管理者の承認が必要。承認されていないと連携画面でエラーになる
-    storeScope: process.env.SENNIN_STORE_SCOPE || "profile points:read points:write",
-    pointsUrl: senninApi("/api/v1/points", process.env.SENNIN_POINTS_URL),
-    pointsAdjustUrl: senninApi("/api/v1/points/adjust", process.env.SENNIN_POINTS_ADJUST_URL)
+    storeScope: env("SENNIN_STORE_SCOPE") || "profile points:read points:write",
+    pointsUrl: senninApi("/api/v1/points", env("SENNIN_POINTS_URL")),
+    pointsAdjustUrl: senninApi("/api/v1/points/adjust", env("SENNIN_POINTS_ADJUST_URL"))
   },
   // senninai（AIチャット）の回答元（UserLocal の senninai API）。既定は作者の公開エンドポイント
   senninAi: {
@@ -59,3 +82,15 @@ export const config = {
     subject: process.env.VAPID_SUBJECT || "mailto:admin@example.com"
   }
 };
+
+// 仙人アカウントの設定で足りないもの（環境変数の名前）を返す。空なら、連携に必要な設定はそろっている
+export function missingSenninSettings(): string[] {
+  const { clientId, clientSecret, authorizationUrl, tokenUrl, userinfoUrl } = config.sennin;
+  const missing: string[] = [];
+  if (!clientId) missing.push("SENNIN_CLIENT_ID");
+  if (!clientSecret) missing.push("SENNIN_CLIENT_SECRET");
+  if (!authorizationUrl) missing.push("SENNIN_AUTHORIZATION_URL（または SENNIN_BASE_URL）");
+  if (!tokenUrl) missing.push("SENNIN_TOKEN_URL（または SENNIN_BASE_URL）");
+  if (!userinfoUrl) missing.push("SENNIN_USERINFO_URL（または SENNIN_BASE_URL）");
+  return missing;
+}

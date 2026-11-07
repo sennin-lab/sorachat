@@ -4,7 +4,7 @@
 // ・更新トークンは使うたびに新しいものに入れ替わる（ローテーション）。新しい値は必ず保存し直す。
 // ・同じユーザーの更新は直列に行う（同じトークンを二重に使うと、無効になるおそれがあるため）。
 // ・アクセストークン（sat_）はメモリに1時間ほど持つ。サーバーが再起動すると取り直す。
-import { config } from "./config.js";
+import { config, missingSenninSettings } from "./config.js";
 import { decryptText, encryptText } from "./crypto.js";
 import { sb } from "./supabase.js";
 
@@ -43,6 +43,7 @@ const NOT_LINKED_MESSAGE = "仙人アカウントとの連携が切れていま�
 
 function requireApi(url: string) {
   if (!url || !config.sennin.clientId) {
+    console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、") || "ポイントのURL"}`);
     throw new SenninError("unavailable", "仙人アカウントは現在利用できません。");
   }
   return url;
