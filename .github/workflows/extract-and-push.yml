@@ -103,7 +103,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          git add -A
+          # uploadフォルダ自体は削除せず、展開されたファイル・変更分のみをステージングする
+          git add -u
+          git add .
 
           if git diff --cached --quiet; then
             echo "変更はありません。"
