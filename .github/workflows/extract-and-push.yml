@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'upload/**'
+      - '!upload/.gitkeep'
     branches:
       - main
 
@@ -56,9 +57,6 @@ jobs:
 
             unzip -o "$zip_file" -d "$temp_dir"
 
-            # ZIP内の最上位フォルダだけを除去する。
-            # その中にプロジェクトファイルがある場合は、
-            # ファイルをリポジトリ直下へ配置する。
             shopt -s dotglob nullglob
             entries=("$temp_dir"/*)
 
@@ -69,7 +67,6 @@ jobs:
               for item in "${root_entries[@]}"; do
                 name="$(basename "$item")"
 
-                # Git管理情報やGitHubワークフロー関連ファイルを上書きしない。
                 if [ "$name" = ".git" ] || [ "$name" = ".github" ]; then
                   continue
                 fi
@@ -81,7 +78,6 @@ jobs:
               for item in "${entries[@]}"; do
                 name="$(basename "$item")"
 
-                # Git管理情報やGitHubワークフロー関連ファイルを上書きしない。
                 if [ "$name" = ".git" ] || [ "$name" = ".github" ]; then
                   continue
                 fi
@@ -94,18 +90,20 @@ jobs:
             rm -rf "$temp_dir"
           done
 
-      - name: 展開元のuploadフォルダを削除
+      - name: 展開元のuploadフォルダ内を整理（.gitkeep以外を削除）
+        shell: bash
         run: |
-          rm -rf upload/
+          # uploadフォルダが存在する場合、.gitkeepを残して他のZIPやファイルを削除する
+          if [ -d "upload" ]; then
+            find upload/ -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} +
+          fi
 
       - name: 変更をコミット
         shell: bash
         run: |
           set -euo pipefail
 
-          # uploadフォルダ自体は削除せず、展開されたファイル・変更分のみをステージングする
-          git add -u
-          git add .
+          git add -A
 
           if git diff --cached --quiet; then
             echo "変更はありません。"
@@ -120,9 +118,5 @@ jobs:
           set -euo pipefail
 
           git fetch origin main
-
-          # リモート側の最新コミットに今回の変更を適用する。
           git rebase origin/main
-
-          # 最新状態に対してプッシュする。
           git push origin HEAD:main
