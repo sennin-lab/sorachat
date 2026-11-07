@@ -493,7 +493,8 @@ a { color: var(--accent); text-decoration: none; }
 .row.enter { animation: bubble-in 0.34s var(--ease-spring) both; }
 .row.mine.enter { transform-origin: right bottom; }
 .msg-avatar { flex: none; width: 40px; margin-right: 4px; align-self: flex-start; }
-.msg-wrap { display: flex; flex-direction: column; max-width: 74%; min-width: 0; }
+/* 広い画面（iPad・PC）で吹き出しが横に伸びすぎて読みにくくならないよう、幅に上限を付ける */
+.msg-wrap { display: flex; flex-direction: column; max-width: min(74%, 520px); min-width: 0; }
 .row.mine .msg-wrap { align-items: flex-end; }
 .sender-name { margin: 0 0 3px 6px; font-size: 12px; color: rgba(0, 0, 0, 0.55); }
 :root[data-theme="dark"] .sender-name { color: rgba(255, 255, 255, 0.7); }
@@ -520,7 +521,7 @@ a { color: var(--accent); text-decoration: none; }
   transition: transform 0.15s ease;
 }
 .bubble:active { transform: scale(0.98); }
-.bubble p { margin: 0; font-size: 15px; line-height: 1.42; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.bubble p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; min-width: 0; }
 .bubble time { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
 .row.mine .bubble { background: var(--mine); color: var(--mine-text); }
 .row.mine .bubble time { color: rgba(0, 0, 0, 0.55); text-align: right; }
@@ -2142,8 +2143,10 @@ button, .bubble, .send-btn, .composer-icon, .chip { touch-action: manipulation; 
   .dots i, .thread-skeleton .sk { animation: none; }
 }
 
-.ai-code-message { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.ai-code-block { margin: 8px 0; max-width: min(100%, 680px); overflow: hidden; border: 1px solid var(--border, rgba(120,130,150,.25)); border-radius: 12px; background: rgba(20,24,34,.96); color: #eef2ff; }
+.ai-code-message { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.ai-code-message > :first-child { margin-top: 0; }
+.ai-code-message > :last-child { margin-bottom: 0; }
+.ai-code-block { margin: 6px 0; max-width: min(100%, 680px); overflow: hidden; border: 1px solid var(--border, rgba(120,130,150,.25)); border-radius: 12px; background: rgba(20,24,34,.96); color: #eef2ff; }
 .ai-code-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 10px; background:rgba(255,255,255,.08); color:#d6def4; font-size:12px; }
 .ai-code-head button { border:0; border-radius:7px; padding:5px 9px; color:#fff; background:rgba(255,255,255,.15); font:inherit; cursor:pointer; }
 .ai-code-block pre { margin:0; padding:12px; overflow:auto; max-height:520px; white-space:pre; tab-size:2; }
@@ -2237,3 +2240,27 @@ button[aria-busy="true"] { animation: sc-soft-pulse 1.4s ease-in-out infinite; }
     transition-duration: .01ms !important;
   }
 }
+
+/* ---- トークの文字が多いときの見やすさ ---- */
+/* 長い文章は10行で切って「全文を表示」で開く */
+.msg-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 10; line-clamp: 10; overflow: hidden; }
+.msg-more {
+  display: block;
+  margin: 6px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.75;
+  cursor: pointer;
+}
+/* コードを含む吹き出しは、幅をそろえて枠の中に収める。吹き出し内の影は付けない */
+.bubble:has(.ai-code-block) { width: min(100%, 520px); }
+.bubble .ai-code-block { max-width: 100%; box-shadow: none; }
+.bubble .ai-code-block pre { max-height: 360px; }
