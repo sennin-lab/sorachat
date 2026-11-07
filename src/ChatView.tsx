@@ -67,7 +67,8 @@ const messagePreview = (m: Message) => {
   if (m.kind === "poll") return `投票: ${m.body ?? ""}`;
   if (m.kind === "game") return "ミニゲーム";
   if (m.kind === "call") return "通話";
-  return clipLongWords(m.body ?? "");
+  // 「\n」という文字のまま届いた改行は、一行の説明では空白にする
+  return clipLongWords((m.body ?? "").replace(/\\n/g, " "));
 };
 
 const downloadFile = (url: string, name?: string | null) => {

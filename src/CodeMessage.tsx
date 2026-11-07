@@ -19,8 +19,14 @@ async function copyCode(value: string) {
 }
 
 // 表示だけ整える（元の文章・コピー・編集・送信はそのまま）。
-// 改行が3つ以上続くと大きな空白になるので2つまでにし、前後の余計な空行は消す
-const tidy = (text: string) => text.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+|\n+$/g, "");
+// 「\n」という文字のまま届いた改行を先に改行へ直し、前後の改行（文字の「\n」も含む）は消す。
+// 改行が3つ以上続くと大きな空白になるので2つまでにする
+const EDGE_BREAKS = /^(?:\n|\\n)+|(?:\n|\\n)+$/g;
+const tidy = (text: string) => {
+  let t = text.replace(/\r\n?/g, "\n");
+  if (!t.includes("\n")) t = t.replace(/\\n/g, "\n");
+  return t.replace(EDGE_BREAKS, "").replace(/\n{3,}/g, "\n\n");
+};
 
 // 長い文章は、先頭の10行だけ出して「全文を表示」で開く
 const CLAMP_LINES = 10;
@@ -72,7 +78,7 @@ export function CodeMessage({ text, users, meName }: { text: string; users: Set<
   }
   const output = [];
   for (let i = 0; i < parts.length; ) {
-    const plain = parts[i++].replace(/^\n+|\n+$/g, "");
+    const plain = tidy(parts[i++]);
     if (plain) output.push(<span key={`text-${i}`}><RichText text={plain} users={users} meName={meName} /></span>);
     if (i < parts.length) {
       const language = parts[i++] || "code";
