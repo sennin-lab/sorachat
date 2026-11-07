@@ -36,7 +36,32 @@ const senninApi = (path: string, override: string) => {
   }
 };
 
-const appOrigin = env("APP_ORIGIN") || "http://localhost:5173";
+// このアプリ（ソラチャット）自身のURL。仙人アカウントから戻ったあとの飛び先に使う。
+// APP_ORIGIN に Google Apps Script のURL（script.google.com/.../exec）が入っていると、戻り先がそこになってしまうため、
+// そのときは使わず、リダイレクトURI（このサーバー自身のURL）の origin を使う。
+const originOf = (url: string) => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "";
+  }
+};
+const isGoogleScript = (url: string) => {
+  try {
+    const host = new URL(url).hostname;
+    return host === "script.google.com" || host.endsWith(".googleusercontent.com");
+  } catch {
+    return false;
+  }
+};
+const isLocalOrigin = (origin: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(origin);
+const appOrigin = (() => {
+  const given = env("APP_ORIGIN").replace(/\/+$/, "");
+  if (given && !isGoogleScript(given)) return given;
+  const fromRedirect = originOf(env("SENNIN_REDIRECT_URI"));
+  if (fromRedirect && !isLocalOrigin(fromRedirect) && !isGoogleScript(fromRedirect)) return fromRedirect;
+  return "http://localhost:5173";
+})();
 
 export const config = {
   port: Number(process.env.PORT || 3000),

@@ -13,11 +13,15 @@ const files = import.meta.glob("./*.{png,webp,gif,jpg,jpeg,svg}", {
 
 export type Stamp = { ref: string; name: string; url: string };
 
+// ファイル名に「#」（#U3042… の形）が入っていると、URL の「#」以降は読まれず、画像が見つからなくなる。
+// そのため、画像のURLの「#」は「%23」にして使う（「?」も同様）
+const safeUrl = (url: string) => url.replace(/#/g, "%23").replace(/\?/g, "%3F");
+
 // 名前は日本語に戻して表示する（#U… のままだと、画像が出ないときに文字として見えてしまうため）
 export const BUILTIN_STAMPS: Stamp[] = Object.entries(files)
   .map(([path, url]) => {
     const file = path.replace(/^\.\//, "");
-    return { ref: `builtin:${file}`, name: decodeStampName(file.replace(/\.[^.]+$/, "")), url };
+    return { ref: `builtin:${file}`, name: decodeStampName(file.replace(/\.[^.]+$/, "")), url: safeUrl(url) };
   })
   .sort((a, b) => a.name.localeCompare(b.name, "ja"));
 

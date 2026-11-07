@@ -1,4 +1,4 @@
-import { config } from "./config.js";
+import { config, missingSenninSettings } from "./config.js";
 import { pushEnabled } from "./push.js";
 import { IMAGE_BUCKET, sb } from "./supabase.js";
 import { tursoExecute } from "./turso.js";
@@ -154,7 +154,7 @@ const PROBES: Record<string, Probe> = {
     run: async () => {
       const { clientId, authorizationUrl } = config.sennin;
       if (!clientId || !authorizationUrl) {
-        return { state: "unconfigured", latencyMs: null, detail: "設定（環境変数）が未設定です" };
+        return { state: "unconfigured", latencyMs: null, detail: `設定（環境変数）が未設定です: ${missingSenninSettings().join("、")}` };
       }
       return httpCheck(authorizationUrl);
     }

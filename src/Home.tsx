@@ -332,10 +332,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                     <span className="option-icon">
                       <Icon name="edit" size={20} />
                     </span>
-                    <span className="more-text">
-                      senninstudio
-                      <small>作品を作って、ポイントで売る（手数料なし）</small>
-                    </span>
+                    senninstudio
                     <Icon name="chevron" size={18} className="chev" />
                   </button>
                 </li>
@@ -344,10 +341,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                     <span className="option-icon">
                       <Icon name="store" size={20} />
                     </span>
-                    <span className="more-text">
-                      仙人ストア
-                      <small>外観・スタンプ・拡張機能をポイントで購入</small>
-                    </span>
+                    仙人ストア
                     <Icon name="chevron" size={18} className="chev" />
                   </button>
                 </li>
