@@ -10,6 +10,7 @@ import { disableAi, enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
 import { befriendTeam } from "./team.js";
 import { attachSenninAccount, SenninError } from "./senninPoints.js";
+import { retryCreatorPayouts } from "./studioPayout.js";
 
 export const accounts = Router();
 
@@ -62,6 +63,17 @@ const patchSchema = z.object({
   aiEnabled: z.boolean().optional()
 });
 
+// 買った外観が作品の場合は、その配色（色の値）を返す（画面の色に反映するため）
+async function studioPaletteOf(themeId: string | null): Promise<{ mine: string; bg: string; accent: string } | null> {
+  if (!themeId?.startsWith("work:")) return null;
+  const id = themeId.slice("work:".length);
+  if (!UUID.test(id)) return null;
+  const { data } = await sb.from("sc_studio_works").select("payload, status").eq("id", id).maybeSingle();
+  if (!data || data.status === "removed") return null;
+  const payload = data.payload as { mine?: string; bg?: string; accent?: string } | null;
+  return payload?.mine && payload.bg && payload.accent ? { mine: payload.mine, bg: payload.bg, accent: payload.accent } : null;
+}
+
 async function loadMe(userId: string) {
   const { data, error } = await sb
     .from("sc_users")
@@ -83,7 +95,8 @@ async function loadMe(userId: string) {
     sennin: Boolean(data.sennin_id),
     coverTheme: (data.cover_theme ?? "green") as string,
     aiEnabled: Boolean(data.ai_enabled),
-    storeTheme: (data.store_theme ?? null) as string | null
+    storeTheme: (data.store_theme ?? null) as string | null,
+    storeThemePalette: await studioPaletteOf((data.store_theme ?? null) as string | null)
   };
 }
 
@@ -264,6 +277,8 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
         return;
       }
       await attachSenninAccount(userId, profile.id, tokenData.refresh_token);
+      // 連携できたので、保留になっていた作者への支払いを払う（作者でなければ何もない）
+      void retryCreatorPayouts(userId).catch((error) => console.error("[studio] 支払いの再送に失敗:", error));
       res.clearCookie("sc_oauth", cookieBase);
       res.clearCookie("sc_oauth_link", cookieBase);
       res.redirect(`${config.appOrigin}/more?store=linked`);

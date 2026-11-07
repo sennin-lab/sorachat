@@ -11,16 +11,25 @@ export function StampSheet({ onPick, onClose }: { onPick: (ref: string) => void;
   const { closing, close } = useExitClose(onClose);
   // 未購入のパックに入っているスタンプ（正規化した名前）
   const [locked, setLocked] = useState<Set<string>>(() => new Set());
+  // 買った作品のスタンプ（studio:画像ID と見本の画像）
+  const [studioStamps, setStudioStamps] = useState<{ ref: string; url: string; name: string }[]>([]);
   const [note, setNote] = useState("");
 
   useEffect(() => {
     api<StoreView>("/api/store")
       .then((view) => {
         const next = new Set<string>();
+        const owned: { ref: string; url: string; name: string }[] = [];
         for (const item of view.items) {
-          if (item.kind === "stamp_pack" && !item.owned) for (const ref of item.stamps ?? []) next.add(ref);
+          if (item.kind !== "stamp_pack") continue;
+          if (item.source === "studio") {
+            if (item.owned) for (const ref of item.stamps ?? []) owned.push({ ref, url: ref.replace("studio:", "/api/studio/images/"), name: item.name });
+            continue;
+          }
+          if (!item.owned) for (const ref of item.stamps ?? []) next.add(ref);
         }
         setLocked(next);
+        setStudioStamps(owned);
       })
       .catch(() => undefined);
   }, []);
@@ -71,6 +80,18 @@ export function StampSheet({ onPick, onClose }: { onPick: (ref: string) => void;
                 );
               })}
             </div>
+          )}
+          {studioStamps.length > 0 && (
+            <>
+              <p className="stamp-label">作品のスタンプ</p>
+              <div className="stamp-grid">
+                {studioStamps.map((s) => (
+                  <button key={s.ref} type="button" className="stamp-btn" onClick={() => close(() => onPick(s.ref))} aria-label={s.name}>
+                    <img src={s.url} alt={s.name} loading="lazy" decoding="async" width={64} height={64} />
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           {note && <p className="stamp-note" role="status">{note}</p>}
         </div>

@@ -44,6 +44,12 @@ export async function saveFile(file: Express.Multer.File, folder: string) {
   return saveBlob(path, file.buffer, "application/octet-stream");
 }
 
+// 中身で形式を確かめた画像を保存する（senninstudio。申告された型は使わない）
+export async function saveSniffedImage(buffer: Buffer, mime: string, folder: string) {
+  const ext = mime === "image/jpeg" ? "jpg" : mime.replace("image/", "");
+  return saveBlob(`${folder}/${randomUUID()}.${ext}`, buffer, mime);
+}
+
 export const isAllowedImage = (file?: Express.Multer.File) => Boolean(file && IMAGE_TYPES[file.mimetype]);
 
 export async function saveImage(file: Express.Multer.File, folder: string) {

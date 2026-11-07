@@ -4,6 +4,7 @@ import { UUID } from "./messages.js";
 import { readImage } from "./media.js";
 import { sb } from "./supabase.js";
 import { stampLocked } from "./storeAccess.js";
+import { studioStampAllowed, STUDIO_STAMP_REF } from "./studioData.js";
 
 // スタンプ。送れるのは src/stamps/ の組み込みスタンプだけ（ref は builtin:ファイル名）。
 // 自分で追加する機能は廃止した。以前送られた自作スタンプ（user:ID）は、表示だけできるように画像の取得を残す。
@@ -14,6 +15,9 @@ const BUILTIN_REF = /^builtin:[^\/\\\x00-\x1f]{1,120}$/;
 
 // 新しく送ってよいスタンプか（組み込みだけ。仙人ストアのパックは、買った人だけ送れる）
 export async function stampRefOk(ref: string, userId: string): Promise<boolean> {
+  // senninstudio のスタンプ（作者本人か、買った人だけ送れる）
+  const studioMatch = ref.match(STUDIO_STAMP_REF);
+  if (studioMatch) return studioStampAllowed(studioMatch[1], userId);
   if (!BUILTIN_REF.test(ref)) return false;
   return !(await stampLocked(ref, userId));
 }

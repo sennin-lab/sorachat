@@ -6,6 +6,9 @@ import { BUILTIN_STAMPS, canonicalStampRef } from "./stamps";
 import { useExitClose } from "./useExitClose";
 import type { Me, StoreItemView, StoreView } from "./types";
 
+// 通報の対象（作品）
+type ReportTarget = { id: string; name: string };
+
 type Flash = { ok: boolean; text: string };
 type Kind = StoreItemView["kind"];
 
@@ -52,6 +55,7 @@ export function StoreSheet({
   const [confirm, setConfirm] = useState<StoreItemView | null>(null);
   const [notice, setNotice] = useState<Flash | null>(flash ?? null);
   const [unlinking, setUnlinking] = useState(false);
+  const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
 
   const loadView = useCallback(async (): Promise<StoreView | null> => {
     try {
@@ -117,6 +121,34 @@ export function StoreSheet({
       setNotice({ ok: false, text: errorText(e, "外観を変えられませんでした。") });
     } finally {
       setBusyId(null);
+    }
+  };
+
+  // senninai の応答スタイル（作品）を使う・やめる
+  const useAiStyle = async (itemId: string | null) => {
+    setBusyId(itemId ?? "default");
+    setNotice(null);
+    try {
+      await api("/api/store/ai-style", post({ itemId }));
+      await loadView();
+      setNotice({ ok: true, text: itemId ? "応答スタイルを変えました。senninai の次の回答から反映されます。" : "応答スタイルを標準に戻しました。" });
+    } catch (e) {
+      setNotice({ ok: false, text: errorText(e, "応答スタイルを変えられませんでした。") });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // 作品を通報する（1人1回。5件たまると自動で非公開になる）
+  const report = async (target: ReportTarget) => {
+    setNotice(null);
+    try {
+      await api(`/api/studio/works/${target.id}/report`, post({ reason: "" }));
+      setNotice({ ok: true, text: `「${target.name}」を通報しました。ご協力ありがとうございます。` });
+    } catch (e) {
+      setNotice({ ok: false, text: errorText(e, "通報できませんでした。") });
+    } finally {
+      setReportTarget(null);
     }
   };
 
@@ -218,15 +250,19 @@ export function StoreSheet({
               <ul className="store-list">
                 {items.map((item) => {
                   const isBusy = busyId === item.id;
-                  const previews =
-                    item.kind === "stamp_pack"
-                      ? BUILTIN_STAMPS.filter((s) => (item.stamps ?? []).includes(canonicalStampRef(s.ref)))
-                      : [];
+                  const previews: { key: string; src: string; alt: string }[] =
+                    item.kind !== "stamp_pack"
+                      ? []
+                      : item.source === "studio"
+                        ? (item.stamps ?? []).slice(0, 8).map((ref) => ({ key: ref, src: ref.replace("studio:", "/api/studio/images/"), alt: "" }))
+                        : BUILTIN_STAMPS.filter((s) => (item.stamps ?? []).includes(canonicalStampRef(s.ref))).map((s) => ({ key: s.ref, src: s.url, alt: s.name }));
                   const short = linked && points !== null && !item.owned && points < item.price;
                   return (
                     <li key={item.id} className={`store-card${item.owned ? " is-owned" : ""}`}>
                       <div className="store-card-top">
-                        {item.kind === "theme" ? (
+                        {item.thumbUrl ? (
+                          <img className="store-thumb" src={item.thumbUrl} alt="" width={56} height={56} />
+                        ) : item.kind === "theme" ? (
                           <span
                             className="store-swatch"
                             aria-hidden="true"
@@ -245,13 +281,18 @@ export function StoreSheet({
                         <div className="store-card-text">
                           <strong>{item.name}</strong>
                           <small>{item.description}</small>
+                          {item.source === "studio" && (
+                            <small className="store-creator">
+                              作者: {item.creatorName || "—"} ・ {item.studioKind === "quiz" ? "クイズ" : item.studioKind === "ai_style" ? "応答スタイル" : item.studioKind === "theme" ? "外観" : "スタンプ"}
+                            </small>
+                          )}
                         </div>
                       </div>
 
                       {previews.length > 0 && (
                         <div className="store-stamps">
                           {previews.map((s) => (
-                            <img key={s.ref} src={s.url} alt={s.name} loading="lazy" width={44} height={44} />
+                            <img key={s.key} src={s.src} alt={s.alt} loading="lazy" width={44} height={44} />
                           ))}
                         </div>
                       )}
@@ -282,8 +323,20 @@ export function StoreSheet({
                               使う
                             </button>
                           )
+                        ) : item.studioKind === "ai_style" && item.owned ? (
+                          item.selected ? (
+                            <button type="button" className="btn-small" disabled={busyId !== null} onClick={() => void useAiStyle(null)}>
+                              使用中（標準に戻す）
+                            </button>
+                          ) : (
+                            <button type="button" className="btn-small accent" disabled={busyId !== null} onClick={() => void useAiStyle(item.id)}>
+                              使う
+                            </button>
+                          )
                         ) : item.owned ? (
                           <span className="store-badge">持っています</span>
+                        ) : item.source === "studio" && item.creatorId === me.id ? (
+                          <span className="store-badge">あなたの作品</span>
                         ) : linked ? (
                           <button
                             type="button"
@@ -299,6 +352,15 @@ export function StoreSheet({
                           </a>
                         )}
                       </div>
+                      {item.source === "studio" && item.creatorId !== me.id && (
+                        <button
+                          type="button"
+                          className="store-report"
+                          onClick={() => setReportTarget({ id: item.id.slice("work:".length), name: item.name })}
+                        >
+                          この作品を通報する
+                        </button>
+                      )}
                     </li>
                   );
                 })}
@@ -317,6 +379,16 @@ export function StoreSheet({
         </div>
       </div>
 
+      {reportTarget && (
+        <ConfirmDialog
+          title="作品を通報しますか？"
+          message={`「${reportTarget.name}」を通報します。通報が5件たまると、自動で非公開になります。`}
+          confirmLabel="通報する"
+          danger
+          onConfirm={() => void report(reportTarget)}
+          onCancel={() => setReportTarget(null)}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           title="購入の確認"

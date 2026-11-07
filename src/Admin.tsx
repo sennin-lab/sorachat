@@ -3,6 +3,7 @@ import { ApiError, api, delete_, post } from "./api";
 import { Avatar } from "./Avatar";
 import { formatRemaining } from "./Banned";
 import { TEAM_ID } from "./team";
+import { StudioPanel } from "./AdminStudio";
 import type { BanInfo } from "./types";
 
 // 管理者パネル（/admin/login からだけ入る。一般の画面からは入口を出さない）
@@ -169,7 +170,7 @@ function AdminLogin({ onDone }: { onDone: () => void }) {
 type Go = (to: string) => void;
 
 function Dashboard({ go }: { go: Go }) {
-  const [tab, setTab] = useState<"users" | "chats" | "news" | "maintenance">("users");
+  const [tab, setTab] = useState<"users" | "chats" | "news" | "studio" | "maintenance">("users");
   return (
     <>
       <div className="admin-segment" role="tablist">
@@ -182,11 +183,24 @@ function Dashboard({ go }: { go: Go }) {
         <button role="tab" aria-selected={tab === "news"} className={tab === "news" ? "on" : ""} onClick={() => setTab("news")}>
           お知らせ
         </button>
+        <button role="tab" aria-selected={tab === "studio"} className={tab === "studio" ? "on" : ""} onClick={() => setTab("studio")}>
+          作品
+        </button>
         <button role="tab" aria-selected={tab === "maintenance"} className={tab === "maintenance" ? "on" : ""} onClick={() => setTab("maintenance")}>
           メンテナンス
         </button>
       </div>
-      {tab === "users" ? <UsersList go={go} /> : tab === "chats" ? <ChatsList go={go} /> : tab === "news" ? <AnnouncementPanel /> : <MaintenancePanel />}
+      {tab === "users" ? (
+        <UsersList go={go} />
+      ) : tab === "chats" ? (
+        <ChatsList go={go} />
+      ) : tab === "news" ? (
+        <AnnouncementPanel />
+      ) : tab === "studio" ? (
+        <StudioPanel />
+      ) : (
+        <MaintenancePanel />
+      )}
     </>
   );
 }

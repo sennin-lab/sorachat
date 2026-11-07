@@ -10,6 +10,7 @@ import { refreshPush } from "./push";
 import { NotifyPrompt } from "./NotifyPrompt";
 import { OpenChatSheet } from "./OpenChatSheet";
 import { StoreSheet } from "./StoreSheet";
+import { StudioSheet } from "./StudioSheet";
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -78,6 +79,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   // 仙人ストア。連携の戻りには、結果（連携できた・できなかった）を表示する
   const [showStore, setShowStore] = useState(false);
   const [storeFlash, setStoreFlash] = useState<{ ok: boolean; text: string } | null>(null);
+  const [showStudio, setShowStudio] = useState(false);
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(() => shouldAskNotify(me));
   const [showAdd, setShowAdd] = useState(false);
   // 友だちが増えた・減ったときに友だち一覧を取り直すための番号
@@ -94,10 +96,21 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   }, [theme]);
 
   // 仙人ストアで選んだ外観（吹き出し・背景の色）を、自分の画面に反映する
+  // 作品の配色（色の値）は、その色を直接入れる。標準の外観は data-store-theme で決まる
   useEffect(() => {
     if (me.storeTheme) document.documentElement.dataset.storeTheme = me.storeTheme;
     else delete document.documentElement.dataset.storeTheme;
-  }, [me.storeTheme]);
+    const style = document.documentElement.style;
+    const palette = me.storeThemePalette;
+    if (palette) {
+      style.setProperty("--mine", palette.mine);
+      style.setProperty("--chat-bg", palette.bg);
+      style.setProperty("--accent", palette.accent);
+      style.setProperty("--accent-ink", palette.accent);
+    } else {
+      for (const name of ["--mine", "--chat-bg", "--accent", "--accent-ink"]) style.removeProperty(name);
+    }
+  }, [me.storeTheme, JSON.stringify(me.storeThemePalette ?? null)]);
 
   // 仙人アカウントの連携から戻ってきたら、ストアを開いて結果を出す（URL の印は消す）
   useEffect(() => {
@@ -303,6 +316,18 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => setShowStudio(true)}>
+                    <span className="option-icon">
+                      <Icon name="edit" size={20} />
+                    </span>
+                    <span className="more-text">
+                      senninstudio
+                      <small>作品を作って、ポイントで売る（手数料なし）</small>
+                    </span>
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => setShowStore(true)}>
                     <span className="option-icon">
                       <Icon name="store" size={20} />
@@ -425,6 +450,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           onFriendsChanged={bumpFriends}
         />
       )}
+      {showStudio && <StudioSheet onClose={() => setShowStudio(false)} />}
       {showStore && (
         <StoreSheet
           me={me}

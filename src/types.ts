@@ -17,6 +17,8 @@ export type Me = {
   aiEnabled: boolean;
   // 仙人ストアで選んでいる外観（商品ID）。なければ null
   storeTheme?: string | null;
+  // 選んでいる外観が作品なら、その配色（画面の色に反映する）
+  storeThemePalette?: { mine: string; bg: string; accent: string } | null;
 };
 
 // 仙人ストアの商品（サーバーの一覧と同じ形）
@@ -30,12 +32,43 @@ export type StoreItemView = {
   feature?: string;
   owned: boolean;
   selected: boolean;
+  // senninstudio の作品のときだけ入る
+  source?: "store" | "studio";
+  creatorId?: string;
+  creatorName?: string | null;
+  thumbUrl?: string | null;
+  studioKind?: "theme" | "stamp_pack" | "quiz" | "ai_style" | null;
+  // 作品のスタンプ（studio:画像ID の形）
+  stamps?: string[];
 };
 
 export type StoreView = {
   linked: boolean;
   selectedTheme: string | null;
+  selectedAiStyle: string | null;
   items: StoreItemView[];
+};
+
+// 作者の画面（senninstudio）
+export type StudioWorkView = {
+  id: string;
+  kind: "stamp_pack" | "theme" | "quiz" | "ai_style";
+  name: string;
+  price: number;
+  status: "published" | "hidden" | "deleted";
+  hiddenReason: "reports" | "admin" | "creator_suspended" | null;
+  sales: number;
+  thumbUrl: string | null;
+  createdAt: string;
+};
+
+export type StudioMeView = {
+  linked: boolean;
+  suspended: boolean;
+  suspendedReason: string | null;
+  earned: number;
+  pending: number;
+  works: StudioWorkView[];
 };
 
 export type Conversation = {

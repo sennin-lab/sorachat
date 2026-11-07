@@ -65,5 +65,7 @@ export const canonicalStampRef = (ref: string): string =>
 export const stampUrlOf = (ref: string): string | null => {
   if (ref.startsWith("builtin:")) return urlByRef.get(ref) ?? urlByRef.get(decodeLegacyRef(ref)) ?? null;
   if (ref.startsWith("user:")) return `/api/stamps/${ref.slice(5)}/image`;
+  // senninstudio のスタンプ（作品の画像）
+  if (ref.startsWith("studio:")) return `/api/studio/images/${ref.slice(7)}`;
   return null;
 };

@@ -4,6 +4,8 @@ import { sendToUser } from "./hub.js";
 import { insertMessage, memberIds, membership, type MessageRow } from "./messages.js";
 import { deadlineOf, GAME_CONFIG, GameError, reduce, viewOf, type GameAction, type GameKind, type GameStatus, type GameView, type Reduced, type Stored } from "./gameLogic.js";
 import { generateQuizQuestions } from "./quizgen.js";
+import { studioQuizFor } from "./studioData.js";
+import { QUIZ_ROUNDS } from "./gameLogic.js";
 import { sb } from "./supabase.js";
 
 type GameRow = {
@@ -129,7 +131,8 @@ export async function gameAction(messageId: string, me: string, input: GameActio
       !row.state.play &&
       !row.state.cancelled &&
       row.state.players.length >= GAME_CONFIG.quiz.min;
-    const quizQuestions = startingQuiz ? await generateQuizQuestions() : null;
+    // 始めた人が買った問題集があれば、そこから出題する。なければ senninai が作る（それも失敗なら固定の問題）
+    const quizQuestions = startingQuiz ? (await studioQuizFor(me, QUIZ_ROUNDS)) ?? (await generateQuizQuestions()) : null;
     const next = reduce(row.kind, row.creator_id, row.state, me, input, Math.random, quizQuestions ?? undefined, Date.now());
     const { error } = await sb
       .from("sc_games")
