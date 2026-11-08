@@ -28,7 +28,6 @@ export type StoreItemView = {
   name: string;
   description: string;
   price: number;
-  stamps?: string[];
   feature?: string;
   owned: boolean;
   selected: boolean;
@@ -40,6 +39,9 @@ export type StoreItemView = {
   studioKind?: "theme" | "stamp_pack" | "quiz" | "ai_style" | null;
   // 作品のスタンプ（studio:画像ID の形）
   stamps?: string[];
+  // 作品の評価（平均・件数）と販売数。固定の商品では null
+  rating?: RatingSummary | null;
+  sales?: number | null;
 };
 
 export type StoreView = {
@@ -49,26 +51,101 @@ export type StoreView = {
   items: StoreItemView[];
 };
 
+// 星の集計（平均・件数・星1〜5ごとの件数。distribution[0] が星1）
+export type RatingSummary = { avg: number; count: number; distribution: number[] };
+
+export type WorkKind = "stamp_pack" | "theme" | "quiz" | "ai_style";
+
+// レビュー（商品の詳細・作者のページ）
+export type ReviewView = {
+  reviewerId: string;
+  reviewerName: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
+  updatedAt: string;
+  mine: boolean;
+};
+
+// 商品の詳細（掲載ページ）。サーバーの /api/store/items/:id と同じ形
+export type StoreDetailView = {
+  id: string;
+  kind: WorkKind;
+  name: string;
+  description: string;
+  price: number;
+  status: "published" | "hidden" | "deleted";
+  createdAt: string;
+  editedAt: string | null;
+  sales: number;
+  thumbUrl: string | null;
+  stamps: string[];
+  palette: { mine?: string; bg?: string; accent?: string } | null;
+  aiStyle: { tone?: string; length?: string; emoji?: boolean } | null;
+  quizCount: number | null;
+  rating: RatingSummary;
+  reviews: ReviewView[];
+  myReview: ReviewView | null;
+  owned: boolean;
+  isMine: boolean;
+  canReview: boolean;
+  creator: { id: string; name: string; rating: RatingSummary; workCount: number };
+};
+
+// 作者のページ（公開）。サーバーの /api/studio/creators/:id と同じ形
+export type CreatorView = {
+  id: string;
+  name: string;
+  createdAt: string;
+  rating: RatingSummary;
+  workCount: number;
+  sales: number;
+  works: {
+    id: string;
+    kind: WorkKind;
+    name: string;
+    price: number;
+    rating: RatingSummary;
+    sales: number;
+    thumbUrl: string | null;
+  }[];
+  reviews: { workId: string; workName: string; reviewerName: string; rating: number; comment: string; updatedAt: string }[];
+};
+
 // 作者の画面（senninstudio）
 export type StudioWorkView = {
   id: string;
-  kind: "stamp_pack" | "theme" | "quiz" | "ai_style";
+  kind: WorkKind;
   name: string;
+  description: string;
   price: number;
   status: "published" | "hidden" | "deleted";
   hiddenReason: "reports" | "admin" | "creator_suspended" | null;
+  // 編集フォームの初期値に使う（種類ごとの中身）
+  payload: Record<string, unknown>;
   sales: number;
+  rating: RatingSummary;
   thumbUrl: string | null;
   createdAt: string;
+  editedAt: string | null;
 };
 
 export type StudioMeView = {
+  userId: string;
   linked: boolean;
   suspended: boolean;
   suspendedReason: string | null;
   earned: number;
   pending: number;
   works: StudioWorkView[];
+};
+
+export type PayoutView = {
+  id: string;
+  workName: string;
+  amount: number;
+  status: "pending" | "paid" | "failed";
+  createdAt: string;
 };
 
 export type Conversation = {

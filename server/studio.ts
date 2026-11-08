@@ -9,6 +9,7 @@ import { sb } from "./supabase.js";
 import { isLinked } from "./senninPoints.js";
 import { retryCreatorPayouts } from "./studioPayout.js";
 import { displayImagesFor, loadWork, WORK_PREFIX } from "./studioData.js";
+import { ratingsByWork } from "./studioReviews.js";
 import {
   checkAiStyle,
   checkBasics,
@@ -62,7 +63,7 @@ studio.get("/studio/me", async (_req, res) => {
 
   const { data: rows, error } = await sb
     .from("sc_studio_works")
-    .select("id, kind, name, price, status, hidden_reason, created_at")
+    .select("id, kind, name, description, price, status, hidden_reason, payload, created_at, edited_at")
     .eq("creator_id", me)
     .neq("status", "removed")
     .order("created_at", { ascending: false })
@@ -85,8 +86,10 @@ studio.get("/studio/me", async (_req, res) => {
     if (p.status === "pending") pending += Number(p.amount);
   }
 
-  const thumbs = await displayImagesFor(ids.map((i) => i.slice(WORK_PREFIX.length)));
+  const workIds = (rows ?? []).map((r) => r.id as string);
+  const [thumbs, ratings] = await Promise.all([displayImagesFor(workIds), ratingsByWork(workIds)]);
   res.json({
+    userId: me,
     linked,
     suspended: creator.suspended,
     suspendedReason: creator.reason,
@@ -96,12 +99,16 @@ studio.get("/studio/me", async (_req, res) => {
       id: r.id,
       kind: r.kind,
       name: r.name,
+      description: r.description ?? "",
       price: r.price,
       status: r.status,
       hiddenReason: r.hidden_reason,
+      payload: r.payload ?? {},
       sales: sales.get(`${WORK_PREFIX}${r.id as string}`) ?? 0,
+      rating: ratings.get(r.id as string) ?? { avg: 0, count: 0, distribution: [0, 0, 0, 0, 0] },
       thumbUrl: thumbs.get(r.id as string)?.thumb ? `/api/studio/images/${thumbs.get(r.id as string)!.thumb}` : null,
-      createdAt: r.created_at
+      createdAt: r.created_at,
+      editedAt: r.edited_at ?? null
     }))
   });
 });
@@ -234,6 +241,113 @@ studio.post("/studio/works", upload, async (req, res) => {
   if (imageError) throw imageError;
 
   res.status(201).json({ ok: true, id });
+});
+
+// 作者の支払いの一覧（新しい順）。作品名・金額・状態だけを返す
+studio.get("/studio/payouts", async (_req, res) => {
+  const me = currentUserId(res);
+  res.set("Cache-Control", "no-store");
+  const { data, error } = await sb
+    .from("sc_studio_payouts")
+    .select("id, work_id, amount, status, created_at")
+    .eq("creator_id", me)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  const rows = data ?? [];
+  const workIds = [...new Set(rows.map((r) => r.work_id as string))];
+  const names = new Map<string, string>();
+  if (workIds.length) {
+    const { data: works, error: worksError } = await sb.from("sc_studio_works").select("id, name").in("id", workIds);
+    if (worksError) throw worksError;
+    for (const w of works ?? []) names.set(w.id as string, w.name as string);
+  }
+  res.json({
+    payouts: rows.map((r) => ({
+      id: r.id,
+      workName: names.get(r.work_id as string) ?? "（削除された作品）",
+      amount: Number(r.amount),
+      status: r.status,
+      createdAt: r.created_at
+    }))
+  });
+});
+
+// 作品の編集（作者本人だけ）。名前・説明・価格・サムネイル・中身（配色・問題・応答スタイル）を変えられる。
+// スタンプ画像は、買った人の手元に残るため差し替えられない（作り直して公開する）。
+studio.post("/studio/works/:id/edit", upload, async (req, res) => {
+  const me = currentUserId(res);
+  const fail = (status: number, error: string) => res.status(status).json({ ok: false, error });
+  const id = String(req.params.id);
+  if (!UUID.test(id)) return fail(404, "作品が見つかりません。");
+  const row = await loadWork(id);
+  if (!row || row.creator_id !== me || row.status === "removed") return fail(404, "作品が見つかりません。");
+  if (row.status === "deleted") return fail(400, "削除した作品は編集できません。");
+  const creator = await ensureCreator(me);
+  if (creator.suspended) return fail(403, "この作者アカウントは作品の公開を停止されています。");
+  if (!allow(`edit:${me}`, 30, 60 * 60_000)) return fail(429, "編集が多すぎます。少し待ってからお試しください。");
+
+  const body = req.body as Record<string, string | undefined>;
+  const basicsError = checkBasics(body.name, body.description ?? "");
+  if (basicsError) return fail(400, basicsError);
+  const priceError = checkPrice(body.price);
+  if (priceError) return fail(400, priceError);
+
+  const files = (req.files ?? {}) as unknown as Record<string, Express.Multer.File[] | undefined>;
+  if ((files.images ?? []).length) return fail(400, "スタンプ画像は編集では差し替えられません。作品を作り直して公開してください。");
+
+  let payload: Record<string, unknown> | null = null;
+  if (row.kind !== "stamp_pack") {
+    let data: unknown = null;
+    try {
+      data = body.data ? JSON.parse(body.data) : null;
+    } catch {
+      return fail(400, "入力の形式が正しくありません。");
+    }
+    if (row.kind === "theme") {
+      const checked = checkTheme(data);
+      if (!checked.ok) return fail(400, checked.error);
+      payload = { ...checked.payload };
+    } else if (row.kind === "quiz") {
+      const checked = checkQuiz(data);
+      if (!checked.ok) return fail(400, checked.error);
+      payload = { ...checked.payload };
+    } else if (row.kind === "ai_style") {
+      const checked = checkAiStyle(data);
+      if (!checked.ok) return fail(400, checked.error);
+      payload = { ...checked.payload };
+    }
+  }
+
+  const thumb = files.thumb?.[0] ?? null;
+  let thumbMime: string | null = null;
+  if (thumb) {
+    const error = checkThumbImage(thumb.buffer);
+    if (error) return fail(400, error);
+    thumbMime = `image/${sniffImage(thumb.buffer)!.type}`;
+  }
+
+  const now = new Date().toISOString();
+  const update: Record<string, unknown> = {
+    name: body.name!.trim(),
+    description: (body.description ?? "").trim(),
+    price: Number(body.price),
+    edited_at: now,
+    updated_at: now
+  };
+  if (payload) update.payload = payload;
+  const { error: updateError } = await sb.from("sc_studio_works").update(update).eq("id", id);
+  if (updateError) throw updateError;
+
+  if (thumb && thumbMime) {
+    const path = await saveSniffedImage(thumb.buffer, thumbMime, "studio");
+    // 古いサムネイルの行だけを消す（画像の実体は、スタンプと共有していることがあるので消さない）
+    const { error: deleteError } = await sb.from("sc_studio_images").delete().eq("work_id", id).eq("role", "thumb");
+    if (deleteError) throw deleteError;
+    const { error: insertError } = await sb.from("sc_studio_images").insert({ work_id: id, role: "thumb", position: 0, path });
+    if (insertError) throw insertError;
+  }
+  res.json({ ok: true, id });
 });
 
 // 作者が作品を削除する（販売をやめる。すでに買った人は引き続き使える）

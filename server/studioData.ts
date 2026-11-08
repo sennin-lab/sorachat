@@ -19,6 +19,8 @@ export type WorkRow = {
   status: "published" | "hidden" | "deleted" | "removed";
   payload: Record<string, unknown> | null;
   created_at: string;
+  // 作者が最後に編集した日時（編集していなければ null）
+  edited_at?: string | null;
 };
 
 // ストアの商品として扱う作品（購入の処理に必要な情報を含む）
@@ -33,7 +35,7 @@ export const workIdOf = (itemId: string): string | null => {
 export async function loadWork(id: string): Promise<WorkRow | null> {
   const { data, error } = await sb
     .from("sc_studio_works")
-    .select("id, creator_id, kind, name, description, price, status, payload, created_at")
+    .select("id, creator_id, kind, name, description, price, status, payload, created_at, edited_at")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;

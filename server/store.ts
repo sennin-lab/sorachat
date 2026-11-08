@@ -21,6 +21,7 @@ import {
 } from "./senninPoints.js";
 import { recordSale } from "./studioPayout.js";
 import { displayImagesFor, resolveStudioItem, toStudioItem, workIdOf, WORK_PREFIX, type StudioStoreItem } from "./studioData.js";
+import { ratingsByWork, salesByWork } from "./studioReviews.js";
 
 export const store = Router();
 store.use("/store", requireAuth);
@@ -105,9 +106,12 @@ store.get("/store", async (_req, res) => {
     .limit(300);
   if (error) throw error;
   const workRows = works ?? [];
-  const [images, names] = await Promise.all([
-    displayImagesFor(workRows.map((w) => w.id as string)),
-    namesById(workRows.map((w) => w.creator_id as string))
+  const workIds = workRows.map((w) => w.id as string);
+  const [images, names, ratings, sales] = await Promise.all([
+    displayImagesFor(workIds),
+    namesById(workRows.map((w) => w.creator_id as string)),
+    ratingsByWork(workIds),
+    salesByWork(workIds)
   ]);
 
   const fixed = STORE_ITEMS.map((item) => ({
@@ -117,7 +121,9 @@ store.get("/store", async (_req, res) => {
     source: "store" as const,
     creatorName: null as string | null,
     thumbUrl: null as string | null,
-    studioKind: null as string | null
+    studioKind: null as string | null,
+    rating: null as { avg: number; count: number } | null,
+    sales: null as number | null
   }));
 
   const studioItems = workRows.map((row) => {
@@ -144,7 +150,9 @@ store.get("/store", async (_req, res) => {
       source: "studio" as const,
       creatorId: base.creatorId,
       creatorName: names.get(base.creatorId) ?? "",
-      thumbUrl: img.thumb ? `/api/studio/images/${img.thumb}` : null
+      thumbUrl: img.thumb ? `/api/studio/images/${img.thumb}` : null,
+      rating: ratings.get(id) ?? { avg: 0, count: 0, distribution: [0, 0, 0, 0, 0] },
+      sales: sales.get(id) ?? 0
     };
   });
 

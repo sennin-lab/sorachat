@@ -25,6 +25,7 @@ import { getStatus } from "./status.js";
 import { store } from "./store.js";
 import { studio } from "./studio.js";
 import { studioAdmin } from "./studioAdmin.js";
+import { studioReviews } from "./studioReviews.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -59,6 +60,7 @@ app.use("/api", blocks);
 app.use("/api", calls);
 app.use("/api", store);
 app.use("/api", studio);
+app.use("/api", studioReviews);
 app.use("/api", studioAdmin);
 app.use("/api", admin);
 app.use("/api", (_req, res) => {

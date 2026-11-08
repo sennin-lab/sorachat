@@ -1,43 +1,73 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, post } from "./api";
+import { useLocation, useNavigate } from "react-router-dom";
+import { api } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { Page } from "./Page";
-import type { StudioMeView, StudioWorkView } from "./types";
+import { storeAuthorPath, storeItemPath } from "./StorePage";
+import { StudioEditor } from "./StudioEditor";
+import { Stars, dateText, errorText, KIND_LABEL, WorkIcon, yen } from "./storeUi";
+import type { CreatorView, PayoutView, StudioMeView, StudioWorkView } from "./types";
 
-// senninstudio（作者の専用ページ /studio）。作品の公開と、自分の作品の削除（削除だけできる）
+// senninstudio の開発者ダッシュボード（/studio）。概要・作品・レビュー・支払い・ドキュメントと、作品の作成・編集。
+// 作者ができるのは「公開」「編集」「削除」だけ。停止・復帰・支払いの再送は管理者が行う。
 const LINK_HREF = "/api/auth/sennin/link?from=studio";
-type Kind = StudioWorkView["kind"];
 
-const KINDS: { kind: Kind; label: string; text: string }[] = [
-  { kind: "stamp_pack", label: "スタンプ", text: "PNG・GIF・WebPの画像を1〜24枚。縦横16〜512px、1枚1MBまで" },
-  { kind: "theme", label: "外観", text: "吹き出しと背景、アクセントの3色を決めます" },
-  { kind: "quiz", label: "クイズ", text: "4択の問題を5〜50問。対戦で5問ずつ出題されます" },
-  { kind: "ai_style", label: "応答スタイル", text: "senninai の口調・長さ・絵文字の使い方を選びます" }
+type Section =
+  | { name: "overview" }
+  | { name: "works" }
+  | { name: "reviews" }
+  | { name: "payments" }
+  | { name: "docs" }
+  | { name: "new" }
+  | { name: "edit"; id: string };
+
+export function parseStudioRoute(path: string): Section {
+  const edit = /^\/studio\/works\/([^/]+)\/edit\/?$/.exec(path);
+  if (edit) return { name: "edit", id: decodeURIComponent(edit[1]) };
+  const top = /^\/studio\/([a-z]+)\/?$/.exec(path);
+  if (top) {
+    const name = top[1];
+    if (name === "works" || name === "reviews" || name === "payments" || name === "docs" || name === "new") return { name };
+  }
+  return { name: "overview" };
+}
+
+const NAV: { to: string; name: Section["name"]; label: string; icon: IconName }[] = [
+  { to: "/studio", name: "overview", label: "概要", icon: "grid" },
+  { to: "/studio/works", name: "works", label: "作品", icon: "store" },
+  { to: "/studio/reviews", name: "reviews", label: "レビュー", icon: "star" },
+  { to: "/studio/payments", name: "payments", label: "支払い", icon: "wallet" },
+  { to: "/studio/docs", name: "docs", label: "ドキュメント", icon: "book" }
 ];
-
-const KIND_LABEL: Record<Kind, string> = { stamp_pack: "スタンプ", theme: "外観", quiz: "クイズ", ai_style: "応答スタイル" };
 
 const STATUS_TEXT = (w: StudioWorkView) => {
   if (w.status === "published") return { text: "販売中", tone: "ok" };
-  if (w.status === "deleted") return { text: "削除済み（買った人は引き続き使えます）", tone: "muted" };
-  if (w.hiddenReason === "reports") return { text: "通報が多いため自動で非公開", tone: "ng" };
-  if (w.hiddenReason === "creator_suspended") return { text: "作者の停止中のため非公開", tone: "ng" };
+  if (w.status === "deleted") return { text: "削除済み", tone: "muted" };
+  if (w.hiddenReason === "reports") return { text: "通報で自動非公開", tone: "ng" };
+  if (w.hiddenReason === "creator_suspended") return { text: "作者の停止中", tone: "ng" };
   return { text: "運営により非公開", tone: "ng" };
 };
 
-type Question = { q: string; options: string[]; answer: number };
-const blankQuestion = (): Question => ({ q: "", options: ["", "", "", ""], answer: 0 });
-
-const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
+const PAYOUT_TEXT: Record<PayoutView["status"], { text: string; tone: string }> = {
+  paid: { text: "支払い済み", tone: "ok" },
+  pending: { text: "保留（連携後に払います）", tone: "muted" },
+  failed: { text: "失敗（運営が再送します）", tone: "ng" }
+};
 
 export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: string } | null; onBack: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const section = useMemo(() => parseStudioRoute(location.pathname), [location.pathname]);
+
   const [data, setData] = useState<StudioMeView | null>(null);
+  const [creator, setCreator] = useState<CreatorView | null>(null);
+  const [payouts, setPayouts] = useState<PayoutView[] | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [view, setView] = useState<"list" | "create">("list");
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(flash ?? null);
   const [toDelete, setToDelete] = useState<StudioWorkView | null>(null);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState<"all" | "published" | "hidden" | "deleted">("all");
 
   // 連携から戻った結果は、ページが開いたあとに届くことがあるので、届いたら表示する
   useEffect(() => {
@@ -46,8 +76,16 @@ export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: str
 
   const load = useCallback(async () => {
     try {
-      setData(await api<StudioMeView>("/api/studio/me"));
+      const me = await api<StudioMeView>("/api/studio/me");
+      setData(me);
       setLoadError("");
+      // 作者の評価・レビュー（作者のページの情報）と、支払いの一覧も取り直す
+      const [profile, list] = await Promise.all([
+        api<CreatorView>(`/api/studio/creators/${me.userId}`).catch(() => null),
+        api<{ payouts: PayoutView[] }>("/api/studio/payouts").catch(() => null)
+      ]);
+      setCreator(profile);
+      setPayouts(list?.payouts ?? null);
     } catch (e) {
       setLoadError(errorText(e, "作者の情報を読み込めませんでした。"));
     }
@@ -56,6 +94,18 @@ export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: str
   useEffect(() => {
     void load();
   }, [load]);
+
+  const canCreate = Boolean(data?.linked && !data?.suspended);
+  const works = data?.works ?? [];
+  const totals = useMemo(() => {
+    const sales = works.reduce((sum, w) => sum + w.sales, 0);
+    return {
+      sales,
+      published: works.filter((w) => w.status === "published").length,
+      hidden: works.filter((w) => w.status === "hidden").length,
+      deleted: works.filter((w) => w.status === "deleted").length
+    };
+  }, [works]);
 
   const remove = async (work: StudioWorkView) => {
     setBusy(true);
@@ -72,109 +122,381 @@ export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: str
     }
   };
 
-  const canCreate = Boolean(data?.linked && !data?.suspended);
+  const goBack = () => {
+    if (section.name === "new" || section.name === "edit") navigate("/studio/works", { replace: true });
+    else if (section.name !== "overview") navigate("/studio", { replace: true });
+    else onBack();
+  };
+
+  const editing = section.name === "edit" ? (works.find((w) => w.id === section.id) ?? null) : null;
+  const pageTitle = section.name === "new" ? "新しい作品" : section.name === "edit" ? "作品を編集" : "senninstudio";
+  const sectionLabel = NAV.find((n) => n.name === section.name)?.label ?? "";
 
   return (
     <>
-      <Page title={view === "create" ? "作品を作る" : "senninstudio"} onBack={() => (view === "create" ? setView("list") : onBack())}>
-        <div className="studio-body">
-            {loadError && <p className="store-error">{loadError}</p>}
+      <Page title={pageTitle} onBack={goBack} wide>
+        <div className="dev">
+          <nav className="dev-nav" aria-label="開発者メニュー">
+            <div className="dev-account">
+              <span className="cws-avatar">{(creator?.name ?? "?").slice(0, 1)}</span>
+              <div className="dev-account-text">
+                <strong>{creator?.name ?? "作者"}</strong>
+                <small>{!data ? "読み込み中" : !data.linked ? "未連携" : data.suspended ? "公開停止中" : "作者アカウント"}</small>
+              </div>
+            </div>
+            <button type="button" className="cws-primary dev-new" disabled={!canCreate} onClick={() => navigate("/studio/new")}>
+              <Icon name="plus" size={16} /> 新しい作品
+            </button>
+            <ul className="dev-nav-list">
+              {NAV.map((item) => (
+                <li key={item.to}>
+                  <button
+                    type="button"
+                    className={`dev-nav-item${section.name === item.name ? " on" : ""}`}
+                    onClick={() => navigate(item.to)}
+                    aria-current={section.name === item.name ? "page" : undefined}
+                  >
+                    <Icon name={item.icon} size={18} />
+                    <span>{item.label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {data?.linked && creator && (
+              <button type="button" className="dev-nav-link" onClick={() => navigate(storeAuthorPath(creator.id))}>
+                作者ページを見る <Icon name="external" size={14} />
+              </button>
+            )}
+          </nav>
+
+          <main className="dev-main">
+            {loadError && <p className="cws-error">{loadError}</p>}
             {notice && (
-              <p className={`store-notice ${notice.ok ? "is-ok" : "is-ng"}`} role="status">
+              <p className={`cws-notice ${notice.ok ? "is-ok" : "is-ng"}`} role="status">
                 {notice.text}
               </p>
             )}
+            {!data && !loadError && <p className="cws-empty">読み込み中…</p>}
 
-            {!data && !loadError && <p className="store-empty">読み込み中…</p>}
+            {data && section.name !== "new" && section.name !== "edit" && (
+              <header className="dev-head">
+                <h2>{sectionLabel}</h2>
+                {section.name === "overview" && <p>作品の公開・販売・レビュー・支払いをここで管理します。</p>}
+              </header>
+            )}
 
-            {data && view === "list" && (
+            {data && !data.linked && section.name !== "docs" && (
+              <section className="dev-banner">
+                <div>
+                  <strong>作者になるには、仙人アカウントと連携してください</strong>
+                  <p>作品を公開して売るには連携が必要です。売上は仙人アカウントのポイントで受け取ります（手数料はかかりません）。</p>
+                </div>
+                <a className="cws-primary" href={LINK_HREF}>
+                  仙人アカウントと連携する
+                </a>
+              </section>
+            )}
+            {data && data.suspended && (
+              <p className="cws-notice is-ng">
+                この作者アカウントは作品の公開を停止されています。{data.suspendedReason ? `（理由: ${data.suspendedReason}）` : ""}
+              </p>
+            )}
+
+            {data && section.name === "overview" && (
               <>
-                {!data.linked ? (
-                  <section className="store-link">
-                    <strong>作者になるには、仙人アカウントと連携</strong>
-                    <p>
-                      作品を公開して売るには、仙人アカウントとの連携が必要です。売上は仙人アカウントのポイントで受け取ります（手数料はかかりません）。
-                    </p>
-                    <a className="btn-primary store-link-btn" href={LINK_HREF}>
-                      仙人アカウントと連携する
-                    </a>
-                  </section>
-                ) : data.suspended ? (
-                  <p className="store-notice is-ng">
-                    この作者アカウントは、作品の公開を停止されています。{data.suspendedReason ? `（理由: ${data.suspendedReason}）` : ""}
-                  </p>
-                ) : null}
-
-                <section className="studio-summary">
-                  <div>
+                <div className="dev-kpis">
+                  <div className="dev-kpi">
                     <span>受け取った売上</span>
-                    <strong>{data.earned.toLocaleString("ja-JP")} pt</strong>
+                    <strong>{yen(data.earned)} pt</strong>
                   </div>
-                  <div>
+                  <div className="dev-kpi">
                     <span>未払い</span>
-                    <strong>{data.pending.toLocaleString("ja-JP")} pt</strong>
+                    <strong>{yen(data.pending)} pt</strong>
                   </div>
-                </section>
+                  <div className="dev-kpi">
+                    <span>平均評価</span>
+                    <strong>{creator && creator.rating.count > 0 ? creator.rating.avg.toFixed(1) : "—"}</strong>
+                    <small>{creator?.rating.count ?? 0} 件のレビュー</small>
+                  </div>
+                  <div className="dev-kpi">
+                    <span>購入の合計</span>
+                    <strong>{totals.sales.toLocaleString("ja-JP")}</strong>
+                    <small>件</small>
+                  </div>
+                </div>
                 {data.pending > 0 && (
-                  <p className="studio-hint">
-                    未払いは、仙人アカウントの連携が有効なときに自動で払われます。払えないときは、いったん保留になります（連携を確認してください）。
-                  </p>
+                  <p className="dev-muted">未払いは、仙人アカウントの連携が有効なときに自動で払われます。払えないときは保留になります。</p>
                 )}
 
-                <button type="button" className="btn-primary studio-new" disabled={!canCreate} onClick={() => setView("create")}>
-                  作品を作る
-                </button>
+                <div className="dev-two">
+                  <section className="dev-panel">
+                    <h3>作品の状況</h3>
+                    <dl className="dev-stats">
+                      <div>
+                        <dt>販売中</dt>
+                        <dd>{totals.published}</dd>
+                      </div>
+                      <div>
+                        <dt>非公開</dt>
+                        <dd>{totals.hidden}</dd>
+                      </div>
+                      <div>
+                        <dt>削除済み</dt>
+                        <dd>{totals.deleted}</dd>
+                      </div>
+                    </dl>
+                    <button type="button" className="cws-outline cws-block" onClick={() => navigate("/studio/works")}>
+                      作品を管理する
+                    </button>
+                  </section>
 
-                <h3 className="studio-heading">作品</h3>
-                {data.works.length === 0 ? (
-                  <p className="store-empty">まだ作品がありません。最初の作品を作ってみましょう。</p>
+                  <section className="dev-panel">
+                    <h3>最近のレビュー</h3>
+                    {!creator || creator.reviews.length === 0 ? (
+                      <p className="dev-muted">まだレビューはありません。</p>
+                    ) : (
+                      <ul className="dev-mini-reviews">
+                        {creator.reviews.slice(0, 4).map((r, i) => (
+                          <li key={`${r.workId}-${i}`}>
+                            <Stars value={r.rating} size={11} />
+                            <span>{r.workName}</span>
+                            <small>{dateText(r.updatedAt)}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <button type="button" className="cws-outline cws-block" onClick={() => navigate("/studio/reviews")}>
+                      すべてのレビュー
+                    </button>
+                  </section>
+                </div>
+              </>
+            )}
+
+            {data && section.name === "works" && (
+              <>
+                <div className="dev-toolbar">
+                  <div className="dev-filter" role="tablist" aria-label="作品の状態">
+                    {(
+                      [
+                        ["all", `すべて ${works.length}`],
+                        ["published", `販売中 ${totals.published}`],
+                        ["hidden", `非公開 ${totals.hidden}`],
+                        ["deleted", `削除済み ${totals.deleted}`]
+                      ] as const
+                    ).map(([id, label]) => (
+                      <button key={id} type="button" role="tab" aria-selected={filter === id} className={`cws-cat${filter === id ? " on" : ""}`} onClick={() => setFilter(id)}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {works.length === 0 ? (
+                  <p className="cws-empty">まだ作品がありません。「新しい作品」から最初の作品を公開しましょう。</p>
                 ) : (
-                  <ul className="store-list">
-                    {data.works.map((work) => {
-                      const status = STATUS_TEXT(work);
-                      return (
-                        <li key={work.id} className="store-card">
-                          <div className="store-card-top">
-                            {work.thumbUrl ? (
-                              <img className="studio-thumb" src={work.thumbUrl} alt="" width={56} height={56} />
-                            ) : (
-                              <span className="store-icon" aria-hidden="true">
-                                <Icon name="edit" size={20} />
+                  <div className="dev-table" role="table" aria-label="作品の一覧">
+                    <div className="dev-row dev-row-head" role="row">
+                      <span role="columnheader">作品</span>
+                      <span role="columnheader">価格</span>
+                      <span role="columnheader">評価</span>
+                      <span role="columnheader">販売</span>
+                      <span role="columnheader">状態</span>
+                      <span role="columnheader">操作</span>
+                    </div>
+                    {works
+                      .filter((w) => filter === "all" || w.status === filter)
+                      .map((work) => {
+                        const status = STATUS_TEXT(work);
+                        return (
+                          <div key={work.id} className="dev-row" role="row">
+                            <span className="dev-cell-work" role="cell">
+                              <WorkIcon item={{ thumbUrl: work.thumbUrl, kind: "extension", studioKind: work.kind }} size={40} />
+                              <span>
+                                <strong>{work.name}</strong>
+                                <small>
+                                  {KIND_LABEL[work.kind]} ・ 更新 {dateText(work.editedAt ?? work.createdAt)}
+                                </small>
                               </span>
-                            )}
-                            <div className="store-card-text">
-                              <strong>{work.name}</strong>
-                              <small>
-                                {KIND_LABEL[work.kind]} ・ {work.price.toLocaleString("ja-JP")} pt ・ 販売 {work.sales} 件
-                              </small>
-                              <small className={`studio-status is-${status.tone}`}>{status.text}</small>
-                            </div>
+                            </span>
+                            <span role="cell" className="dev-num">
+                              <span className="dev-label">価格</span>
+                              {yen(work.price)} pt
+                            </span>
+                            <span role="cell" className="dev-num">
+                              <span className="dev-label">評価</span>
+                              {work.rating.count > 0 ? (
+                                <>
+                                  {work.rating.avg.toFixed(1)} <small>({work.rating.count})</small>
+                                </>
+                              ) : (
+                                <small>なし</small>
+                              )}
+                            </span>
+                            <span role="cell" className="dev-num">
+                              <span className="dev-label">販売</span>
+                              {work.sales}
+                            </span>
+                            <span role="cell">
+                              <span className="dev-label">状態</span>
+                              <span className={`dev-status is-${status.tone}`}>{status.text}</span>
+                            </span>
+                            <span role="cell" className="dev-cell-actions">
+                              {work.status !== "deleted" && (
+                                <button type="button" className="cws-outline cws-small" onClick={() => navigate(`/studio/works/${work.id}/edit`)}>
+                                  編集
+                                </button>
+                              )}
+                              {work.status === "published" && (
+                                <button type="button" className="cws-outline cws-small" onClick={() => navigate(storeItemPath(`work:${work.id}`))}>
+                                  掲載ページ
+                                </button>
+                              )}
+                              {work.status !== "deleted" && (
+                                <button type="button" className="cws-text-btn danger" onClick={() => setToDelete(work)} disabled={busy}>
+                                  削除
+                                </button>
+                              )}
+                            </span>
                           </div>
-                          {work.status !== "deleted" && (
-                            <div className="studio-card-actions">
-                              <button type="button" className="btn-small danger" onClick={() => setToDelete(work)} disabled={busy}>
-                                削除する
-                              </button>
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
+                        );
+                      })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {data && section.name === "reviews" && (
+              <>
+                <section className="dev-panel">
+                  <div className="cws-summary">
+                    <div className="cws-summary-score">
+                      <strong>{creator && creator.rating.count > 0 ? creator.rating.avg.toFixed(1) : "—"}</strong>
+                      <Stars value={creator?.rating.avg ?? 0} size={14} />
+                      <span>{creator?.rating.count ?? 0} 件のレビュー（作者の全作品）</span>
+                    </div>
+                    <ol className="cws-bars">
+                      {[5, 4, 3, 2, 1].map((n) => {
+                        const count = creator?.rating.distribution[n - 1] ?? 0;
+                        const max = Math.max(1, ...(creator?.rating.distribution ?? [1]));
+                        return (
+                          <li key={n}>
+                            <span>{n}</span>
+                            <span className="cws-bar">
+                              <span style={{ width: `${(count / max) * 100}%` }} />
+                            </span>
+                            <span className="cws-bar-count">{count}</span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                </section>
+                {!creator || creator.reviews.length === 0 ? (
+                  <p className="cws-empty">まだレビューはありません。作品が買われて、レビューが付くとここに並びます。</p>
+                ) : (
+                  <ul className="cws-reviews">
+                    {creator.reviews.map((r, i) => (
+                      <li key={`${r.workId}-${i}`} className="cws-review">
+                        <div className="cws-review-head">
+                          <span className="cws-avatar">{r.reviewerName.slice(0, 1) || "?"}</span>
+                          <div className="cws-review-who">
+                            <strong>{r.reviewerName || "ユーザー"}</strong>
+                            <small>
+                              {dateText(r.updatedAt)} ・ {r.workName}
+                            </small>
+                          </div>
+                        </div>
+                        <Stars value={r.rating} size={12} />
+                        {r.comment && <p className="cws-review-text">{r.comment}</p>}
+                      </li>
+                    ))}
                   </ul>
                 )}
               </>
             )}
 
-            {data && view === "create" && (
-              <CreateForm
+            {data && section.name === "payments" && (
+              <>
+                <div className="dev-kpis dev-kpis-2">
+                  <div className="dev-kpi">
+                    <span>受け取った売上</span>
+                    <strong>{yen(data.earned)} pt</strong>
+                  </div>
+                  <div className="dev-kpi">
+                    <span>未払い</span>
+                    <strong>{yen(data.pending)} pt</strong>
+                  </div>
+                </div>
+                <p className="dev-muted">購入のたびに、作品の価格の全額が支払いとして記録されます（手数料はありません）。</p>
+                {!payouts || payouts.length === 0 ? (
+                  <p className="cws-empty">まだ支払いはありません。</p>
+                ) : (
+                  <div className="dev-table" role="table" aria-label="支払いの一覧">
+                    <div className="dev-row dev-row-head dev-row-pay" role="row">
+                      <span role="columnheader">日付</span>
+                      <span role="columnheader">作品</span>
+                      <span role="columnheader">金額</span>
+                      <span role="columnheader">状態</span>
+                    </div>
+                    {payouts.map((p) => (
+                      <div key={p.id} className="dev-row dev-row-pay" role="row">
+                        <span role="cell">
+                          <span className="dev-label">日付</span>
+                          {dateText(p.createdAt)}
+                        </span>
+                        <span role="cell">
+                          <span className="dev-label">作品</span>
+                          {p.workName}
+                        </span>
+                        <span role="cell" className="dev-num">
+                          <span className="dev-label">金額</span>
+                          {yen(p.amount)} pt
+                        </span>
+                        <span role="cell">
+                          <span className="dev-label">状態</span>
+                          <span className={`dev-status is-${PAYOUT_TEXT[p.status].tone}`}>{PAYOUT_TEXT[p.status].text}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {section.name === "docs" && <StudioDocs />}
+
+            {data && section.name === "new" && (
+              <StudioEditor
+                mode="create"
+                initial={null}
+                onCancel={() => navigate("/studio/works")}
                 onDone={(text) => {
                   setNotice({ ok: true, text });
-                  setView("list");
+                  navigate("/studio/works", { replace: true });
                   void load();
                 }}
-                onCancel={() => setView("list")}
               />
             )}
+
+            {data &&
+              section.name === "edit" &&
+              (editing ? (
+                <StudioEditor
+                  key={editing.id}
+                  mode="edit"
+                  initial={editing}
+                  onCancel={() => navigate("/studio/works")}
+                  onDone={(text) => {
+                    setNotice({ ok: true, text });
+                    navigate("/studio/works", { replace: true });
+                    void load();
+                  }}
+                />
+              ) : (
+                <p className="cws-empty">この作品は見つかりませんでした。</p>
+              ))}
+          </main>
         </div>
       </Page>
 
@@ -193,199 +515,77 @@ export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: str
   );
 }
 
-// 作品の公開フォーム（種類ごとの入力欄）。送る前に基本の形だけ見て、細かい判定は作品を公開するときにサーバーが行う
-function CreateForm({ onDone, onCancel }: { onDone: (text: string) => void; onCancel: () => void }) {
-  const [kind, setKind] = useState<Kind>("stamp_pack");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("100");
-  const [thumb, setThumb] = useState<File | null>(null);
-  const [stamps, setStamps] = useState<File[]>([]);
-  const [colors, setColors] = useState({ mine: "#ffd6e5", bg: "#fff7fa", accent: "#e0789f" });
-  const [questions, setQuestions] = useState<Question[]>(() => Array.from({ length: 5 }, blankQuestion));
-  const [style, setStyle] = useState<{ tone: string; length: string; emoji: boolean }>({ tone: "ふつう", length: "ふつう", emoji: true });
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const thumbUrl = useMemo(() => (thumb ? URL.createObjectURL(thumb) : null), [thumb]);
-  useEffect(() => () => {
-    if (thumbUrl) URL.revokeObjectURL(thumbUrl);
-  }, [thumbUrl]);
-
-  const submit = async () => {
-    setError("");
-    if (!name.trim()) return setError("作品の名前を入力してください。");
-    if (kind !== "stamp_pack" && !thumb) return setError("サムネイル画像を選んでください。");
-    if (kind === "stamp_pack" && stamps.length === 0) return setError("スタンプ画像を1枚以上選んでください。");
-
-    let payload: unknown = null;
-    if (kind === "theme") payload = colors;
-    if (kind === "ai_style") payload = style;
-    if (kind === "quiz") {
-      payload = { questions };
+// 開発者ドキュメント（作品の種類・公開の自動チェック・価格と支払い・編集・レビュー・通報）
+function StudioDocs() {
+  const items: { title: string; body: string[] }[] = [
+    {
+      title: "はじめに",
+      body: [
+        "作品の公開には、仙人アカウントとの連携が必要です。連携すると、作者として作品を公開・編集・削除できます。審査はなく、公開のときに自動チェックを通ったものだけが公開されます。",
+        "1人が1日に公開できる作品は20件までです。"
+      ]
+    },
+    {
+      title: "作品の種類",
+      body: [
+        "スタンプパック：PNG・GIF・WebP の画像を 1〜24 枚。縦横とも 16〜512px、1 枚 1MB まで。サムネイルを省略すると 1 枚目を使います。",
+        "外観：自分の吹き出し・チャットの背景・ボタンの 3 色（#RRGGBB）。買った人は自分の画面だけで使えます。",
+        "クイズ：4 択の問題を 5〜50 問。対戦では 5 問ずつランダムに出題され、選択肢の順番もばらされます。",
+        "応答スタイル：senninai の口調・長さ・絵文字の使い方を選びます。自由文の指示は入れられません。"
+      ]
+    },
+    {
+      title: "公開の自動チェック",
+      body: [
+        "URL・メールアドレス・電話番号らしいもの、禁止語を含む名前・説明・問題は公開できません。画像は拡張子ではなく中身で形式と大きさを判定します。",
+        "作品のエディタの「公開前チェック」で、サーバーと同じ条件を先に確かめられます。"
+      ]
+    },
+    {
+      title: "価格と支払い",
+      body: [
+        "価格は 10〜1000 pt の整数です。手数料はなく、購入額の全額が作者の仙人アカウントに入ります。",
+        "購入のたびに支払いを 1 件記録します。作者が未連携のあいだは保留になり、連携したときに自動で払われます。失敗したときは運営が再送できます。"
+      ]
+    },
+    {
+      title: "編集のルール",
+      body: [
+        "名前・説明・価格・サムネイルは、いつでも変えられます。外観の色・クイズの問題・応答スタイルも変えられます。変更は、買った人の画面にも反映されます。",
+        "スタンプ画像と作品の種類は、買った人の手元に残るため変えられません。作り直して公開してください。",
+        "価格を変えても、すでに買った人の支払いは変わりません。"
+      ]
+    },
+    {
+      title: "レビューと評価",
+      body: [
+        "レビューは、その作品を買った人だけが書けます（作者本人は不可）。星は 1〜5 で、コメントは 1000 文字まで。1 人 1 作品につき 1 件で、あとから直したり消したりできます。",
+        "作者の評価は、作者の全作品のレビューの平均です。評価は作品の一覧と掲載ページ、作者のページに表示されます。"
+      ]
+    },
+    {
+      title: "通報と非公開",
+      body: [
+        "買った人や見た人は、作品を通報できます（1 人 1 回）。通報が 5 件たまると、自動で非公開になります。",
+        "非公開になっても、すでに買った人は引き続き使えます。運営は作品の公開・非公開・削除と、作者の停止を管理します。"
+      ]
+    },
+    {
+      title: "削除",
+      body: ["作者は作品を削除すると、販売をやめられます。削除しても、すでに買った人は引き続き使えます。削除は取り消せません。"]
     }
-
-    const form = new FormData();
-    form.append("kind", kind);
-    form.append("name", name.trim());
-    form.append("description", description.trim());
-    form.append("price", price);
-    if (payload !== null) form.append("data", JSON.stringify(payload));
-    if (thumb) form.append("thumb", thumb);
-    for (const file of stamps) form.append("images", file);
-
-    setSaving(true);
-    try {
-      await api<{ ok: boolean; id: string }>("/api/studio/works", { method: "POST", body: form });
-      onDone(`「${name.trim()}」を公開しました。`);
-    } catch (e) {
-      setError(errorText(e, "公開できませんでした。"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateQuestion = (index: number, next: Partial<Question>) =>
-    setQuestions((list) => list.map((item, i) => (i === index ? { ...item, ...next } : item)));
-
+  ];
   return (
-    <div className="studio-form">
-      <p className="studio-hint">公開は審査なしです。禁止事項（URL・連絡先・不適切な言葉など）は自動で確かめられ、引っかかると公開できません。</p>
-
-      <div className="store-tabs" role="tablist" aria-label="作品の種類">
-        {KINDS.map((k) => (
-          <button key={k.kind} type="button" role="tab" aria-selected={kind === k.kind} className={`store-tab${kind === k.kind ? " on" : ""}`} onClick={() => setKind(k.kind)}>
-            {k.label}
-          </button>
-        ))}
-      </div>
-      <p className="store-tab-text">{KINDS.find((k) => k.kind === kind)?.text}</p>
-
-      <label className="studio-field">
-        <span>作品の名前（40文字まで）</span>
-        <input className="auth-input" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
-      </label>
-      <label className="studio-field">
-        <span>説明（300文字まで）</span>
-        <textarea className="auth-input" rows={3} maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} />
-      </label>
-      <label className="studio-field">
-        <span>価格（10〜1000 pt）</span>
-        <input className="auth-input" type="number" inputMode="numeric" min={10} max={1000} step={1} value={price} onChange={(e) => setPrice(e.target.value)} />
-      </label>
-
-      <label className="studio-field">
-        <span>サムネイル{kind === "stamp_pack" ? "（省略すると1枚目を使います）" : "（必須）"}</span>
-        <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(e) => setThumb(e.target.files?.[0] ?? null)} />
-        {thumbUrl && <img className="studio-thumb-preview" src={thumbUrl} alt="サムネイルの見本" />}
-      </label>
-
-      {kind === "stamp_pack" && (
-        <label className="studio-field">
-          <span>スタンプ（{stamps.length}/24枚）</span>
-          <input
-            type="file"
-            multiple
-            accept="image/png,image/gif,image/webp"
-            onChange={(e) => setStamps(Array.from(e.target.files ?? []).slice(0, 24))}
-          />
-        </label>
-      )}
-
-      {kind === "theme" && (
-        <div className="studio-colors">
-          {(
-            [
-              ["mine", "自分の吹き出し"],
-              ["bg", "チャットの背景"],
-              ["accent", "ボタンの色"]
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="studio-color">
-              <span>{label}</span>
-              <input type="color" value={colors[key]} onChange={(e) => setColors((c) => ({ ...c, [key]: e.target.value }))} />
-            </label>
+    <div className="dev-docs">
+      <p className="dev-muted">senninstudio の仕組みと、作者が守ること・できることをまとめています。</p>
+      {items.map((item) => (
+        <section key={item.title} className="dev-doc">
+          <h3>{item.title}</h3>
+          {item.body.map((p, i) => (
+            <p key={i}>{p}</p>
           ))}
-          <div className="studio-color-preview" style={{ background: colors.bg }}>
-            <span className="studio-bubble" style={{ background: colors.mine }}>
-              こんにちは
-            </span>
-            <span className="studio-accent" style={{ background: colors.accent }} />
-          </div>
-        </div>
-      )}
-
-      {kind === "quiz" && (
-        <div className="studio-quiz">
-          {questions.map((item, index) => (
-            <fieldset key={index} className="studio-question">
-              <legend>{index + 1}問目</legend>
-              <input className="auth-input" placeholder="問題文（100文字まで）" maxLength={100} value={item.q} onChange={(e) => updateQuestion(index, { q: e.target.value })} />
-              {item.options.map((option, o) => (
-                <label key={o} className="studio-option">
-                  <input type="radio" name={`answer-${index}`} checked={item.answer === o} onChange={() => updateQuestion(index, { answer: o })} />
-                  <input
-                    className="auth-input"
-                    placeholder={`選択肢 ${o + 1}（30文字まで）`}
-                    maxLength={30}
-                    value={option}
-                    onChange={(e) => {
-                      const next = [...item.options];
-                      next[o] = e.target.value;
-                      updateQuestion(index, { options: next });
-                    }}
-                  />
-                </label>
-              ))}
-              {questions.length > 5 && (
-                <button type="button" className="btn-small danger" onClick={() => setQuestions((list) => list.filter((_, i) => i !== index))}>
-                  この問題を消す
-                </button>
-              )}
-            </fieldset>
-          ))}
-          <button type="button" className="btn-secondary" disabled={questions.length >= 50} onClick={() => setQuestions((list) => [...list, blankQuestion()])}>
-            <Icon name="plus" size={16} /> 問題を追加（{questions.length}/50）
-          </button>
-          <p className="studio-hint">○印で正解を選んでください。4つの選択肢は重ならないようにしてください。</p>
-        </div>
-      )}
-
-      {kind === "ai_style" && (
-        <div className="studio-style">
-          <label className="studio-field">
-            <span>口調</span>
-            <select className="auth-input" value={style.tone} onChange={(e) => setStyle((s) => ({ ...s, tone: e.target.value }))}>
-              {["やさしい", "ていねい", "ふつう", "カジュアル"].map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </label>
-          <label className="studio-field">
-            <span>長さ</span>
-            <select className="auth-input" value={style.length} onChange={(e) => setStyle((s) => ({ ...s, length: e.target.value }))}>
-              {["短め", "ふつう", "詳しめ"].map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </label>
-          <label className="studio-check">
-            <input type="checkbox" checked={style.emoji} onChange={(e) => setStyle((s) => ({ ...s, emoji: e.target.checked }))} />
-            <span>絵文字を使う</span>
-          </label>
-          <p className="studio-hint">自由な文章の指示は入れられません。選んだ項目だけが、senninai への指示になります。</p>
-        </div>
-      )}
-
-      {error && <p className="store-error">{error}</p>}
-      <div className="studio-form-actions">
-        <button type="button" className="btn-secondary" onClick={onCancel} disabled={saving}>
-          やめる
-        </button>
-        <button type="button" className="btn-primary" onClick={() => void submit()} disabled={saving}>
-          {saving ? "公開しています…" : "公開する"}
-        </button>
-      </div>
+        </section>
+      ))}
     </div>
   );
 }

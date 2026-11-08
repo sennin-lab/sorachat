@@ -70,8 +70,9 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const chatId = (matchPath("/dm/:id", path) ?? matchPath("/groupchat/:id", path))?.params.id ?? null;
   const viewUser = matchPath("/profile/:id", path)?.params.id ?? null;
   // 仙人ストア（/store）と senninstudio（/studio）は、専用のページとして開く
-  const onStorePage = Boolean(matchPath("/store", path));
-  const onStudioPage = Boolean(matchPath("/studio", path));
+  // （/store/item/:id・/store/author/:id、/studio/works/:id/edit のような下の画面も、同じ専用ページで開く）
+  const onStorePage = path === "/store" || path.startsWith("/store/");
+  const onStudioPage = path === "/studio" || path.startsWith("/studio/");
 
   const [selectedId, setSelectedId] = useState<string | null>(chatId);
   const [tab, setTab] = useState<Tab>(() => tabOfPath(path) ?? "talk");
