@@ -12,6 +12,7 @@ import { OpenChatSheet } from "./OpenChatSheet";
 import { StorePage } from "./StorePage";
 import { StudioPage } from "./StudioPage";
 import { TubePage } from "./TubePage";
+import { ExtensionsPage } from "./ExtensionsPage";
 import { ChatBootScreen } from "./Loading";
 // SenninPay は使うときだけ読み込む（通常の起動を軽く保つため）
 const SenninPayPage = lazy(() => import("./SenninPayPage").then((m) => ({ default: m.SenninPayPage })));
@@ -51,7 +52,7 @@ const shouldAskNotify = (me: Me) => {
 // URL とタブの対応。プロフィールなどの重ねて表示する画面では null（直前のタブを保つ）
 const tabOfPath = (path: string): Tab | null => {
   if (path.startsWith("/friends")) return "friends";
-  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay") || path.startsWith("/tube")) return "more";
+  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay") || path.startsWith("/tube") || path.startsWith("/extensions")) return "more";
   if (path === "/" || path.startsWith("/home") || path.startsWith("/dm/") || path.startsWith("/groupchat/")) return "talk";
   return null;
 };
@@ -85,6 +86,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const onGamesPage = path === "/senningames" || path.startsWith("/senningames/");
   // 仙人Tube Plus（/tube）も専用のページとして開く
   const onTubePage = path === "/tube" || path.startsWith("/tube/");
+  // 拡張機能（その他 →「拡張機能」）も専用のページとして開く（/extensions）
+  const onExtensionsPage = path === "/extensions" || path.startsWith("/extensions/");
 
   const [selectedId, setSelectedId] = useState<string | null>(chatId);
   const [tab, setTab] = useState<Tab>(() => tabOfPath(path) ?? "talk");
@@ -386,6 +389,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => navigate("/extensions")}>
+                    <span className="option-icon">
+                      <Icon name="code" size={20} />
+                    </span>
+                    拡張機能
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => navigate("/pay")}>
                     <span className="option-icon">
                       <Icon name="wallet" size={20} />
@@ -536,6 +548,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
         </Suspense>
       )}
       {onTubePage && <TubePage onBack={closePage} />}
+      {onExtensionsPage && <ExtensionsPage me={me} onBack={closePage} onMeChange={onMeChange} />}
       {showOpenChats && (
         <OpenChatSheet
           onClose={() => setShowOpenChats(false)}
