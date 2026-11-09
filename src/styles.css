@@ -2884,3 +2884,14 @@ textarea.dev-input { resize: vertical; }
 .admin-stamp img { width: 48px; height: 48px; object-fit: contain; }
 .admin-stamp.is-on { border-color: var(--g-ok, #06a84a); color: var(--g-text); }
 .admin-stamp-grid .admin-sub { grid-column: 1 / -1; }
+
+/* ---- 読み込み表示（チャットが読み込まれるまで全画面に出す） ---- */
+.chat-boot { position: fixed; inset: 0; z-index: 1000; display: grid; place-content: center; justify-items: center; gap: 22px; background: var(--bg); color: var(--muted); animation: fade-in 0.3s ease both; }
+.chat-boot.leaving { animation: fade-out 0.35s ease both; pointer-events: none; }
+.chat-boot-mark { position: relative; width: 96px; height: 96px; display: grid; place-items: center; }
+.chat-boot-ring { position: absolute; inset: 0; border-radius: 50%; border: 3px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent); animation: auth-spin 0.9s linear infinite; }
+.chat-boot-logo { font-size: 14px; font-weight: 700; letter-spacing: 0.04em; color: var(--text); animation: intro-float 2.4s ease-in-out infinite; }
+
+/* ---- 仙人Tube Plus（その他から開く。仙人Tubeの画面をそのまま表示） ---- */
+.tube-frame { display: block; width: 100%; height: calc(100dvh - 72px); border: 0; background: var(--bg); }
+.tube-note { padding: 20px; color: var(--muted); }

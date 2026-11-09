@@ -11,6 +11,8 @@ import { NotifyPrompt } from "./NotifyPrompt";
 import { OpenChatSheet } from "./OpenChatSheet";
 import { StorePage } from "./StorePage";
 import { StudioPage } from "./StudioPage";
+import { TubePage } from "./TubePage";
+import { ChatBootScreen } from "./Loading";
 // SenninPay は使うときだけ読み込む（通常の起動を軽く保つため）
 const SenninPayPage = lazy(() => import("./SenninPayPage").then((m) => ({ default: m.SenninPayPage })));
 // senningames（1人で遊ぶゲーム）も、開くときだけ読み込む
@@ -49,7 +51,7 @@ const shouldAskNotify = (me: Me) => {
 // URL とタブの対応。プロフィールなどの重ねて表示する画面では null（直前のタブを保つ）
 const tabOfPath = (path: string): Tab | null => {
   if (path.startsWith("/friends")) return "friends";
-  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay")) return "more";
+  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay") || path.startsWith("/tube")) return "more";
   if (path === "/" || path.startsWith("/home") || path.startsWith("/dm/") || path.startsWith("/groupchat/")) return "talk";
   return null;
 };
@@ -81,6 +83,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const onPayPage = path === "/pay" || path.startsWith("/pay/");
   // senningames（/senningames）も専用のページとして開く
   const onGamesPage = path === "/senningames" || path.startsWith("/senningames/");
+  // 仙人Tube Plus（/tube）も専用のページとして開く
+  const onTubePage = path === "/tube" || path.startsWith("/tube/");
 
   const [selectedId, setSelectedId] = useState<string | null>(chatId);
   const [tab, setTab] = useState<Tab>(() => tabOfPath(path) ?? "talk");
@@ -99,6 +103,21 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     localStorage.getItem("sorachat-theme") === "dark" ? "dark" : "light"
   );
   const timer = useRef(0);
+  // チャットの画面が読み込み終わるまで、読み込み表示を出す（時間がかかりすぎたら、そのまま開く）
+  const [chatReady, setChatReady] = useState(false);
+  const [bootGone, setBootGone] = useState(false);
+  useEffect(() => {
+    if (listLoaded) setChatReady(true);
+  }, [listLoaded]);
+  useEffect(() => {
+    const limit = window.setTimeout(() => setChatReady(true), 8000);
+    return () => window.clearTimeout(limit);
+  }, []);
+  useEffect(() => {
+    if (!chatReady) return;
+    const gone = window.setTimeout(() => setBootGone(true), 350);
+    return () => window.clearTimeout(gone);
+  }, [chatReady]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -291,6 +310,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
 
   return (
     <div className={`app ${selectedId ? "has-chat" : ""}`}>
+      {!bootGone && <ChatBootScreen leaving={chatReady} />}
       <aside className="sidebar">
         <div className="sidebar-body" key={tab}>
           {tab === "talk" && (
@@ -380,6 +400,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                       <Icon name="game" size={20} />
                     </span>
                     senningames
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
+                  <button onClick={() => navigate("/tube")}>
+                    <span className="option-icon">
+                      <Icon name="play" size={20} />
+                    </span>
+                    仙人Tube Plus
                     <Icon name="chevron" size={18} className="chev" />
                   </button>
                 </li>
@@ -506,6 +535,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           <SenningamesPage flash={storeFlash} onBack={closePage} />
         </Suspense>
       )}
+      {onTubePage && <TubePage onBack={closePage} />}
       {showOpenChats && (
         <OpenChatSheet
           onClose={() => setShowOpenChats(false)}

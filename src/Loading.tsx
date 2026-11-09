@@ -23,3 +23,16 @@ export function ThreadSkeleton() {
     </div>
   );
 }
+
+// チャットの画面が読み込み終わるまで、全画面に出す表示。リングが回り、ロゴが浮き、点が順に跳ねる
+export function ChatBootScreen({ leaving = false }: { leaving?: boolean }) {
+  return (
+    <div className={`chat-boot${leaving ? " leaving" : ""}`} role="status" aria-label="読み込み中">
+      <div className="chat-boot-mark">
+        <span className="chat-boot-ring" />
+        <span className="chat-boot-logo">SoraChat</span>
+      </div>
+      <Dots />
+    </div>
+  );
+}

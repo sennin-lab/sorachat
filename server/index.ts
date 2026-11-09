@@ -29,6 +29,7 @@ import { adminPay } from "./adminPay.js";
 import { studio } from "./studio.js";
 import { studioAdmin } from "./studioAdmin.js";
 import { studioReviews } from "./studioReviews.js";
+import tubeRouter from "./tube/router.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -51,6 +52,9 @@ app.get("/api/status", async (_req, res) => {
 // メンテナンスモードは管理者パネルから即時切り替え可能。
 // /api/admin と /admin はメンテナンス中も利用できる。
 app.use(maintenanceGate);
+
+// 仙人Tube Plus（/tube の中で動く。SoraChat と同じ場所から開く）
+app.use("/tube", tubeRouter);
 
 app.use("/api", accounts);
 app.use("/api", dm);

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "./api";
 import { AuthScreen } from "./AuthScreen";
 import { BannedScreen } from "./Banned";
+import { ChatBootScreen } from "./Loading";
 import { clearCache, loadMeDb, saveMeDb } from "./cache";
 import { GroupCallHost } from "./GroupCallScreen";
 import { Home } from "./Home";
@@ -70,7 +71,7 @@ export default function App() {
   if (maintenance) return <MaintenanceScreen message={maintenance} />;
   if (ban) return <BannedScreen ban={ban} onRecheck={loadMe} />;
   if (introOpen) return <Intro onDone={() => setIntroOpen(false)} />;
-  if (me === undefined) return <div className="boot">読み込み中…</div>;
+  if (me === undefined) return <ChatBootScreen />;
   if (!me)
     return (
       <AuthScreen
