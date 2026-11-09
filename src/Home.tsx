@@ -482,7 +482,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       {onStorePage && <StorePage me={me} flash={storeFlash} onBack={closePage} onMeChange={onMeChange} />}
       {onPayPage && (
         <Suspense fallback={null}>
-          <SenninPayPage flash={storeFlash} onBack={closePage} />
+          <SenninPayPage me={me} flash={storeFlash} onBack={closePage} />
         </Suspense>
       )}
       {showOpenChats && (

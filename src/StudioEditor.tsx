@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { ExtensionPreview } from "./ExtensionRunner";
 import { Icon } from "./Icon";
 import { errorText, KIND_LABEL, yen } from "./storeUi";
 import type { StudioWorkView, WorkKind } from "./types";
@@ -11,8 +12,22 @@ const KINDS: { kind: Kind; label: string; text: string }[] = [
   { kind: "stamp_pack", label: "スタンプパック", text: "PNG・GIF・WebP の画像を 1〜24 枚。縦横 16〜512px、1 枚 1MB まで" },
   { kind: "theme", label: "外観", text: "吹き出し・背景・ボタンの 3 色を決めます（#RRGGBB）" },
   { kind: "quiz", label: "クイズ", text: "4 択の問題を 5〜50 問。対戦で 5 問ずつ出題されます" },
-  { kind: "ai_style", label: "応答スタイル", text: "senninai の口調・長さ・絵文字の使い方を選びます" }
+  { kind: "ai_style", label: "応答スタイル", text: "senninai の口調・長さ・絵文字の使い方を選びます" },
+  { kind: "extension", label: "拡張機能", text: "HTML・CSS・JavaScript で作るミニアプリ。隔離された枠の中で動きます" }
 ];
+
+// 拡張機能の大きさの上限（サーバーと同じ）
+const EXT_LIMITS = { html: 60_000, css: 60_000, js: 150_000 };
+const EXT_EXTERNAL = /(https?:|wss?:)\/\/|\bwww\./i;
+const EXT_BLOCKED_JS = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts)\b|\bnavigator\s*\.\s*sendBeacon\b|\bimport\s*\(|\b(window\s*\.\s*)?(top|parent|opener)\s*\./;
+
+// はじめて作るときの見本（カウンター）
+const EXT_STARTER = {
+  html: '<main class="app">\n  <h1>カウンター</h1>\n  <p id="count">0</p>\n  <button id="up">+1</button>\n  <button id="reset" class="sub">リセット</button>\n</main>',
+  css: '.app { max-width: 360px; margin: 0 auto; padding: 32px 16px; text-align: center; }\n#count { font-size: 64px; margin: 12px 0; }\nbutton { padding: 10px 20px; border: 0; border-radius: 999px; background: #79b9ef; color: #fff; font-size: 16px; }\nbutton.sub { background: #e4e7ec; color: #111; }',
+  js: 'let n = 0;\nconst view = document.getElementById("count");\ndocument.getElementById("up").onclick = () => { n += 1; view.textContent = n; };\ndocument.getElementById("reset").onclick = () => { n = 0; view.textContent = n; };'
+};
+type ExtTab = "html" | "css" | "js";
 
 const TONES = ["やさしい", "ていねい", "ふつう", "カジュアル"];
 const LENGTHS = ["短め", "ふつう", "詳しめ"];
@@ -59,6 +74,12 @@ export function StudioEditor({
     length: typeof payload.length === "string" ? payload.length : "ふつう",
     emoji: typeof payload.emoji === "boolean" ? payload.emoji : true
   });
+  const [code, setCode] = useState({
+    html: typeof payload.html === "string" ? payload.html : EXT_STARTER.html,
+    css: typeof payload.css === "string" ? payload.css : EXT_STARTER.css,
+    js: typeof payload.js === "string" ? payload.js : EXT_STARTER.js
+  });
+  const [codeTab, setCodeTab] = useState<ExtTab>("html");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -99,8 +120,16 @@ export function StudioEditor({
         ok: questions.every((q) => q.q.trim() && q.options.every((o) => o.trim()) && new Set(q.options.map((o) => o.trim())).size === 4)
       });
     }
+    if (kind === "extension") {
+      list.push({ label: "HTML か JavaScript を入力", ok: Boolean(code.html.trim() || code.js.trim()) });
+      list.push({
+        label: "大きさ（HTML・CSS 6万文字、JavaScript 15万文字まで）",
+        ok: code.html.length <= EXT_LIMITS.html && code.css.length <= EXT_LIMITS.css && code.js.length <= EXT_LIMITS.js
+      });
+      list.push({ label: "外部サイトのURL・通信（fetch など）を使わない", ok: ![code.html, code.css, code.js].some((c) => EXT_EXTERNAL.test(c)) && !EXT_BLOCKED_JS.test(code.js) });
+    }
     return list;
-  }, [allText, colors, currentThumb, description, editing, kind, nameTrim, priceNumber, questions, stamps.length]);
+  }, [allText, code, colors, currentThumb, description, editing, kind, nameTrim, priceNumber, questions, stamps.length]);
 
   const allOk = checks.every((c) => c.ok);
 
@@ -117,6 +146,7 @@ export function StudioEditor({
     if (kind === "theme") data = colors;
     if (kind === "ai_style") data = style;
     if (kind === "quiz") data = { questions };
+    if (kind === "extension") data = code;
 
     const form = new FormData();
     form.append("name", nameTrim);
@@ -254,6 +284,36 @@ export function StudioEditor({
                 <Icon name="plus" size={16} /> 問題を追加（{questions.length}/50）
               </button>
               <p className="dev-muted">○ で正解を選んでください。4 つの選択肢は重ならないようにしてください。</p>
+            </div>
+          )}
+
+          {kind === "extension" && (
+            <div className="dev-ext">
+              <div className="dev-ext-tabs" role="tablist" aria-label="コードの種類">
+                {(["html", "css", "js"] as const).map((t) => (
+                  <button key={t} type="button" role="tab" aria-selected={codeTab === t} className={codeTab === t ? "on" : ""} onClick={() => setCodeTab(t)}>
+                    {t === "js" ? "JavaScript" : t.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                className="dev-input dev-code"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                rows={14}
+                aria-label={`${codeTab} のコード`}
+                value={code[codeTab]}
+                onChange={(e) => setCode((c) => ({ ...c, [codeTab]: e.target.value }))}
+              />
+              <small className="dev-muted">
+                {code[codeTab].length.toLocaleString("ja-JP")} / {EXT_LIMITS[codeTab].toLocaleString("ja-JP")} 文字
+              </small>
+              <h4 className="dev-ext-h">試し表示（買った人と同じ、隔離された枠で動きます）</h4>
+              <ExtensionPreview html={code.html} css={code.css} js={code.js} />
+              <p className="dev-muted">
+                外のサイトへの通信や、ソラチャットの画面・アカウント情報へのアクセスはできません。画像は data: で埋め込めます。買った人はいつでも開いて使えます。
+              </p>
             </div>
           )}
 

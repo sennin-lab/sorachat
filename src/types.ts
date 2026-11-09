@@ -36,7 +36,7 @@ export type StoreItemView = {
   creatorId?: string;
   creatorName?: string | null;
   thumbUrl?: string | null;
-  studioKind?: "theme" | "stamp_pack" | "quiz" | "ai_style" | null;
+  studioKind?: "theme" | "stamp_pack" | "quiz" | "ai_style" | "extension" | null;
   // 作品のスタンプ（studio:画像ID の形）
   stamps?: string[];
   // 作品の評価（平均・件数）と販売数。固定の商品では null
@@ -54,7 +54,7 @@ export type StoreView = {
 // 星の集計（平均・件数・星1〜5ごとの件数。distribution[0] が星1）
 export type RatingSummary = { avg: number; count: number; distribution: number[] };
 
-export type WorkKind = "stamp_pack" | "theme" | "quiz" | "ai_style";
+export type WorkKind = "stamp_pack" | "theme" | "quiz" | "ai_style" | "extension";
 
 // レビュー（商品の詳細・作者のページ）
 export type ReviewView = {
@@ -83,6 +83,8 @@ export type StoreDetailView = {
   palette: { mine?: string; bg?: string; accent?: string } | null;
   aiStyle: { tone?: string; length?: string; emoji?: boolean } | null;
   quizCount: number | null;
+  // 拡張機能のコードの大きさ（コードそのものは買うまで見せない）
+  extensionBytes?: number | null;
   rating: RatingSummary;
   reviews: ReviewView[];
   myReview: ReviewView | null;

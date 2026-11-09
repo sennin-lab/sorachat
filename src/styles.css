@@ -2717,47 +2717,163 @@ textarea.dev-input { resize: vertical; }
   .dev-kpis { grid-template-columns: 1fr 1fr; }
 }
 
-/* ---- SenninPay（/pay）---- */
-.pay { padding: 4px 0 8px; }
-.pay-balance { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 16px 18px; border-radius: 14px; background: var(--g-soft); }
-.pay-balance-label { display: block; font-size: 12px; color: var(--g-sub); }
-.pay-balance-value { display: block; margin-top: 2px; font-size: 24px; font-weight: 700; color: var(--g-text); }
-.pay-refresh { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--g-line); background: transparent; font-size: 13px; color: var(--g-text); }
-.pay-hint { margin: 10px 0 0; font-size: 13px; line-height: 1.7; color: var(--g-sub); }
-.pay-link { display: inline-block; margin-left: 6px; color: var(--accent, #06c755); font-weight: 600; }
-.pay-link-button { display: block; text-align: center; text-decoration: none; }
-.pay-sub { font-size: 12px; color: var(--g-sub); }
-.pay-ng { color: var(--g-ng); }
-.pay-tabs { display: flex; gap: 6px; margin-top: 16px; padding: 4px; border-radius: 12px; background: var(--g-soft); }
-.pay-tabs button { flex: 1; padding: 8px 4px; border: 0; border-radius: 9px; background: transparent; font-size: 13px; color: var(--g-sub); }
-.pay-tabs button.on { background: var(--bg, #fff); color: var(--g-text); font-weight: 700; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
-.pay-card { margin-top: 14px; padding: 16px 18px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg, #fff); }
-.pay-h { margin: 0 0 4px; font-size: 16px; color: var(--g-text); }
-.pay-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
-.pay-choice { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
-.pay-choice input { margin: 0; }
-.pay-field { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 13px; color: var(--g-sub); }
-.pay-field input, .pay-field textarea { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg, #fff); font-size: 15px; color: var(--g-text); font-family: inherit; }
-.pay-submit { width: 100%; margin-top: 14px; padding: 12px; border-radius: 12px; font-size: 15px; }
-.pay-submit:disabled { opacity: 0.5; }
-.pay-actions { display: flex; gap: 10px; margin-top: 14px; }
-.pay-actions > * { flex: 1; }
-.pay-actions-end { justify-content: flex-end; }
-.pay-actions-end > * { flex: 0 0 auto; }
-.pay-scan { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
-.pay-merchant { margin-top: 12px; }
-.pay-merchant-name { font-size: 18px; color: var(--g-text); }
-.pay-qr { display: block; margin: 14px auto 0; width: 240px; max-width: 100%; height: auto; border-radius: 12px; background: #fff; }
-.pay-history { list-style: none; margin: 4px 0 0; padding: 0; }
-.pay-history-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.pay-history-label { font-size: 14px; color: var(--g-text); }
-.pay-history-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
-.pay-in { color: var(--g-ok, #06a84a); }
-.pay-out { color: var(--g-text); }
-.pay-status { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--g-soft); color: var(--g-sub); }
-.pay-status.is-ok { color: var(--g-ok, #06a84a); }
-.pay-status.is-ng { color: var(--g-ng); }
-.pay-status.is-wait { color: #b7791f; }
+/* ---- SenninPay（/pay）：PayPay のような構成。色はこれまでの配色（--accent など）のまま ---- */
+.pp { display: flex; flex-direction: column; gap: 16px; padding: 12px 16px 8px; color: var(--text); }
+.pp h2 { margin: 0; }
+.pp-center { text-align: center; }
+.pp-hint { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--muted); }
+.pp-sub { font-size: 12px; color: var(--muted); }
+.pp-ng { color: var(--danger); }
+.pp-error { margin: 0; font-size: 13px; line-height: 1.6; color: var(--danger); }
+.pp-notice { margin: 0; padding: 10px 14px; border-radius: 12px; font-size: 13px; background: var(--raised); }
+.pp-notice.is-ok { color: var(--accent-ink); }
+.pp-notice.is-ng { color: var(--danger); }
+
+/* 残高 */
+.pp-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 20px 20px;
+  border-radius: 22px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--badge) 100%);
+  box-shadow: 0 10px 24px rgba(77, 156, 219, 0.28);
+  overflow: hidden;
+}
+.pp-hero::after { content: ""; position: absolute; right: -40px; top: -50px; width: 160px; height: 160px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); pointer-events: none; }
+.pp-hero-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; position: relative; z-index: 1; }
+.pp-hero-label { font-size: 13px; font-weight: 600; opacity: 0.95; }
+.pp-hero-tools { display: flex; gap: 6px; }
+.pp-hero-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.24); color: #fff; font-size: 12px; font-weight: 600; }
+.pp-hero-btn:active { transform: scale(0.96); }
+.pp-hero-value { position: relative; z-index: 1; margin-top: 6px; font-size: 34px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.15; }
+.pp-hero-sub { position: relative; z-index: 1; font-size: 12px; opacity: 0.9; }
+.pp-hero-link { position: relative; z-index: 1; align-self: flex-start; margin-top: 10px; padding: 8px 14px; border-radius: 999px; background: #fff; color: var(--accent-ink, #347fb9); font-size: 13px; font-weight: 700; }
+:root[data-theme="dark"] .pp-hero-link { color: #347fb9; }
+
+/* 4つの大きなボタン */
+.pp-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pp-tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 4px 12px; border: 0; border-radius: 18px; background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--line); transition: transform 0.18s var(--ease-out), box-shadow 0.2s ease; }
+.pp-tile:active { transform: scale(0.96); }
+.pp-tile-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--raised); color: var(--accent-ink); flex: none; }
+.pp-tile-icon.is-small { width: 40px; height: 40px; }
+.pp-tile.is-primary .pp-tile-icon { background: var(--accent); color: #fff; box-shadow: 0 6px 14px rgba(77, 156, 219, 0.35); }
+.pp-tile-label { font-size: 12.5px; font-weight: 700; }
+
+/* セクション・取引 */
+.pp-section { display: flex; flex-direction: column; gap: 6px; padding: 14px 14px 6px; border-radius: 20px; background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.pp-section-head { display: flex; align-items: center; justify-content: space-between; }
+.pp-section-head h2 { font-size: 15px; }
+.pp-text-btn { border: 0; background: transparent; color: var(--accent-ink); font-size: 13px; font-weight: 700; padding: 6px 2px; }
+.pp-history { list-style: none; margin: 0; padding: 0; }
+.pp-history-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.pp-history-row:last-child { border-bottom: 0; }
+.pp-history-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; flex: none; background: var(--raised); color: var(--muted); }
+.pp-history-icon.is-in { background: var(--mine); color: var(--accent-ink); }
+.pp-history-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.pp-history-label { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-history-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.pp-history-side strong { font-size: 15px; }
+.pp-in { color: var(--accent-ink); }
+.pp-out { color: var(--text); }
+.pp-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--raised); color: var(--muted); }
+.pp-status.is-ng { color: var(--danger); }
+.pp-status.is-wait { color: #b7791f; }
+
+/* ボタン */
+.pp-primary, .pp-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 20px; border: 0; border-radius: 999px; font-size: 15px; font-weight: 700; text-decoration: none; transition: transform 0.18s var(--ease-out), opacity 0.2s ease; }
+.pp-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 18px rgba(77, 156, 219, 0.3); }
+.pp-secondary { background: var(--raised); color: var(--accent-ink); }
+.pp-primary:active, .pp-secondary:active { transform: scale(0.97); }
+.pp-primary:disabled, .pp-secondary:disabled { opacity: 0.45; box-shadow: none; }
+.pp-submit { width: 100%; }
+.pp-link-btn { width: 100%; }
+
+/* スキャン */
+.pp-scan, .pp-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 8px; }
+.pp-scan-lead { margin: 0; font-size: 14px; font-weight: 600; text-align: center; }
+.pp-scan-box { position: relative; width: min(340px, 100%); padding: 10px; border-radius: 28px; background: #10161d; }
+.pp-scan-box .scanner { width: 100%; border-radius: 20px; }
+.pp-scan-checking { position: absolute; inset: 10px; display: grid; place-items: center; margin: 0; border-radius: 20px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 14px; }
+.pp-empty { padding: 28px 0; text-align: center; }
+.pp-empty p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--muted); }
+
+/* 送る相手 */
+.pp-friends { display: flex; flex-direction: column; gap: 12px; }
+.pp-qr-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 0; border-radius: 18px; background: var(--panel); color: var(--text); text-align: left; box-shadow: 0 0 0 1px var(--line); }
+.pp-qr-row:disabled { opacity: 0.5; }
+.pp-qr-row-text { display: flex; flex-direction: column; flex: 1; gap: 2px; }
+.pp-qr-row-text small { color: var(--muted); font-size: 12px; }
+.pp-search { display: flex; align-items: center; gap: 8px; padding: 0 14px; height: 42px; border-radius: 999px; background: var(--raised); color: var(--muted); }
+.pp-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 15px; }
+.pp-list { list-style: none; margin: 0; padding: 0; border-radius: 18px; background: var(--panel); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
+.pp-list li + li { border-top: 1px solid var(--line); }
+.pp-person { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 14px; border: 0; background: transparent; color: var(--text); text-align: left; }
+.pp-person:disabled { opacity: 0.5; }
+.pp-person:active:not(:disabled) { background: var(--raised); }
+.pp-person-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 2px; }
+.pp-person-text strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-person-text small { color: var(--muted); font-size: 12px; }
+
+/* 金額の入力 */
+.pp-amount { display: flex; flex-direction: column; gap: 10px; }
+.pp-target { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.pp-target-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pp-target-text strong { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-target-text small { color: var(--muted); font-size: 12px; }
+.pp-shop-badge { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: #fff; flex: none; }
+.pp-shop-badge.is-large { width: 68px; height: 68px; margin: 0 auto; }
+.pp-amount-display { display: flex; align-items: baseline; justify-content: center; gap: 6px; padding: 10px 0 0; }
+.pp-amount-num { font-size: 54px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.pp-amount-unit { font-size: 20px; font-weight: 700; color: var(--muted); }
+.pp-amount-sub { margin: 0; text-align: center; font-size: 12.5px; color: var(--muted); }
+.pp-amount-sub.is-ng { color: var(--danger); font-weight: 700; }
+.pp-memo input { width: 100%; height: 44px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--raised); color: var(--text); font: inherit; font-size: 14px; outline: none; }
+.pp-memo input:focus { box-shadow: 0 0 0 2px var(--accent); }
+.pp-keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 2px; }
+.pp-key { height: 56px; border: 0; border-radius: 16px; background: var(--panel); color: var(--text); font-size: 22px; font-weight: 600; box-shadow: 0 0 0 1px var(--line); transition: transform 0.12s var(--ease-out), background-color 0.15s ease; user-select: none; -webkit-user-select: none; }
+.pp-key:active { transform: scale(0.95); background: var(--raised); }
+
+/* 受け取る・店舗 */
+.pp-receive { display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
+.pp-qr-card, .pp-card { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 18px; border-radius: 22px; background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.pp-card { align-items: stretch; }
+.pp-card.pp-center { align-items: center; }
+.pp-qr-who { display: flex; align-items: center; gap: 12px; align-self: flex-start; }
+.pp-qr-who div { display: flex; flex-direction: column; gap: 2px; }
+.pp-qr-who small { color: var(--muted); font-size: 12px; }
+.pp-qr { display: block; width: 240px; max-width: 100%; height: auto; padding: 10px; border-radius: 18px; background: #fff; box-shadow: 0 0 0 1px var(--line); }
+.pp-h { font-size: 17px; }
+.pp-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.pp-field input, .pp-field textarea { padding: 12px 14px; border: 0; border-radius: 14px; background: var(--raised); color: var(--text); font: inherit; font-size: 15px; outline: none; }
+.pp-field input:focus, .pp-field textarea:focus { box-shadow: 0 0 0 2px var(--accent); }
+.pp-chip { margin: 0; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--raised); }
+.pp-chip.is-ok { color: var(--accent-ink); }
+.pp-chip.is-ng { color: var(--danger); }
+
+/* 完了 */
+.pp-done { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 36px 8px 8px; text-align: center; }
+.pp-done h2 { font-size: 20px; }
+.pp-done-icon { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%; color: #fff; animation: pop 0.4s var(--ease-spring); }
+.pp-done-icon.is-ok { background: var(--accent); box-shadow: 0 10px 24px rgba(77, 156, 219, 0.35); }
+.pp-done-icon.is-ng { background: var(--danger); }
+.pp-done-amount { margin: 0; font-size: 36px; font-weight: 800; }
+.pp-done-actions { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 18px; }
+
+/* ---- 拡張機能（senninstudio）：隔離した枠で動かす ---- */
+.ext-run { z-index: 60; background: var(--bg); }
+.ext-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; display: block; }
+.ext-note { margin: 0; padding: 8px 14px calc(8px + env(safe-area-inset-bottom, 0px)); font-size: 11px; line-height: 1.5; color: var(--muted); background: var(--bg); border-top: 1px solid var(--line); }
+.ext-preview { border: 1px solid var(--g-line, var(--line)); border-radius: 8px; overflow: hidden; background: #fff; }
+.ext-frame-preview { height: 360px; flex: none; }
+.dev-ext { display: flex; flex-direction: column; gap: 8px; }
+.dev-ext-tabs { display: flex; gap: 6px; }
+.dev-ext-tabs button { padding: 6px 14px; border: 1px solid var(--g-line, var(--line)); border-radius: 999px; background: transparent; color: var(--g-sub, var(--muted)); font-size: 13px; font-weight: 600; }
+.dev-ext-tabs button.on { background: var(--g-blue-soft, var(--raised)); color: var(--g-blue, var(--accent-ink)); border-color: transparent; }
+.dev-code { min-height: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace; font-size: 13px; line-height: 1.55; white-space: pre; overflow: auto; tab-size: 2; resize: vertical; }
+.dev-ext-h { margin: 8px 0 0; font-size: 13px; color: var(--g-sub, var(--muted)); }
 
 /* ---- 管理者：ストアの商品・店舗 ---- */
 .admin-lineup { display: flex; flex-direction: column; gap: 12px; padding: 12px 0; }

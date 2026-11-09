@@ -1,23 +1,27 @@
 // senninstudio（作者向け）。作品の公開・削除・通報・画像の配信。
 // 作者ができるのは「公開」と「削除」だけ。停止・復帰・支払いの再送は管理者（studioAdmin.ts）が行う。
 import { randomUUID } from "node:crypto";
-import { Router } from "express";
+import { Router, urlencoded } from "express";
 import multer from "multer";
 import { currentUserId, requireAuth } from "./auth.js";
 import { readImage, saveSniffedImage } from "./media.js";
 import { sb } from "./supabase.js";
 import { isLinked } from "./senninPoints.js";
 import { retryCreatorPayouts } from "./studioPayout.js";
-import { displayImagesFor, loadWork, WORK_PREFIX } from "./studioData.js";
+import { canUseItem } from "./storeAccess.js";
+import { displayImagesFor, loadWork, toStudioItem, WORK_PREFIX } from "./studioData.js";
 import { ratingsByWork } from "./studioReviews.js";
 import {
+  buildExtensionDocument,
   checkAiStyle,
   checkBasics,
+  checkExtension,
   checkPrice,
   checkQuiz,
   checkStampImage,
   checkTheme,
   checkThumbImage,
+  EXTENSION_CSP,
   sniffImage,
   STAMP_MAX_COUNT,
   STUDIO_KINDS,
@@ -180,6 +184,10 @@ studio.post("/studio/works", upload, async (req, res) => {
     const checked = checkAiStyle(data);
     if (!checked.ok) return fail(400, checked.error);
     payload = { ...checked.payload };
+  } else if (kind === "extension") {
+    const checked = checkExtension(data);
+    if (!checked.ok) return fail(400, checked.error);
+    payload = { ...checked.payload };
   }
 
   const files = (req.files ?? {}) as unknown as Record<string, Express.Multer.File[] | undefined>;
@@ -316,6 +324,10 @@ studio.post("/studio/works/:id/edit", upload, async (req, res) => {
       const checked = checkAiStyle(data);
       if (!checked.ok) return fail(400, checked.error);
       payload = { ...checked.payload };
+    } else if (row.kind === "extension") {
+      const checked = checkExtension(data);
+      if (!checked.ok) return fail(400, checked.error);
+      payload = { ...checked.payload };
     }
   }
 
@@ -411,6 +423,55 @@ studio.post("/studio/works/:id/report", async (req, res) => {
       .eq("status", "published");
   }
   res.json({ ok: true });
+});
+
+// ---- 拡張機能の表示 ----
+// 拡張機能（作者が書いた HTML・CSS・JavaScript）は、ソラチャットの画面の中では動かさない。
+// ここから返す文書を iframe（sandbox）で開く。CSP の sandbox で別の出どころ扱いになり、
+// ソラチャットの画面・ログイン情報・通信には触れない。外への通信も CSP で止める。
+function sendExtensionDocument(res: import("express").Response, payload: unknown) {
+  res.setHeader("Content-Security-Policy", EXTENSION_CSP);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cache-Control", "no-store");
+  res.type("html").send(buildExtensionDocument((payload ?? {}) as Record<string, string>));
+}
+
+// 買った拡張機能（作者本人もテスト用に開ける）
+studio.get("/studio/extensions/:id/frame", async (req, res) => {
+  const me = currentUserId(res);
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).end();
+    return;
+  }
+  const work = await loadWork(id);
+  if (!work || work.kind !== "extension" || work.status === "removed") {
+    res.status(404).end();
+    return;
+  }
+  // 非公開・削除済みでも、買った人と作者は使える（ほかの作品と同じ扱い）
+  if (work.creator_id !== me && !(await canUseItem(me, toStudioItem(work)))) {
+    res.status(403).type("text/plain").send("この拡張機能はまだ購入していません。");
+    return;
+  }
+  sendExtensionDocument(res, work.payload);
+});
+
+// 公開前の試し表示。フォームの送信で、書いたコードをそのまま表示する（保存はしない）
+studio.post("/studio/extensions/preview", urlencoded({ extended: false, limit: "2mb" }), (req, res) => {
+  const me = currentUserId(res);
+  if (!allow(`ext-preview:${me}`, 60, 60_000)) {
+    res.status(429).type("text/plain").send("試し表示が多すぎます。少し待ってからお試しください。");
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const checked = checkExtension({ html: body.html, css: body.css, js: body.js });
+  if (!checked.ok) {
+    res.status(400).type("text/plain").send(checked.error);
+    return;
+  }
+  sendExtensionDocument(res, checked.payload);
 });
 
 // 作品の画像（サムネイル・スタンプ）。ログインしている人だけが見られる

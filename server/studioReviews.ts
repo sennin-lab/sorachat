@@ -201,6 +201,8 @@ studioReviews.get("/store/items/:id", requireAuth, async (req, res) => {
     // 配色・応答スタイルは見本として公開する。問題の中身（答え）は買うまで見せない（問題数だけ）
     palette: work.kind === "theme" ? (payload as Partial<ThemePayload>) : null,
     aiStyle: work.kind === "ai_style" ? (payload as Partial<AiStylePayload>) : null,
+    // 拡張機能のコードは買うまで見せない（大きさだけ）
+    extensionBytes: work.kind === "extension" ? JSON.stringify(payload).length : null,
     quizCount: work.kind === "quiz" ? ((payload as Partial<QuizPayload>).questions?.length ?? 0) : null,
     rating: toSummary(raw.get(id)),
     reviews,

@@ -91,7 +91,7 @@ export function WorkIcon({ item, size = 48 }: { item: Pick<StoreItemView, "thumb
     return <img className="cws-icon-img" src={item.thumbUrl} alt="" width={size} height={size} loading="lazy" style={{ width: size, height: size }} />;
   }
   const isTheme = item.kind === "theme";
-  const glyph = isTheme ? "" : item.kind === "stamp_pack" ? "🙂" : item.studioKind === "quiz" ? "?" : item.studioKind === "ai_style" ? "✎" : "◆";
+  const glyph = isTheme ? "" : item.kind === "stamp_pack" ? "🙂" : item.studioKind === "quiz" ? "?" : item.studioKind === "ai_style" ? "✎" : item.studioKind === "extension" ? "</>" : "◆";
   return (
     <span className={`cws-icon-fallback${isTheme ? " is-theme" : ""}`} style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }} aria-hidden="true">
       {glyph}

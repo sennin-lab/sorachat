@@ -36,7 +36,7 @@ const CATEGORIES: { id: string; label: string; match: (item: StoreItemView) => b
   { id: "stamp", label: "スタンプ", match: (i) => i.kind === "stamp_pack" },
   { id: "quiz", label: "クイズ", match: (i) => i.studioKind === "quiz" },
   { id: "style", label: "応答スタイル", match: (i) => i.studioKind === "ai_style" },
-  { id: "ext", label: "拡張機能", match: (i) => i.kind === "extension" && !i.studioKind }
+  { id: "ext", label: "拡張機能", match: (i) => i.kind === "extension" && i.studioKind !== "quiz" && i.studioKind !== "ai_style" }
 ];
 
 const SORTS = [

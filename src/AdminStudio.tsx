@@ -35,7 +35,7 @@ type WorkDetail = {
 type ReportRow = { id: string; name: string; kind: string; status: string; hiddenReason: string | null; creatorName: string; reportCount: number; latestAt: string };
 type PayoutRow = { id: string; creatorName: string; workName: string; amount: number; status: string; attempts: number; lastError: string | null; createdAt: string };
 
-const KIND: Record<string, string> = { stamp_pack: "スタンプ", theme: "外観", quiz: "クイズ", ai_style: "応答スタイル" };
+const KIND: Record<string, string> = { stamp_pack: "スタンプ", theme: "外観", quiz: "クイズ", ai_style: "応答スタイル", extension: "拡張機能" };
 const STATUS: Record<string, string> = { published: "販売中", hidden: "非公開", deleted: "作者が削除", removed: "運営が削除" };
 const REASON: Record<string, string> = { reports: "通報による自動非公開", admin: "運営が非公開", creator_suspended: "作者の停止" };
 const when = (iso: string) => new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });

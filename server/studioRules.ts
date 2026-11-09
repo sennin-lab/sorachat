@@ -1,7 +1,7 @@
 // senninstudio の自動チェック（審査なしで公開するための仕組み）。
 // DB や通信には触れない純粋な関数だけを置く（テストしやすいように）。
 
-export const STUDIO_KINDS = ["stamp_pack", "theme", "quiz", "ai_style"] as const;
+export const STUDIO_KINDS = ["stamp_pack", "theme", "quiz", "ai_style", "extension"] as const;
 export type StudioKind = (typeof STUDIO_KINDS)[number];
 
 export const PRICE_MIN = 10;
@@ -13,6 +13,9 @@ export const STAMP_MAX_SIDE = 512;
 export const STAMP_MIN_SIDE = 16;
 export const QUIZ_MIN_QUESTIONS = 5; // 対戦の5問に足りるように
 export const QUIZ_MAX_QUESTIONS = 50;
+export const EXT_HTML_MAX = 60_000; // 文字数
+export const EXT_CSS_MAX = 60_000;
+export const EXT_JS_MAX = 150_000;
 
 // 禁止語（最低限の例）。運営が増やしてください。ここに当たる文字列は公開できません。
 export const BLOCKED_WORDS = ["死ね", "殺してやる", "自殺しろ"];
@@ -169,4 +172,83 @@ export function checkBasics(name: unknown, description: unknown): string | null 
   if (typeof name !== "string" || !name.trim() || name.trim().length > 40) return "作品の名前は1〜40文字で入力してください。";
   if (typeof description !== "string" || description.length > 300) return "説明は300文字以内にしてください。";
   return checkText(`${name} ${description}`, "作品の名前と説明");
+}
+
+
+// ---------- 拡張機能（HTML・CSS・JavaScript） ----------
+// 拡張機能は、隔離した枠（sandbox・通信禁止の CSP つき）の中でだけ動く。本当の安全はその枠が守る。
+// ここの検査は、明らかに外へつなごうとするものを公開前に止めるための一次チェック。
+
+export type ExtensionPayload = { html: string; css: string; js: string };
+
+// 外部の読み込み・別ページの埋め込み・ページの書き換えにつながるタグ
+const EXT_BLOCKED_TAGS = /<\s*(iframe|frame|frameset|object|embed|base|meta|link|portal|applet)\b|<\s*script[^>]*\bsrc\s*=/i;
+// 外のサイトを指す書き方（http(s)・ //ホスト・www.）
+const EXT_EXTERNAL = /(https?:|wss?:)\/\/|(^|[\s"'(=])\/\/[a-z0-9-]+\.|\bwww\./i;
+// 通信・親ページへの手出し・動的な読み込み（枠が止めるが、先に分かるものは公開前に断る）
+const EXT_BLOCKED_JS =
+  /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|SharedWorker|ServiceWorker|RTCPeerConnection)\b|\bnavigator\s*\.\s*(sendBeacon|serviceWorker)\b|\bimport\s*\(|\b(window\s*\.\s*)?(top|parent|opener)\s*\./;
+
+export function checkExtension(value: unknown): { ok: true; payload: ExtensionPayload } | { ok: false; error: string } {
+  const v = value as Partial<ExtensionPayload> | null;
+  if (!v || typeof v !== "object") return { ok: false, error: "拡張機能のコードを入力してください。" };
+  const html = typeof v.html === "string" ? v.html : "";
+  const css = typeof v.css === "string" ? v.css : "";
+  const js = typeof v.js === "string" ? v.js : "";
+  if (!html.trim() && !js.trim()) return { ok: false, error: "HTML か JavaScript のどちらかは入力してください。" };
+  if (html.length > EXT_HTML_MAX) return { ok: false, error: `HTML は ${EXT_HTML_MAX.toLocaleString("ja-JP")} 文字までです。` };
+  if (css.length > EXT_CSS_MAX) return { ok: false, error: `CSS は ${EXT_CSS_MAX.toLocaleString("ja-JP")} 文字までです。` };
+  if (js.length > EXT_JS_MAX) return { ok: false, error: `JavaScript は ${EXT_JS_MAX.toLocaleString("ja-JP")} 文字までです。` };
+  if (EXT_BLOCKED_TAGS.test(html)) return { ok: false, error: "HTML に iframe・embed・meta・link・外部 script などは使えません。" };
+  for (const [label, code] of [["HTML", html], ["CSS", css], ["JavaScript", js]] as const) {
+    if (EXT_EXTERNAL.test(code)) return { ok: false, error: `${label}に外部サイトのURLは書けません。画像などは data: で埋め込んでください。` };
+  }
+  if (EXT_BLOCKED_JS.test(js)) return { ok: false, error: "JavaScript に通信（fetch など）や親ページへのアクセスは使えません。" };
+  if (/@import\b/i.test(css)) return { ok: false, error: "CSS の @import は使えません。" };
+  return { ok: true, payload: { html, css, js } };
+}
+
+// 隔離して表示するための HTML 文書を作る。配信するときは、必ず sandbox と下の CSP を付ける。
+export const EXTENSION_CSP = [
+  "sandbox allow-scripts",
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  "img-src data: blob:",
+  "media-src data: blob:",
+  "font-src data:",
+  "connect-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "frame-src 'none'",
+  "frame-ancestors 'self'"
+].join("; ");
+
+export function buildExtensionDocument(payload: Partial<ExtensionPayload>): string {
+  const html = payload.html ?? "";
+  const css = (payload.css ?? "").replace(/<\/style/gi, "<\\/style");
+  const js = (payload.js ?? "").replace(/<\/script/gi, "<\\/script");
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;padding:0;min-height:100%;font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;color:#111;background:#fff}*{box-sizing:border-box}</style>
+<style>${css}</style>
+</head>
+<body>
+${html}
+<script>
+window.addEventListener("error", function (event) {
+  var box = document.createElement("pre");
+  box.setAttribute("style", "color:#b00020;white-space:pre-wrap;padding:12px;margin:0");
+  box.textContent = String((event && event.message) || "エラーが起きました");
+  document.body.appendChild(box);
+});
+</script>
+<script>
+${js}
+</script>
+</body>
+</html>`;
 }

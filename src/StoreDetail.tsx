@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, delete_, post } from "./api";
+import { ExtensionRunner } from "./ExtensionRunner";
 import { Icon } from "./Icon";
 import { BUILTIN_STAMPS, canonicalStampRef } from "./stamps";
 import { StarPicker, Stars, WorkIcon, dateText, errorText, kindLabelOf, yen } from "./storeUi";
@@ -50,6 +51,7 @@ export function StoreDetail({
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("overview");
   const [version, setVersion] = useState(0);
+  const [running, setRunning] = useState(false);
 
   // 作品の詳細（レビュー・作者の評価）は、開いたときと、購入やレビューの後に取り直す
   useEffect(() => {
@@ -97,6 +99,14 @@ export function StoreDetail({
         </button>
       );
     }
+    // 拡張機能は、買った人（と作者）がここから開く
+    if (item.studioKind === "extension" && (item.owned || isMine)) {
+      return (
+        <button type="button" className="cws-primary" onClick={() => setRunning(true)}>
+          <Icon name="play" size={16} /> 開く
+        </button>
+      );
+    }
     return buyButton;
   };
 
@@ -123,6 +133,15 @@ export function StoreDetail({
           <li>長さ: {style.length}</li>
           <li>{style.emoji ? "絵文字を使う" : "絵文字は使わない"}</li>
         </ul>
+      );
+    }
+    if (item.studioKind === "extension") {
+      const bytes = detail?.extensionBytes ?? null;
+      return (
+        <p className="cws-quiz-count">
+          HTML・CSS・JavaScript で作られたミニアプリです。隔離された枠の中で動き、アカウント情報や通信には触れません。
+          {bytes !== null ? `（コードの大きさ 約 ${Math.max(1, Math.round(bytes / 1024))} KB。中身は買うと動かせます）` : ""}
+        </p>
       );
     }
     if (item.studioKind === "quiz") {
@@ -288,6 +307,7 @@ export function StoreDetail({
           </button>
         </section>
       )}
+      {running && <ExtensionRunner workId={workId} name={item.name} onClose={() => setRunning(false)} />}
     </div>
   );
 }

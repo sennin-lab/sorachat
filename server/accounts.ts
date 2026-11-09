@@ -3,7 +3,7 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { z } from "zod";
 import { config, missingSenninSettings } from "./config.js";
 import { cookieBase, currentUserId, banOfUser, endSession, randomToken, requireAuth, sessionUserId, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
-import { cloudflareAvatarUrl, deleteCloudflareAvatar, isAllowedImage, readImage, removeImage, saveCloudflareAvatar, upload } from "./media.js";
+import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
 import { friendIdsOf, friendshipOf } from "./friends.js";
 import { avatarVersionOf } from "./avatarVersion.js";
 import { disableAi, enableAi } from "./senninai.js";
@@ -400,15 +400,16 @@ accounts.post("/me/avatar", requireAuth, upload.single("file"), async (req, res)
     return;
   }
   const userId = currentUserId(res);
-  const path = await saveCloudflareAvatar(req.file!);
+  // プロフィール画像は、ほかの画像と同じく Turso（sc_blobs）に保存する
+  const path = await saveImage(req.file!, `avatars/${userId}`);
   const { data } = await sb.from("sc_users").select("avatar_path").eq("id", userId).maybeSingle();
   const { error } = await sb.from("sc_users").update({ avatar_path: path }).eq("id", userId);
-  if (error) throw error;
-  if (data?.avatar_path?.startsWith("cf:")) {
-    await deleteCloudflareAvatar(data.avatar_path);
-  } else {
-    await removeImage(data?.avatar_path ?? null);
+  if (error) {
+    // DB の更新に失敗したら、いま保存した画像は使われないので消しておく
+    await removeImage(path);
+    throw error;
   }
+  await removeImage(data?.avatar_path ?? null);
   res.json(await loadMe(userId));
 });
 
@@ -480,21 +481,6 @@ accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
   // 版（?v=）が今の画像と同じなら、URL が変わらない限りブラウザに保存させる（同じ版はもう取りに来ない）
   const versioned = typeof req.query.v === "string" && req.query.v === avatarVersionOf(data.avatar_path);
   const cacheControl = versioned ? "private, max-age=31536000, immutable" : "private, no-cache";
-  const cloudflareUrl = cloudflareAvatarUrl(data.avatar_path);
-  if (cloudflareUrl) {
-    // 別サイトへリダイレクトさせると、画面の CSP（画像の読み込み先の制限）で表示できないことがあるため、ここで中継する
-    const upstream = await fetch(cloudflareUrl, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
-    if (!upstream?.ok) {
-      res.setHeader("cache-control", "no-store");
-      res.status(502).end();
-      return;
-    }
-    const bytes = Buffer.from(await upstream.arrayBuffer());
-    res.setHeader("content-type", upstream.headers.get("content-type") ?? "image/jpeg");
-    res.setHeader("cache-control", cacheControl);
-    res.send(bytes);
-    return;
-  }
   const image = await readImage(data.avatar_path);
   if (!image) {
     res.setHeader("cache-control", "no-store");
