@@ -219,9 +219,11 @@ accounts.get("/auth/options", (_req, res) => {
 });
 
 // 連携の後に戻るページ（仙人ストア・senninstudio は、それぞれ専用のページ）
-const linkReturnPath = (value: unknown) => (value === "studio" ? "/studio" : value === "pay" ? "/pay" : "/store");
-type LinkFrom = "store" | "studio" | "pay";
-const linkFromOf = (value: unknown): LinkFrom => (value === "studio" ? "studio" : value === "pay" ? "pay" : "store");
+const linkReturnPath = (value: unknown) =>
+  value === "studio" ? "/studio" : value === "pay" ? "/pay" : value === "games" ? "/senningames" : "/store";
+type LinkFrom = "store" | "studio" | "pay" | "games";
+const linkFromOf = (value: unknown): LinkFrom =>
+  value === "studio" ? "studio" : value === "pay" ? "pay" : value === "games" ? "games" : "store";
 
 accounts.get("/auth/sennin/link", requireAuth, (req, res) => {
   const { clientId, authorizationUrl, redirectUri, storeScope } = config.sennin;

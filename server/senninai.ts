@@ -30,7 +30,8 @@ const MAX_MEMBER_CHARS = 300;
 const MAX_QUESTION_CHARS = 300;
 const MAX_SENT_CHARS = 1000; // 1件あたりの送信量の上限
 const MAX_HISTORY_ITEM_CHARS = 300; // 履歴1件の上限
-const MAX_HISTORY_CHARS = 1000; // 履歴の合計の上限
+const HISTORY_LIMIT = 20; // 返答に添える直近のトークの件数
+const MAX_HISTORY_CHARS = 6000; // 履歴の合計の上限（20件ぶん入るように）
 const PENDING_MS = 5 * 60_000;
 export const PREVIOUS = "__PREVIOUS__";
 
@@ -736,7 +737,7 @@ async function handleReply(conversationId: string, userId: string, name: string)
 }
 
 async function handleChat(conversationId: string, userId: string, text: string, row: MessageRow) {
-  // 直近のやり取り（履歴は5件まで）を添えて答えてもらう
+  // 直近のやり取り（履歴は20件まで）を添えて答えてもらう
   const { data, error } = await sb
     .from("sc_messages")
     .select(COLUMNS)
@@ -745,7 +746,7 @@ async function handleChat(conversationId: string, userId: string, text: string, 
     .eq("kind", "text")
     .lt("created_at", row.created_at)
     .order("created_at", { ascending: false })
-    .limit(4);
+    .limit(HISTORY_LIMIT);
   if (error) throw error;
   const history = ((data ?? []) as MessageRow[])
     .reverse()

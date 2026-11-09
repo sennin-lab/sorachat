@@ -24,6 +24,7 @@ import { initializeMaintenanceSettings, maintenanceGate } from "./maintenance.js
 import { getStatus } from "./status.js";
 import { store } from "./store.js";
 import { senninPay } from "./senninpay.js";
+import { senningames } from "./senningames.js";
 import { adminPay } from "./adminPay.js";
 import { studio } from "./studio.js";
 import { studioAdmin } from "./studioAdmin.js";
@@ -62,6 +63,7 @@ app.use("/api", blocks);
 app.use("/api", calls);
 app.use("/api", store);
 app.use("/api", senninPay);
+app.use("/api", senningames);
 app.use("/api", studio);
 app.use("/api", studioReviews);
 app.use("/api", studioAdmin);

@@ -38,6 +38,8 @@ type Target =
 
 type ByUsername = { id: string; username: string; displayName: string; hasAvatar: boolean; isSelf: boolean; isFriend: boolean };
 
+import "./senninpay-motion.css";
+
 const LINK_HREF = "/api/auth/sennin/link?from=pay";
 const MAX_AMOUNT = 10_000;
 const MAX_DIGITS = String(MAX_AMOUNT).length;
@@ -156,7 +158,8 @@ export function SenninPayPage({ me, flash, onBack }: { me: Me; flash?: { ok: boo
 
   return (
     <Page title={TITLES[view]} onBack={back}>
-      <div className="pp">
+      {/* 画面が変わるたびに作り直して、入ってくる動きを出す */}
+      <div className="pp" key={view}>
         {view === "home" && (
           <HomeView
             notice={notice}
@@ -267,7 +270,7 @@ function HomeView({
             </button>
           </div>
         </div>
-        <strong className="pp-hero-value">{value}</strong>
+        <strong key={value} className="pp-hero-value">{value}</strong>
         <span className="pp-hero-sub">仙人アカウントのポイント</span>
         {balance && !linked && (
           <a className="pp-hero-link" href={LINK_HREF}>
@@ -278,10 +281,10 @@ function HomeView({
       {balanceError && <p className="pp-error">{balanceError}</p>}
 
       <nav className="pp-actions" aria-label="SenninPay のメニュー">
-        <ActionTile icon="scan" label="スキャン" onClick={() => onGo("scan")} primary />
-        <ActionTile icon="paysend" label="送る" onClick={() => onGo("friends")} />
-        <ActionTile icon="receive" label="受け取る" onClick={() => onGo("receive")} />
-        <ActionTile icon="shop" label="店舗" onClick={() => onGo("shop")} />
+        <ActionTile index={0} icon="scan" label="スキャン" onClick={() => onGo("scan")} primary />
+        <ActionTile index={1} icon="paysend" label="送る" onClick={() => onGo("friends")} />
+        <ActionTile index={2} icon="receive" label="受け取る" onClick={() => onGo("receive")} />
+        <ActionTile index={3} icon="shop" label="店舗" onClick={() => onGo("shop")} />
       </nav>
 
       <section className="pp-section">
@@ -297,9 +300,21 @@ function HomeView({
   );
 }
 
-function ActionTile({ icon, label, onClick, primary = false }: { icon: string; label: string; onClick: () => void; primary?: boolean }) {
+function ActionTile({
+  icon,
+  label,
+  onClick,
+  primary = false,
+  index = 0
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+  index?: number;
+}) {
   return (
-    <button type="button" className={`pp-tile${primary ? " is-primary" : ""}`} onClick={onClick}>
+    <button type="button" className={`pp-tile${primary ? " is-primary" : ""}`} style={{ animationDelay: `${index * 60}ms` }} onClick={onClick}>
       <span className="pp-tile-icon">
         <Icon name={icon} size={26} />
       </span>
@@ -506,7 +521,7 @@ function AmountView({
       </div>
 
       <div className="pp-amount-display" aria-live="polite">
-        <span className="pp-amount-num">{amountText === "" ? "0" : Number(amountText).toLocaleString("ja-JP")}</span>
+        <span key={amountText} className="pp-amount-num">{amountText === "" ? "0" : Number(amountText).toLocaleString("ja-JP")}</span>
         <span className="pp-amount-unit">pt</span>
       </div>
       <p className={`pp-amount-sub${shortage ? " is-ng" : ""}`}>
@@ -743,7 +758,7 @@ function HistoryList({ limit }: { limit?: number }) {
 
   return (
     <ul className="pp-history" aria-label="送金・支払いの履歴">
-      {rows.map((item) => {
+      {rows.map((item, index) => {
         const status = STATUS_TEXT[item.status] ?? { text: item.status, tone: "wait" as const };
         const sign = item.direction === "in" ? "+" : "−";
         const label =
@@ -755,7 +770,7 @@ function HistoryList({ limit }: { limit?: number }) {
               ? `${item.counterpartName} さんに送金`
               : `${item.counterpartName} さんから受け取り`;
         return (
-          <li key={item.id} className="pp-history-row">
+          <li key={item.id} className="pp-history-row" style={{ animationDelay: `${Math.min(index, 12) * 45}ms` }}>
             <span className={`pp-history-icon ${item.direction === "in" ? "is-in" : "is-out"}`} aria-hidden="true">
               <Icon name={item.direction === "in" ? "receive" : "paysend"} size={18} />
             </span>

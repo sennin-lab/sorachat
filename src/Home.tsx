@@ -13,6 +13,8 @@ import { StorePage } from "./StorePage";
 import { StudioPage } from "./StudioPage";
 // SenninPay は使うときだけ読み込む（通常の起動を軽く保つため）
 const SenninPayPage = lazy(() => import("./SenninPayPage").then((m) => ({ default: m.SenninPayPage })));
+// senningames（1人で遊ぶゲーム）も、開くときだけ読み込む
+const SenningamesPage = lazy(() => import("./SenningamesPage").then((m) => ({ default: m.SenningamesPage })));
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -77,6 +79,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const onStudioPage = path === "/studio" || path.startsWith("/studio/");
   // SenninPay（/pay）も専用のページとして開く
   const onPayPage = path === "/pay" || path.startsWith("/pay/");
+  // senningames（/senningames）も専用のページとして開く
+  const onGamesPage = path === "/senningames" || path.startsWith("/senningames/");
 
   const [selectedId, setSelectedId] = useState<string | null>(chatId);
   const [tab, setTab] = useState<Tab>(() => tabOfPath(path) ?? "talk");
@@ -126,6 +130,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     if (!linked && !error) return;
     const studioPage = path.startsWith("/studio");
     const payPage = path.startsWith("/pay");
+    const gamesPage = path.startsWith("/senningames");
     setStoreFlash(
       linked
         ? {
@@ -134,12 +139,14 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
               ? "仙人アカウントと連携しました。作品を公開できます。"
               : payPage
                 ? "仙人アカウントと連携しました。SenninPayが使えます。"
-                : "仙人アカウントと連携しました。ストアで買い物できます。"
+                : gamesPage
+                  ? "仙人アカウントと連携しました。ポイントを出金できます。"
+                  : "仙人アカウントと連携しました。ストアで買い物できます。"
           }
         : { ok: false, text: error ?? "" }
     );
     setTab("more");
-    navigate(studioPage ? "/studio" : payPage ? "/pay" : "/store", { replace: true });
+    navigate(studioPage ? "/studio" : payPage ? "/pay" : gamesPage ? "/senningames" : "/store", { replace: true });
   }, []);
 
   // 専用ページを閉じる（開いた元の画面へ戻る。直接開いたときは「その他」へ）
@@ -368,6 +375,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => navigate("/senningames")}>
+                    <span className="option-icon">
+                      <Icon name="game" size={20} />
+                    </span>
+                    senningames
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => setShowSettings(true)}>
                     <span className="option-icon">
                       <Icon name="settings" size={20} />
@@ -483,6 +499,11 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       {onPayPage && (
         <Suspense fallback={null}>
           <SenninPayPage me={me} flash={storeFlash} onBack={closePage} />
+        </Suspense>
+      )}
+      {onGamesPage && (
+        <Suspense fallback={null}>
+          <SenningamesPage flash={storeFlash} onBack={closePage} />
         </Suspense>
       )}
       {showOpenChats && (
