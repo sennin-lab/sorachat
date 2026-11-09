@@ -11,7 +11,8 @@
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "test:senninai": "tsx test/senninai-parse.test.ts && tsx test/senninai-flow.test.ts",
-    "encrypt:backfill": "tsx server/scripts/encrypt-existing.ts"
+    "encrypt:backfill": "tsx server/scripts/encrypt-existing.ts",
+    "test:pay": "tsx test/pay-helpers.test.ts && tsx test/pay-transfer.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",

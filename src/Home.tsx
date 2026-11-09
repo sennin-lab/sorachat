@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { api, post } from "./api";
 import { ChatView } from "./ChatView";
@@ -11,6 +11,8 @@ import { NotifyPrompt } from "./NotifyPrompt";
 import { OpenChatSheet } from "./OpenChatSheet";
 import { StorePage } from "./StorePage";
 import { StudioPage } from "./StudioPage";
+// SenninPay は使うときだけ読み込む（通常の起動を軽く保つため）
+const SenninPayPage = lazy(() => import("./SenninPayPage").then((m) => ({ default: m.SenninPayPage })));
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -45,7 +47,7 @@ const shouldAskNotify = (me: Me) => {
 // URL とタブの対応。プロフィールなどの重ねて表示する画面では null（直前のタブを保つ）
 const tabOfPath = (path: string): Tab | null => {
   if (path.startsWith("/friends")) return "friends";
-  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio")) return "more";
+  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay")) return "more";
   if (path === "/" || path.startsWith("/home") || path.startsWith("/dm/") || path.startsWith("/groupchat/")) return "talk";
   return null;
 };
@@ -73,6 +75,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   // （/store/item/:id・/store/author/:id、/studio/works/:id/edit のような下の画面も、同じ専用ページで開く）
   const onStorePage = path === "/store" || path.startsWith("/store/");
   const onStudioPage = path === "/studio" || path.startsWith("/studio/");
+  // SenninPay（/pay）も専用のページとして開く
+  const onPayPage = path === "/pay" || path.startsWith("/pay/");
 
   const [selectedId, setSelectedId] = useState<string | null>(chatId);
   const [tab, setTab] = useState<Tab>(() => tabOfPath(path) ?? "talk");
@@ -121,13 +125,21 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     const error = params.get("store_error");
     if (!linked && !error) return;
     const studioPage = path.startsWith("/studio");
+    const payPage = path.startsWith("/pay");
     setStoreFlash(
       linked
-        ? { ok: true, text: studioPage ? "仙人アカウントと連携しました。作品を公開できます。" : "仙人アカウントと連携しました。ストアで買い物できます。" }
+        ? {
+            ok: true,
+            text: studioPage
+              ? "仙人アカウントと連携しました。作品を公開できます。"
+              : payPage
+                ? "仙人アカウントと連携しました。SenninPayが使えます。"
+                : "仙人アカウントと連携しました。ストアで買い物できます。"
+          }
         : { ok: false, text: error ?? "" }
     );
     setTab("more");
-    navigate(studioPage ? "/studio" : "/store", { replace: true });
+    navigate(studioPage ? "/studio" : payPage ? "/pay" : "/store", { replace: true });
   }, []);
 
   // 専用ページを閉じる（開いた元の画面へ戻る。直接開いたときは「その他」へ）
@@ -347,6 +359,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => navigate("/pay")}>
+                    <span className="option-icon">
+                      <Icon name="wallet" size={20} />
+                    </span>
+                    SenninPay
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => setShowSettings(true)}>
                     <span className="option-icon">
                       <Icon name="settings" size={20} />
@@ -459,6 +480,11 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       )}
       {onStudioPage && <StudioPage flash={storeFlash} onBack={closePage} />}
       {onStorePage && <StorePage me={me} flash={storeFlash} onBack={closePage} onMeChange={onMeChange} />}
+      {onPayPage && (
+        <Suspense fallback={null}>
+          <SenninPayPage flash={storeFlash} onBack={closePage} />
+        </Suspense>
+      )}
       {showOpenChats && (
         <OpenChatSheet
           onClose={() => setShowOpenChats(false)}

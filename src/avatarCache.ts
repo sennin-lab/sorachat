@@ -79,6 +79,13 @@ export async function avatarObjectUrl(userId: string): Promise<string | null> {
   return url;
 }
 
+// 画面で読めなかったオブジェクトURLを捨てる。次に表示するとき、保存済みの画像から作り直す。
+// 表示中の画像をすぐ壊さないよう、古いURLは forgetBlobUrl と同じく少し後で無効にする
+export function dropAvatarObjectUrl(userId: string) {
+  forgetBlobUrl(userId);
+  window.dispatchEvent(new Event(AVATAR_EVENT));
+}
+
 // 保存済みの友だち一覧（画面を開いた直後に表示するため）
 export const cachedFriends = (): Friend[] => {
   try {

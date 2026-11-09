@@ -9,7 +9,7 @@ import {
   type KeyboardEvent
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, api, delete_, patch, post } from "./api";
+import { ApiError, api, delete_, post } from "./api";
 import { Avatar } from "./Avatar";
 import { SenninaiConfirm } from "./SenninaiConfirm";
 import { RoomSettingsSheet } from "./RoomSettingsSheet";
@@ -24,7 +24,7 @@ import { CallCard } from "./CallCard";
 import { Icon } from "./Icon";
 import { ImageViewer } from "./ImageViewer";
 import { MessageMenu } from "./MessageMenu";
-import { isSocketOpen, onChatEvent, sendChat } from "./realtime";
+import { isSocketOpen, onChatEvent, sendChat, sendTyping } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { AttachSheet } from "./AttachSheet";
 import { StampSheet } from "./StampSheet";
@@ -151,6 +151,10 @@ function threadInfo(messages: Message[], index: number) {
     joinNext
   };
 }
+
+// 入力中の表示：送るのは2.5秒に1回まで、受け取った表示は4秒で消える（届かなくなったときも消えるように）
+const TYPING_SEND_GAP_MS = 2500;
+const TYPING_HOLD_MS = 4000;
 
 export function ChatView({
   conversationId,
@@ -413,6 +417,45 @@ export function ChatView({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [lastId, loaded, unreadFrom]);
 
+  // 相手の入力中表示
+  const [typingIds, setTypingIds] = useState<string[]>([]);
+  const typingTimers = useRef(new Map<string, number>());
+  const lastTypingSent = useRef(0);
+  const noteTyping = (value: string) => {
+    if (editing || !value.trim()) return;
+    const now = Date.now();
+    if (now - lastTypingSent.current < TYPING_SEND_GAP_MS) return;
+    if (sendTyping(conversationId)) lastTypingSent.current = now;
+  };
+
+  useEffect(() => {
+    const timers = typingTimers.current;
+    const dropTyping = (userId: string) => {
+      window.clearTimeout(timers.get(userId));
+      timers.delete(userId);
+      setTypingIds((current) => current.filter((id) => id !== userId));
+    };
+    setTypingIds([]);
+    const off = onChatEvent((event) => {
+      if (event.type === "typing" && event.conversationId === conversationId && event.userId !== meId) {
+        const userId = event.userId;
+        window.clearTimeout(timers.get(userId));
+        timers.set(userId, window.setTimeout(() => dropTyping(userId), TYPING_HOLD_MS));
+        setTypingIds((current) => (current.includes(userId) ? current : [...current, userId]));
+        return;
+      }
+      // 相手のメッセージが届いたら、その人の入力中の表示はすぐ消す
+      if (event.type === "message" && event.message.conversationId === conversationId) {
+        dropTyping(event.message.senderId);
+      }
+    });
+    return () => {
+      off();
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+    };
+  }, [conversationId, meId]);
+
   // senninai とのトークでは、送信の確認待ちがあればモーダルで聞く（新しい発言のたびに確かめる）
   const botDm = !conversation?.isGroup && conversation?.otherId === SENNIN_BOT_ID;
   const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
@@ -460,7 +503,7 @@ export function ChatView({
     setBusy(true);
     setError("");
     try {
-      await api(`/api/dm/messages/${editing.id}`, patch({ body }));
+      await api(`/api/dm/messages/${editing.id}`, post({ body }));
       patchMessage(editing.id, (m) => ({ ...m, body, edited: true }));
       setEditing(null);
       setText("");
@@ -832,6 +875,16 @@ export function ChatView({
     }).catch((e) => setError(e instanceof Error ? e.message : "通話を始められませんでした"));
   };
 
+  const typingNames = typingIds.map(
+    (id) => memberList.find((m) => m.id === id)?.displayName ?? people.get(id)?.name ?? (isGroup ? "メンバー" : conversation?.name ?? "相手")
+  );
+  const typingLabel =
+    typingNames.length === 0
+      ? ""
+      : typingNames.length === 1
+        ? `${typingNames[0]}が入力中…`
+        : `${typingNames[0]}ほか${typingNames.length - 1}人が入力中…`;
+
   return (
     <section className={`chat${leaving ? " is-leaving" : ""}`}>
       <header className="chat-head">
@@ -1144,6 +1197,12 @@ export function ChatView({
         </ul>
       )}
 
+      {typingLabel && (
+        <div className="muted small" role="status" aria-live="polite" style={{ padding: "2px 14px 0", minHeight: 18 }}>
+          {typingLabel}
+        </div>
+      )}
+
       <form className="composer" ref={formRef} onSubmit={onSubmit}>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={pickImage} />
         <input ref={anyFileRef} type="file" hidden onChange={pickAnyFile} />
@@ -1160,7 +1219,10 @@ export function ChatView({
           <textarea
             ref={textRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              noteTyping(e.target.value);
+            }}
             onKeyDown={onKeyDown}
             onFocus={() => {
               // キーボードが出きったあと、最新メッセージを入力欄の上に見せる

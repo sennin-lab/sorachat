@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, patch } from "./api";
+import { api, post } from "./api";
 import { Icon } from "./Icon";
 import { enablePush } from "./push";
 import type { Me } from "./types";
@@ -18,7 +18,7 @@ export function NotifyPrompt({ onEnabled, onLater }: { onEnabled: (me: Me) => vo
         setMessage(result.message);
         return;
       }
-      onEnabled(await api<Me>("/api/me", patch({ notifyDm: true })));
+      onEnabled(await api<Me>("/api/me", post({ notifyDm: true })));
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       setMessage(`通知設定の更新に失敗しました。${detail}`);

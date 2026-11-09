@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { avatarObjectUrl, cachedAvatar, knownAvatarVersion, onAvatarCacheChange } from "./avatarCache";
+import { avatarObjectUrl, cachedAvatar, dropAvatarObjectUrl, knownAvatarVersion, onAvatarCacheChange } from "./avatarCache";
 import { RobotFace, SENNIN_BOT_ID } from "./robot";
 
 // 一時的に読めなかった画像は、少し待って読み直す（ネットワークの一瞬の失敗で文字のアイコンに戻らないように）
@@ -31,6 +31,13 @@ export function Avatar({
   const [saved, setSaved] = useState<string | null>(() => (!src && userId && hasAvatar ? cachedAvatar(userId) : null));
   // IndexedDB から読んだ画像。undefined は「まだ確かめていない」、null は「保存なし」
   const [dbUrl, setDbUrl] = useState<string | null | undefined>(undefined);
+  // 手元の画像（保存済みのデータURL・オブジェクトURL）が読めなかったときのURL。そのURLは使わず、別の経路で出し直す
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  // 手元の画像を作り直すのは、人ごとに1回まで（作り直した画像も読めないときは、サーバーから取る）
+  const droppedOnce = useRef(false);
+  useEffect(() => {
+    droppedOnce.current = false;
+  }, [userId]);
 
   useEffect(() => {
     if (src || !userId) return;
@@ -105,6 +112,8 @@ export function Avatar({
   }
   // 優先順：指定された画像 → localStorage → IndexedDB → 通常の読み込み（確かめ終わってから）
   const fromDb = dbUrl === undefined ? null : dbUrl;
+  // 読めなかったURLは候補から外す
+  const pick = (candidate: string | null | undefined) => (candidate && candidate !== brokenUrl ? candidate : null);
   // 版（?v=）を付けると、画像が変わっていないあいだはブラウザに保存された分を使い、サーバーに取りに行かない
   const version = knownAvatarVersion(userId);
   const params = new URLSearchParams();
@@ -113,7 +122,7 @@ export function Avatar({
   if (retry > 0) params.set("r", String(retry));
   const query = params.toString();
   const remote = `/api/users/${userId}/avatar${query ? `?${query}` : ""}`;
-  const url = src ?? saved ?? fromDb ?? (userId && dbUrl !== undefined ? remote : "");
+  const url = pick(src) ?? pick(saved) ?? pick(fromDb) ?? (userId && dbUrl !== undefined ? remote : "");
   if (!url || !hasAvatar || failed) {
     return (
       <span className="avatar" style={style} aria-hidden="true">
@@ -131,6 +140,15 @@ export function Avatar({
         recovered.current = 0;
       }}
       onError={() => {
+        // 手元の画像が読めなかったときは、その画像を外して別の経路で出し直す（同じURLを何度も読みに行かない）
+        if (!src && url !== remote) {
+          setBrokenUrl(url);
+          if (url === fromDb && !droppedOnce.current && userId) {
+            droppedOnce.current = true;
+            dropAvatarObjectUrl(userId);
+          }
+          return;
+        }
         if (retry < MAX_RETRY) {
           // 少し待ってから読み直す（一時的な失敗なら、次の読み込みで表示される）
           window.setTimeout(() => setRetry((n) => n + 1), 600 * (retry + 1));

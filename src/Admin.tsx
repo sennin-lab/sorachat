@@ -4,6 +4,8 @@ import { Avatar } from "./Avatar";
 import { formatRemaining } from "./Banned";
 import { TEAM_ID } from "./team";
 import { StudioPanel } from "./AdminStudio";
+import { AdminPayPanel } from "./AdminPay";
+
 import type { BanInfo } from "./types";
 
 // 管理者パネル（/admin/login からだけ入る。一般の画面からは入口を出さない）
@@ -170,7 +172,7 @@ function AdminLogin({ onDone }: { onDone: () => void }) {
 type Go = (to: string) => void;
 
 function Dashboard({ go }: { go: Go }) {
-  const [tab, setTab] = useState<"users" | "chats" | "news" | "studio" | "maintenance">("users");
+  const [tab, setTab] = useState<"users" | "chats" | "news" | "studio" | "pay" | "maintenance">("users");
   return (
     <>
       <div className="admin-segment" role="tablist">
@@ -186,6 +188,9 @@ function Dashboard({ go }: { go: Go }) {
         <button role="tab" aria-selected={tab === "studio"} className={tab === "studio" ? "on" : ""} onClick={() => setTab("studio")}>
           作品
         </button>
+        <button role="tab" aria-selected={tab === "pay"} className={tab === "pay" ? "on" : ""} onClick={() => setTab("pay")}>
+          ストア・Pay
+        </button>
         <button role="tab" aria-selected={tab === "maintenance"} className={tab === "maintenance" ? "on" : ""} onClick={() => setTab("maintenance")}>
           メンテナンス
         </button>
@@ -198,6 +203,8 @@ function Dashboard({ go }: { go: Go }) {
         <AnnouncementPanel />
       ) : tab === "studio" ? (
         <StudioPanel />
+      ) : tab === "pay" ? (
+        <AdminPayPanel />
       ) : (
         <MaintenancePanel />
       )}

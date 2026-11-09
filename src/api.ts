@@ -44,11 +44,6 @@ export const post = (body?: unknown): RequestInit => ({
   body: body === undefined ? undefined : JSON.stringify(body)
 });
 
-export const patch = (body: unknown): RequestInit => ({
-  method: "POST", // 学校のネットワークがPATCHを通さないためPOSTで送る（サーバー側もPOSTで受ける）
-  body: JSON.stringify(body)
-});
-
 export const put = (body: unknown): RequestInit => ({
   method: "PUT",
   body: JSON.stringify(body)

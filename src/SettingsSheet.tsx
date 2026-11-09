@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ApiError, api, delete_, patch } from "./api";
+import { ApiError, api, delete_, post } from "./api";
 import { Icon } from "./Icon";
 import { disablePush, enablePush, testPush } from "./push";
 import { getShowUnsent, setShowUnsent } from "./prefs";
@@ -50,7 +50,7 @@ export function SettingsSheet({
     setStatus("");
     setAi(on);
     try {
-      onChange(await api<Me>("/api/me", patch({ aiEnabled: on })));
+      onChange(await api<Me>("/api/me", post({ aiEnabled: on })));
     } catch (err) {
       setAi(!on);
       setStatus(err instanceof ApiError ? err.message : "AI機能の設定を変更できませんでした。");
@@ -72,9 +72,9 @@ export function SettingsSheet({
           setStatus(result.message);
           return;
         }
-        onChange(await api<Me>("/api/me", patch({ notifyDm: true })));
+        onChange(await api<Me>("/api/me", post({ notifyDm: true })));
       } else {
-        onChange(await api<Me>("/api/me", patch({ notifyDm: false })));
+        onChange(await api<Me>("/api/me", post({ notifyDm: false })));
         await disablePush();
       }
     } catch (err) {

@@ -2716,3 +2716,55 @@ textarea.dev-input { resize: vertical; }
   .dev-kinds { grid-template-columns: 1fr; }
   .dev-kpis { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---- SenninPay（/pay）---- */
+.pay { padding: 4px 0 8px; }
+.pay-balance { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 16px 18px; border-radius: 14px; background: var(--g-soft); }
+.pay-balance-label { display: block; font-size: 12px; color: var(--g-sub); }
+.pay-balance-value { display: block; margin-top: 2px; font-size: 24px; font-weight: 700; color: var(--g-text); }
+.pay-refresh { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--g-line); background: transparent; font-size: 13px; color: var(--g-text); }
+.pay-hint { margin: 10px 0 0; font-size: 13px; line-height: 1.7; color: var(--g-sub); }
+.pay-link { display: inline-block; margin-left: 6px; color: var(--accent, #06c755); font-weight: 600; }
+.pay-link-button { display: block; text-align: center; text-decoration: none; }
+.pay-sub { font-size: 12px; color: var(--g-sub); }
+.pay-ng { color: var(--g-ng); }
+.pay-tabs { display: flex; gap: 6px; margin-top: 16px; padding: 4px; border-radius: 12px; background: var(--g-soft); }
+.pay-tabs button { flex: 1; padding: 8px 4px; border: 0; border-radius: 9px; background: transparent; font-size: 13px; color: var(--g-sub); }
+.pay-tabs button.on { background: var(--bg, #fff); color: var(--g-text); font-weight: 700; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+.pay-card { margin-top: 14px; padding: 16px 18px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg, #fff); }
+.pay-h { margin: 0 0 4px; font-size: 16px; color: var(--g-text); }
+.pay-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.pay-choice { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
+.pay-choice input { margin: 0; }
+.pay-field { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 13px; color: var(--g-sub); }
+.pay-field input, .pay-field textarea { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg, #fff); font-size: 15px; color: var(--g-text); font-family: inherit; }
+.pay-submit { width: 100%; margin-top: 14px; padding: 12px; border-radius: 12px; font-size: 15px; }
+.pay-submit:disabled { opacity: 0.5; }
+.pay-actions { display: flex; gap: 10px; margin-top: 14px; }
+.pay-actions > * { flex: 1; }
+.pay-actions-end { justify-content: flex-end; }
+.pay-actions-end > * { flex: 0 0 auto; }
+.pay-scan { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.pay-merchant { margin-top: 12px; }
+.pay-merchant-name { font-size: 18px; color: var(--g-text); }
+.pay-qr { display: block; margin: 14px auto 0; width: 240px; max-width: 100%; height: auto; border-radius: 12px; background: #fff; }
+.pay-history { list-style: none; margin: 4px 0 0; padding: 0; }
+.pay-history-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.pay-history-label { font-size: 14px; color: var(--g-text); }
+.pay-history-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.pay-in { color: var(--g-ok, #06a84a); }
+.pay-out { color: var(--g-text); }
+.pay-status { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--g-soft); color: var(--g-sub); }
+.pay-status.is-ok { color: var(--g-ok, #06a84a); }
+.pay-status.is-ng { color: var(--g-ng); }
+.pay-status.is-wait { color: #b7791f; }
+
+/* ---- 管理者：ストアの商品・店舗 ---- */
+.admin-lineup { display: flex; flex-direction: column; gap: 12px; padding: 12px 0; }
+.admin-editor { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg, #fff); }
+.admin-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--g-text); }
+.admin-stamp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 6px; }
+.admin-stamp { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; border-radius: 10px; border: 2px solid transparent; background: var(--g-soft); font-size: 11px; color: var(--g-sub); }
+.admin-stamp img { width: 48px; height: 48px; object-fit: contain; }
+.admin-stamp.is-on { border-color: var(--g-ok, #06a84a); color: var(--g-text); }
+.admin-stamp-grid .admin-sub { grid-column: 1 / -1; }

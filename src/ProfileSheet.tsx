@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { AvatarCropper } from "./AvatarCropper";
-import { ApiError, api, patch, put } from "./api";
+import { ApiError, api, post, put } from "./api";
 import { Avatar } from "./Avatar";
 import { COVER_THEMES, Cover } from "./Cover";
 import { Icon } from "./Icon";
@@ -68,7 +68,7 @@ export function ProfileSheet({
     run(async () => {
       const next = await api<Me>(
         "/api/me",
-        patch({ displayName, username: username.trim().toLowerCase(), bio, contact: contact.trim(), profileUrl: profileUrl.trim() })
+        post({ displayName, username: username.trim().toLowerCase(), bio, contact: contact.trim(), profileUrl: profileUrl.trim() })
       );
       onChange(next);
       setUsername(next.username);
@@ -79,7 +79,7 @@ export function ProfileSheet({
   const chooseCover = (id: CoverTheme) =>
     run(async () => {
       if (id === me.coverTheme) return "";
-      onChange(await api<Me>("/api/me", patch({ coverTheme: id })));
+      onChange(await api<Me>("/api/me", post({ coverTheme: id })));
       return "";
     });
 

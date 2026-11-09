@@ -8,7 +8,9 @@ import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { sb } from "./supabase.js";
 import { ownedItemIds, canUseItem } from "./storeAccess.js";
-import { STORE_ITEMS, storeItemById, type StoreItem } from "./storeCatalog.js";
+import { config } from "./config.js";
+import type { StoreItem } from "./storeCatalog.js";
+import { lineupItemById, loadLineup, type LineupItem } from "./storeLineup.js";
 import {
   adjustPoints,
   clearLink,
@@ -42,10 +44,10 @@ function allow(key: string, max: number, windowMs: number) {
 
 const NEEDS_LINK = "仙人アカウントと連携すると、ポイントで買い物できます。";
 
-// 固定の商品か、作品（work:）の商品を探す。forSale のときは販売中の作品だけ
-async function resolveItem(itemId: string, forSale: boolean): Promise<StoreItem | StudioStoreItem | null> {
+// 固定の商品か、作品（work:）の商品を探す。forSale のときは販売中のものだけ
+async function resolveItem(itemId: string, forSale: boolean): Promise<LineupItem | StudioStoreItem | null> {
   if (workIdOf(itemId)) return resolveStudioItem(itemId, forSale);
-  return storeItemById(itemId);
+  return lineupItemById(itemId, forSale);
 }
 
 // 仙人アカウント関連のエラーを、画面に返す形に変える
@@ -114,7 +116,7 @@ store.get("/store", async (_req, res) => {
     salesByWork(workIds)
   ]);
 
-  const fixed = STORE_ITEMS.map((item) => ({
+  const fixed = (await loadLineup()).filter((item) => item.enabled).map((item) => ({
     ...item,
     owned: item.price <= 0 || owned.has(item.id),
     selected: item.kind === "theme" && item.id === selectedTheme,
@@ -186,7 +188,11 @@ async function purchase(me: string, item: StoreItem | StudioStoreItem) {
   if (!(await isLinked(me))) throw new SenninError("not_linked", NEEDS_LINK);
   if (await canUseItem(me, item)) throw new SenninError("owned", "すでに持っている商品です。");
   const studioCreator = "source" in item ? item.creatorId : null;
-  if (studioCreator === me) throw new SenninError("own_work", "自分の作品は買えません。");
+  // 自分の作品を買ったときは、ポイントを作者（自分）に戻さず、運営に返す（作品の売上を自分で増やせないようにするため）
+  const payee = studioCreator === me ? config.operatorUserId || null : studioCreator;
+  if (studioCreator === me && !payee) {
+    throw new SenninError("invalid", "運営の設定がないため、自分の作品は買えません。");
+  }
 
   // 前回の購入の結果が分からないままのものがあれば、それを同じ購入として確かめ直す（二重に払わないため）
   const { data: pending, error: pendingError } = await sb
@@ -240,11 +246,12 @@ async function purchase(me: string, item: StoreItem | StudioStoreItem) {
     .update({ status: "completed", sennin_ledger_id: result.ledgerId, updated_at: new Date().toISOString() })
     .eq("id", purchaseId);
 
-  // 作品の購入なら、作者へ全額を支払う（手数料なし）。失敗しても購入は成立している（支払いは再送される）
-  if (studioCreator) {
+  // 作品の購入なら、作者へ全額を支払う（手数料なし）。自分の作品なら運営へ返す。
+  // 失敗しても購入は成立している（支払いは再送される）
+  if (studioCreator && payee) {
     const workId = workIdOf(item.id);
     if (workId) {
-      await recordSale({ creatorId: studioCreator, workId, purchaseId, amount: item.price }).catch((error) =>
+      await recordSale({ creatorId: payee, workId, purchaseId, amount: item.price }).catch((error) =>
         console.error("[studio] 売上の記録に失敗:", error)
       );
     }
@@ -273,10 +280,6 @@ store.post("/store/purchase", async (req, res) => {
   } catch (error) {
     if (error instanceof SenninError && error.code === "owned") {
       res.status(409).json({ ok: false, error: error.message, code: "owned" });
-      return;
-    }
-    if (error instanceof SenninError && error.code === "own_work") {
-      res.status(400).json({ ok: false, error: error.message, code: "own_work" });
       return;
     }
     sendSenninError(res, error);

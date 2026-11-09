@@ -13,3 +13,9 @@ export const usernameFromQr = (value: string) => {
   const match = value.trim().match(/(?:sorachat:\/\/user\/|@)([a-z0-9_]{3,20})\/?$/i);
   return match ? match[1].toLowerCase() : null;
 };
+
+// SenninPay の店舗QR（sorachat://pay/店舗のユーザーID）。サーバーの merchantQrValue と同じ形
+export const merchantIdFromQr = (value: string): string | null => {
+  const match = value.trim().match(/^sorachat:\/\/pay\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i);
+  return match ? match[1].toLowerCase() : null;
+};

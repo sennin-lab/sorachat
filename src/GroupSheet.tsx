@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { ApiError, api, patch, post } from "./api";
+import { ApiError, api, post } from "./api";
 import { Avatar } from "./Avatar";
 import { AvatarCropper } from "./AvatarCropper";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -246,7 +246,7 @@ export function GroupSheet({
             <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={40} aria-label="グループ名" />
             <button
               className="btn-small accent"
-              onClick={() => run(() => api(`/api/dm/${conversationId}`, patch({ title: title.trim() })).then(() => undefined), "グループ名を変更しました。")}
+              onClick={() => run(() => api(`/api/dm/${conversationId}`, post({ title: title.trim() })).then(() => undefined), "グループ名を変更しました。")}
             >
               変更
             </button>

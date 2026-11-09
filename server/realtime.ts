@@ -7,7 +7,7 @@ import { config } from "./config.js";
 import { getMaintenanceSettings } from "./maintenance.js";
 import { addSocket, removeSocket, sendToUser, setViewing } from "./hub.js";
 import { findCall } from "./callRegistry.js";
-import { BlockedError, UUID, insertMessage, membership, replyTargetOk, toMessage } from "./messages.js";
+import { BlockedError, UUID, blockersOf, insertMessage, memberIds, membership, replyTargetOk, toMessage } from "./messages.js";
 import { senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
 import { sb } from "./supabase.js";
 
@@ -32,6 +32,11 @@ const callSignalSchema = z.object({
 
 // 画面を見ているかどうかの通知（アプリを裏に回したら false になる）
 const presenceSchema = z.object({ type: z.literal("presence"), visible: z.boolean(), endpoint: z.string().max(2048).nullish() });
+
+// 入力中の知らせ（会話ID だけを受け取り、中身は保存しない）
+const typingSchema = z.object({ type: z.literal("typing"), conversationId: z.string().regex(UUID) });
+const TYPING_MIN_GAP_MS = 1500;
+const lastTypingAt = new WeakMap<WebSocket, number>();
 
 async function userFromRequest(req: IncomingMessage): Promise<string | null> {
   const match = req.headers.cookie?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
@@ -129,6 +134,30 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
     if (presence.success) setViewing(ws, presence.data.visible, presence.data.endpoint ?? null);
     return;
   }
+  if (data?.type === "typing") {
+    const typing = typingSchema.safeParse(data);
+    if (!typing.success) return;
+    // 短い間隔の連続は捨てる（問い合わせを増やさないため）
+    const now = Date.now();
+    if (now - (lastTypingAt.get(ws) ?? 0) < TYPING_MIN_GAP_MS) return;
+    lastTypingAt.set(ws, now);
+    const conversationId = typing.data.conversationId;
+    try {
+      const [member, members, blockers] = await Promise.all([
+        membership(conversationId, userId),
+        memberIds(conversationId),
+        blockersOf(userId)
+      ]);
+      if (!member) return;
+      // 送った本人と、この人をブロックしている人以外へ（開いている画面にだけ届く）
+      for (const uid of members) {
+        if (uid !== userId && !blockers.has(uid)) sendToUser(uid, { type: "typing", conversationId, userId });
+      }
+    } catch {
+      // 入力中の表示は補助なので、失敗しても何もしない
+    }
+    return;
+  }
   if (data?.type === "call") {
     const signal = callSignalSchema.safeParse(data);
     if (!signal.success) return;
@@ -147,11 +176,16 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
   }
   const { clientId, conversationId, body, replyToId } = parsed.data;
   try {
-    if (!(await membership(conversationId, userId))) {
+    // 会員確認と返信先の確認は互いに依存しないので、並べて問い合わせる（待ち時間を減らす）
+    const [isMember, replyOk] = await Promise.all([
+      membership(conversationId, userId),
+      replyTargetOk(conversationId, replyToId)
+    ]);
+    if (!isMember) {
       reply(ws, { type: "error", clientId, error: "会話が見つかりません。" });
       return;
     }
-    if (!(await replyTargetOk(conversationId, replyToId))) {
+    if (!replyOk) {
       reply(ws, { type: "error", clientId, error: "返信先のメッセージが見つかりません。" });
       return;
     }

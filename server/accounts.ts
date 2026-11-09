@@ -10,6 +10,7 @@ import { disableAi, enableAi } from "./senninai.js";
 import { sb } from "./supabase.js";
 import { befriendTeam } from "./team.js";
 import { attachSenninAccount, SenninError } from "./senninPoints.js";
+import { grantLoginBonus } from "./loginBonus.js";
 import { retryCreatorPayouts } from "./studioPayout.js";
 
 export const accounts = Router();
@@ -52,7 +53,7 @@ const loginSchema = z.object({
 
 export const COVER_THEMES = ["green", "sky", "sunset", "lavender", "sand", "graphite"] as const;
 
-const patchSchema = z.object({
+const updateMeSchema = z.object({
   displayName: nameSchema.optional(),
   username: usernameSchema.optional(),
   bio: z.string().max(200).optional(),
@@ -160,7 +161,7 @@ accounts.post("/auth/login", authLimit, async (req, res) => {
 });
 
 accounts.get("/auth/sennin/login", (_req, res) => {
-  const { clientId, authorizationUrl, redirectUri, scope } = config.sennin;
+  const { clientId, authorizationUrl, redirectUri, loginScope } = config.sennin;
   if (!clientId || !authorizationUrl) {
     console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、")}`);
     res.redirect(`${config.appOrigin}/?auth_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
@@ -174,7 +175,7 @@ accounts.get("/auth/sennin/login", (_req, res) => {
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("scope", scope);
+  url.searchParams.set("scope", loginScope);
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
@@ -218,11 +219,13 @@ accounts.get("/auth/options", (_req, res) => {
 });
 
 // 連携の後に戻るページ（仙人ストア・senninstudio は、それぞれ専用のページ）
-const linkReturnPath = (value: unknown) => (value === "studio" ? "/studio" : "/store");
+const linkReturnPath = (value: unknown) => (value === "studio" ? "/studio" : value === "pay" ? "/pay" : "/store");
+type LinkFrom = "store" | "studio" | "pay";
+const linkFromOf = (value: unknown): LinkFrom => (value === "studio" ? "studio" : value === "pay" ? "pay" : "store");
 
 accounts.get("/auth/sennin/link", requireAuth, (req, res) => {
   const { clientId, authorizationUrl, redirectUri, storeScope } = config.sennin;
-  const from = req.query.from === "studio" ? "studio" : "store";
+  const from = linkFromOf(req.query.from);
   if (!clientId || !authorizationUrl) {
     console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、")}`);
     res.redirect(`${config.appOrigin}${linkReturnPath(from)}?store_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
@@ -316,6 +319,15 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
     }
     const userId = await upsertSenninUser(profile.id, profile.name);
     await befriendTeam(userId).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
+    // ログインの許可でポイントの更新用の情報も受け取れたら、連携済みにして初回のログイン特典を付ける
+    if (config.sennin.loginBonus && typeof tokenData.refresh_token === "string") {
+      try {
+        await attachSenninAccount(userId, profile.id, tokenData.refresh_token);
+        void grantLoginBonus(userId).catch((error) => console.error("[bonus] ログイン特典を付与できませんでした（次回のログインで再試行します）:", error));
+      } catch (error) {
+        console.error("[sennin] ログインで連携情報を保存できませんでした:", error);
+      }
+    }
     res.clearCookie("sc_oauth", cookieBase);
     res.clearCookie("sc_oauth_link", cookieBase);
     await startSession(res, userId);
@@ -352,7 +364,7 @@ accounts.get("/me", requireAuth, async (_req, res) => {
 });
 
 accounts.post("/me", requireAuth, async (req, res) => {
-  const parsed = patchSchema.safeParse(req.body);
+  const parsed = updateMeSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0].message });
     return;

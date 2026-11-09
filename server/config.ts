@@ -63,10 +63,23 @@ const appOrigin = (() => {
   return "http://localhost:5173";
 })();
 
+// 仙人ストアの「運営」の仙人アカウントに紐づくソラチャットのユーザーID（sc_users.id）。
+// 運営へ返すポイント（自分の作品を買ったときの売上など）の受け取り先。未設定なら自分の作品は買えません。
+const operatorUserId = env("OPERATOR_USER_ID");
+
+// ストアの許可（ポイントの読み書き）
+const senninStoreScope = env("SENNIN_STORE_SCOPE") || "profile points:read points:write";
+const senninScope = env("SENNIN_SCOPE") || "profile email";
+// ログイン特典（初回ログインで30ポイント）を使うか。使うとログイン時にポイントの許可も求める
+// （points:write は仙人アカウント側の管理者の承認が必要。承認前に有効にすると、ログインの許可画面でエラーになるおそれがあるため既定はオフ）
+const senninLoginBonus = ["on", "true", "1", "yes"].includes(env("SENNIN_LOGIN_BONUS").toLowerCase());
+const senninLoginScope = env("SENNIN_LOGIN_SCOPE") || (senninLoginBonus ? senninStoreScope : senninScope);
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || "development",
   appOrigin,
+  operatorUserId,
   supabaseUrl: need("SUPABASE_URL"),
   supabaseServiceKey: need("SUPABASE_SERVICE_ROLE_KEY"),
   supabaseAnonKey: need("SUPABASE_ANON_KEY"),
@@ -83,10 +96,13 @@ export const config = {
     tokenUrl: senninUrl(env("SENNIN_TOKEN_URL"), "/oauth/token"),
     userinfoUrl: senninUrl(env("SENNIN_USERINFO_URL"), "/oauth/userinfo"),
     meUrl: senninUrl(env("SENNIN_ME_URL"), "/api/v1/me"),
-    scope: env("SENNIN_SCOPE") || "profile email",
+    scope: senninScope,
+    // ログイン（仙人アカウントで続行）で要求する許可。ログイン特典を使うときは points も含める
+    loginScope: senninLoginScope,
+    loginBonus: senninLoginBonus,
     // ストア（ポイント）用の許可。ログインとは別に、「連携」のときだけ要求する
     // points:write は管理者の承認が必要。承認されていないと連携画面でエラーになる
-    storeScope: env("SENNIN_STORE_SCOPE") || "profile points:read points:write",
+    storeScope: senninStoreScope,
     pointsUrl: senninApi("/api/v1/points", env("SENNIN_POINTS_URL")),
     pointsAdjustUrl: senninApi("/api/v1/points/adjust", env("SENNIN_POINTS_ADJUST_URL"))
   },

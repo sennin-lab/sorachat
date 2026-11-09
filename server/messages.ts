@@ -341,12 +341,23 @@ export async function blockedBetween(a: string, b: string): Promise<boolean> {
 
 // 1対1のトークでは、相手とどちらかがブロックしていれば送れない（グループは対象外）
 export async function assertNotBlocked(conversationId: string, senderId: string): Promise<void> {
-  const { data: conv, error } = await sb.from("sc_conversations").select("is_group").eq("id", conversationId).maybeSingle();
-  if (error) throw error;
-  if (conv?.is_group === true) return;
-  const others = (await memberIds(conversationId)).filter((id) => id !== senderId);
-  for (const other of others) {
-    if (await blockedBetween(senderId, other)) throw new BlockedError();
+  // 会話の種類・メンバー・送信者が関わるブロックを同時に取る（以前はメンバーごとに直列で問い合わせていた）
+  const [conv, members, blocks] = await Promise.all([
+    sb.from("sc_conversations").select("is_group").eq("id", conversationId).maybeSingle(),
+    memberIds(conversationId),
+    sb.from("sc_blocks").select("blocker_id, blocked_id").or(`blocker_id.eq.${senderId},blocked_id.eq.${senderId}`)
+  ]);
+  if (conv.error) throw conv.error;
+  if (blocks.error) throw blocks.error;
+  if (conv.data?.is_group === true) return;
+  // ブロックの相手（送信者ではない側）の集合。どちらの向きでも相手として数える
+  const counterparts = new Set(
+    ((blocks.data ?? []) as { blocker_id: string; blocked_id: string }[]).map((r) =>
+      r.blocker_id === senderId ? r.blocked_id : r.blocker_id
+    )
+  );
+  for (const other of members) {
+    if (other !== senderId && counterparts.has(other)) throw new BlockedError();
   }
 }
 

@@ -229,7 +229,6 @@ export function StorePage({
         </span>
       );
     }
-    if (item.source === "studio" && item.creatorId === me.id) return <span className="cws-own">自分の作品</span>;
     if (!linked) {
       return (
         <a className={`cws-add${compact ? " is-compact" : ""}`} href={LINK_HREF}>
@@ -405,7 +404,11 @@ export function StorePage({
       {confirm && (
         <ConfirmDialog
           title="購入の確認"
-          message={`「${confirm.name}」を ${yen(confirm.price)} pt で購入します。よろしいですか？`}
+          message={
+            confirm.source === "studio" && confirm.creatorId === me.id
+              ? `「${confirm.name}」は自分の作品です。${yen(confirm.price)} pt で購入すると、ポイントは作者（自分）ではなく運営に返されます。よろしいですか？`
+              : `「${confirm.name}」を ${yen(confirm.price)} pt で購入します。よろしいですか？`
+          }
           confirmLabel="購入する"
           busy={busyId !== null}
           onConfirm={() => void buy(confirm)}

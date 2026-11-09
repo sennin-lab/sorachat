@@ -69,7 +69,8 @@ export type ChatEvent =
   | { type: "reactions"; conversationId: string; messageId: string; reactions: Reaction[] }
   | { type: "poll"; conversationId: string; messageId: string; poll: PollView }
   | { type: "game"; conversationId: string; messageId: string; game: GameView }
-  | { type: "read"; conversationId: string; userId: string; readAt: string };
+  | { type: "read"; conversationId: string; userId: string; readAt: string }
+  | { type: "typing"; conversationId: string; userId: string };
 
 const chatListeners = new Set<(event: ChatEvent) => void>();
 
@@ -199,6 +200,13 @@ export function connectRealtime() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
   window.clearTimeout(retryTimer);
   openSocket();
+}
+
+// 入力中の知らせを送る（接続中のときだけ。切れていれば何もしない）
+export function sendTyping(conversationId: string): boolean {
+  if (!isSocketOpen()) return false;
+  socket!.send(JSON.stringify({ type: "typing", conversationId }));
+  return true;
 }
 
 // 送信: 接続中はWebSocketで送り、サーバーの保存完了（ack）を待つ。切断中はHTTPで送る。
