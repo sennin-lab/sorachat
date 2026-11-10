@@ -2121,26 +2121,38 @@ button, .bubble, .send-btn, .composer-icon, .chip { touch-action: manipulation; 
 .preview.loading-text { display: inline-flex; align-items: center; }
 
 .thread-skeleton {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   padding: 14px 10px;
+  overflow: hidden;
 }
-.thread-skeleton .sk {
-  align-self: flex-start;
-  width: 56%;
-  height: 40px;
-  border-radius: 18px;
+.sk-row { display: flex; align-items: flex-end; gap: 8px; }
+.sk-row.mine { justify-content: flex-end; }
+.sk-avatar,
+.sk-bubble,
+.sk-line {
   background: linear-gradient(90deg, var(--bg-soft) 25%, var(--raised) 37%, var(--bg-soft) 63%);
   background-size: 400px 100%;
   animation: shimmer 1.3s infinite linear;
+  animation-delay: var(--d, 0ms);
 }
-.thread-skeleton .sk.short { width: 34%; height: 32px; }
-.thread-skeleton .sk.mine { align-self: flex-end; }
-.thread-skeleton .dots { align-self: center; margin-top: 6px; }
+.sk-avatar { flex: none; width: 34px; height: 34px; border-radius: 50%; }
+.sk-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 72%;
+  padding: 12px 14px;
+  border-radius: 18px;
+}
+.sk-row:not(.mine) .sk-bubble { border-bottom-left-radius: 6px; }
+.sk-row.mine .sk-bubble { border-bottom-right-radius: 6px; }
+.sk-line { display: block; height: 10px; border-radius: 6px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .dots i, .thread-skeleton .sk { animation: none; }
+  .sk-avatar, .sk-bubble, .sk-line { animation: none; }
 }
 
 .ai-code-message { display: flex; flex-direction: column; gap: 0; min-width: 0; }
@@ -2473,7 +2485,8 @@ button[aria-busy="true"] { animation: sc-soft-pulse 1.4s ease-in-out infinite; }
 .cws-field textarea:focus { outline: 2px solid var(--g-blue); outline-offset: -1px; }
 
 /* 星 */
-.cws-stars { position: relative; display: inline-block; line-height: 0; vertical-align: middle; }
+/* 幅は星の列の幅に合わせる（親が広くても、塗りの割合が星の数からずれないように） */
+.cws-stars { position: relative; display: inline-block; width: max-content; line-height: 0; vertical-align: middle; }
 .cws-stars-back { display: block; }
 .cws-stars-front { position: absolute; left: 0; top: 0; display: block; overflow: hidden; white-space: nowrap; }
 .cws-star-row { display: inline-flex; }

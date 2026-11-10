@@ -936,8 +936,9 @@ export function ChatView({
       )}
 
       <div className="thread" ref={threadRef}>
-        {!loaded && messages.length === 0 && <ThreadSkeleton />}
-        {hasOlder && messages.length > 0 && (
+        {/* 最新まで読み込み終わるまでは、キャッシュの古い分も含めて骨組みだけを出す（途中のトークを見せてから切り替わらないように） */}
+        {!loaded && <ThreadSkeleton />}
+        {loaded && hasOlder && messages.length > 0 && (
           <button
             type="button"
             className="older-btn"
@@ -951,7 +952,7 @@ export function ChatView({
           </button>
         )}
 
-        {messages.map((m, index) => {
+        {(loaded ? messages : []).map((m, index) => {
           // 設定で非表示にしたときは、取り消されたメッセージを出さない
           if (m.deleted && !showUnsent) return null;
           const info = threadInfo(messages, index);

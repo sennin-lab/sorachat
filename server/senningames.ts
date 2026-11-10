@@ -16,14 +16,20 @@ export const senningames = Router();
 senningames.use("/senningames", requireAuth);
 
 // ゲームの中身（ポイントの単位もここで決める）。pointsMilli は 1つあたりのミリポイント（0.03pt = 30）
+// 風船割りのハードは、ふつうの 5倍のポイント（1個 0.15pt）。
+// ゲームを増やすときは、ここに足したうえで、supabase/schema_v32.sql のような移行（sc_solo_rounds.game の制約）も行う。
 export const SOLO_GAMES = {
   balloon: { label: "風船割り", description: "ふくらんだ風船を割る。1個割るごとに加算", unit: "個", pointsMilli: 30, maxPerRound: 150 },
+  balloon_hard: { label: "風船割り ハード", description: "小さく速い風船。ふつうの5倍のポイント", unit: "個", pointsMilli: 150, maxPerRound: 150 },
   whack: { label: "もぐらたたき", description: "顔を出したもぐらを叩く。1匹ごとに加算", unit: "匹", pointsMilli: 20, maxPerRound: 60 },
   stop: { label: "ストップ", description: "動くバーを的の中で止める。成功するごとに加算", unit: "回", pointsMilli: 50, maxPerRound: 40 },
-  memory: { label: "神経衰弱", description: "同じ絵柄のカードをそろえる。1組そろえるごとに加算", unit: "組", pointsMilli: 100, maxPerRound: 40 }
+  memory: { label: "神経衰弱", description: "同じ絵柄のカードをそろえる。1組そろえるごとに加算", unit: "組", pointsMilli: 100, maxPerRound: 40 },
+  rhythm: { label: "リズムタップ", description: "流れてくる音符を、線に合わせてタップ。1つ合わせるごとに加算", unit: "回", pointsMilli: 25, maxPerRound: 80 },
+  numbers: { label: "数字つなぎ", description: "1から順に、数字をできるだけ速くタップ。1組そろえるごとに加算", unit: "組", pointsMilli: 120, maxPerRound: 30 },
+  catch: { label: "星キャッチ", description: "落ちてくる星をタップ。爆弾は取らない（加算されない）", unit: "個", pointsMilli: 20, maxPerRound: 120 }
 } as const;
 export type SoloGame = keyof typeof SOLO_GAMES;
-const GAME_KEYS = Object.keys(SOLO_GAMES) as SoloGame[];
+const GAME_KEYS = Object.keys(SOLO_GAMES) as [SoloGame, ...SoloGame[]];
 
 export const WITHDRAW_POINTS = 200;
 const MILLI_PER_POINT = 1000;
@@ -83,7 +89,7 @@ senningames.get("/senningames/state", async (_req, res) => {
 // ---- ラウンドの結果を加算する ----
 
 const rewardBody = z.object({
-  game: z.enum(["balloon", "whack", "stop", "memory"]),
+  game: z.enum(GAME_KEYS),
   units: z.number().int().min(1).max(1000)
 });
 

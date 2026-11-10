@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, post } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Icon } from "./Icon";
@@ -29,10 +29,37 @@ type Flash = { ok: boolean; text: string } | null;
 type View =
   | { kind: "home" }
   | { kind: "play"; game: SoloGameId; round: number }
-  | { kind: "result"; game: SoloGameId; units: number; added: number | null; error: string | null };
+  | { kind: "result"; game: SoloGameId; units: number; added: number | null; error: string | null; newBest: boolean };
+type Bests = Partial<Record<SoloGameId, number>>;
 
 const LINK_HREF = "/api/auth/sennin/link?from=games";
-const GAME_MARKS: Record<SoloGameId, string> = { balloon: "🎈", whack: "🔨", stop: "🎯", memory: "🃏" };
+const GAME_MARKS: Record<SoloGameId, string> = {
+  balloon: "🎈",
+  balloon_hard: "💥",
+  whack: "🔨",
+  stop: "🎯",
+  memory: "🃏",
+  rhythm: "🎵",
+  numbers: "🔢",
+  catch: "⭐"
+};
+// 1ラウンドの自己ベスト（この端末だけに残す。ポイントには関係しない）
+const BEST_KEY = "senningames-best-v1";
+const readBests = (): Bests => {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(BEST_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? (parsed as Bests) : {};
+  } catch {
+    return {};
+  }
+};
+const saveBests = (next: Bests) => {
+  try {
+    window.localStorage.setItem(BEST_KEY, JSON.stringify(next));
+  } catch {
+    // 保存できなくても、遊ぶことはできる
+  }
+};
 
 const errorOf = (err: unknown) => (err instanceof ApiError ? err.message : "通信に失敗しました。時間をおいてお試しください。");
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -45,6 +72,8 @@ export function SenningamesPage({ flash, onBack }: { flash?: Flash; onBack: () =
   const [loadError, setLoadError] = useState("");
   const [notice, setNotice] = useState<Flash>(flash ?? null);
   const [view, setView] = useState<View>({ kind: "home" });
+  const [bests, setBests] = useState<Bests>(readBests);
+  const bestsRef = useRef(bests);
 
   // 出金の確認（同じ出金IDで押し直すと、二重には出金されない）
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -68,17 +97,25 @@ export function SenningamesPage({ flash, onBack }: { flash?: Flash; onBack: () =
 
   // ラウンドの結果を加算する。画面を戻ったあとでも加算は行う（結果の表示は、まだそのゲームを見ているときだけ）
   const report = (game: SoloGameId, units: number) => {
+    // 自己ベストは、加算が通ったときだけ更新する（失敗した回の数は残さない）
+    const newBest = units > (bestsRef.current[game] ?? 0);
     if (units <= 0) {
-      setView((v) => (v.kind === "play" && v.game === game ? { kind: "result", game, units: 0, added: 0, error: null } : v));
+      setView((v) => (v.kind === "play" && v.game === game ? { kind: "result", game, units: 0, added: 0, error: null, newBest: false } : v));
       return;
     }
     api<GamesState & { ok: boolean; added: number }>("/api/senningames/reward", post({ game, units }))
       .then((data) => {
         setState(data);
-        setView((v) => (v.kind === "play" && v.game === game ? { kind: "result", game, units, added: data.added, error: null } : v));
+        if (newBest) {
+          const next = { ...bestsRef.current, [game]: units };
+          bestsRef.current = next;
+          setBests(next);
+          saveBests(next);
+        }
+        setView((v) => (v.kind === "play" && v.game === game ? { kind: "result", game, units, added: data.added, error: null, newBest } : v));
       })
       .catch((err) => {
-        setView((v) => (v.kind === "play" && v.game === game ? { kind: "result", game, units, added: null, error: errorOf(err) } : v));
+        setView((v) => (v.kind === "play" && v.game === game ? { kind: "result", game, units, added: null, error: errorOf(err), newBest: false } : v));
       });
   };
 
@@ -118,6 +155,7 @@ export function SenningamesPage({ flash, onBack }: { flash?: Flash; onBack: () =
             loadError={loadError}
             notice={notice}
             onRetry={load}
+            bests={bests}
             onPlay={(game) => setView({ kind: "play", game, round: 0 })}
             onWithdraw={() => setConfirmOpen(true)}
           />
@@ -162,6 +200,7 @@ function HomeView({
   state,
   loadError,
   notice,
+  bests,
   onRetry,
   onPlay,
   onWithdraw
@@ -169,6 +208,7 @@ function HomeView({
   state: GamesState | null;
   loadError: string;
   notice: Flash;
+  bests: Bests;
   onRetry: () => void;
   onPlay: (game: SoloGameId) => void;
   onWithdraw: () => void;
@@ -245,6 +285,12 @@ function HomeView({
                 <span className="sg-game-rate">
                   1{game.unit} = +{game.pointsPerUnit.toFixed(2)} pt
                 </span>
+                {bests[game.id] !== undefined && (
+                  <span className="sg-game-best">
+                    ベスト {bests[game.id]}
+                    {game.unit}
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -285,7 +331,7 @@ function ResultView({
   onAgain,
   onHome
 }: {
-  result: { game: SoloGameId; units: number; added: number | null; error: string | null };
+  result: { game: SoloGameId; units: number; added: number | null; error: string | null; newBest: boolean };
   state: GamesState;
   onAgain: () => void;
   onHome: () => void;
@@ -298,6 +344,7 @@ function ResultView({
         <Icon name={result.error ? "close" : "check"} size={40} />
       </span>
       <h2>{info?.label ?? "ゲーム"}</h2>
+      {result.newBest && result.error === null && <span className="sg-newbest">ベスト更新！</span>}
       {pending && <p className="pp-hint pp-center">加算しています…</p>}
       {result.added !== null && (
         <>

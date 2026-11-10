@@ -39,7 +39,8 @@ const UUID = /^[0-9a-f-]{36}$/i;
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: THUMB_MAX_BYTES, files: STAMP_MAX_COUNT + 1 }
+  // data（作品の中身の JSON）は、拡張機能のコード（合計 15万文字・日本語で最大 約 450KB）が入るように大きめにする
+  limits: { fileSize: THUMB_MAX_BYTES, fieldSize: 1536 * 1024, files: STAMP_MAX_COUNT + 1 }
 }).fields([
   { name: "thumb", maxCount: 1 },
   { name: "images", maxCount: STAMP_MAX_COUNT }

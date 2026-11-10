@@ -258,3 +258,116 @@
   .sg-page *::before,
   .sg-page *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ベスト・コンボ */
+.sg-game-best { font-size: 11.5px; font-weight: 700; color: var(--muted); }
+.sg-combo {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #ffb84d, #ff7a59);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  animation: sg-pop 0.3s var(--ease-spring);
+}
+.sg-newbest {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 99px;
+  background: #fff3c4;
+  color: #8a5a00;
+  font-size: 13px;
+  font-weight: 800;
+  animation: sg-pop 0.5s var(--ease-spring) 0.1s both;
+}
+
+/* 風船割り ハード：小さく、短く浮く */
+.sg-balloon.is-hard { width: 40px; height: 54px; margin-left: -20px; }
+.sg-balloon.is-hard .sg-balloon-string { height: 18px; }
+
+/* リズムタップ */
+.sg-rhythm { background: linear-gradient(#1f2a44, #2b3a5c); color: #fff; }
+.sg-rhythm .sg-hint { top: 10px; bottom: auto; color: rgba(255, 255, 255, 0.7); }
+.sg-note {
+  position: absolute;
+  height: 26px;
+  margin-top: -13px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #7ee0ff, #4d9cdb);
+  box-shadow: 0 0 12px rgba(126, 224, 255, 0.6);
+}
+.sg-pads { position: absolute; left: 0; right: 0; height: 14%; display: flex; gap: 6px; padding: 0 6px; }
+.sg-pad {
+  position: relative;
+  flex: 1;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.14);
+  touch-action: manipulation;
+}
+.sg-pad:active { background: rgba(255, 255, 255, 0.3); }
+.sg-pad-fx { position: absolute; inset: 0; border-radius: 14px; animation: sg-burst 0.3s ease-out forwards; }
+.sg-pad-fx.is-ok { background: rgba(126, 255, 180, 0.7); }
+.sg-pad-fx.is-miss { background: rgba(255, 120, 120, 0.7); }
+
+/* 数字つなぎ */
+.sg-numbers { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--bg-soft); }
+.sg-next { margin: 0; text-align: center; font-size: 14px; color: var(--muted); }
+.sg-next strong { margin-left: 4px; font-size: 22px; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.sg-numgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.sg-num {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--card-shadow);
+  touch-action: manipulation;
+}
+.sg-num.is-done { background: #d9f7e3; box-shadow: none; }
+.sg-num.is-wrong { background: #ffd9d9; color: var(--danger); animation: sg-shake 0.35s ease-in-out; }
+.sg-num-fx { position: absolute; inset: 0; border: 2px solid var(--danger); border-radius: 14px; animation: sg-burst 0.35s ease-out forwards; }
+
+/* 星キャッチ */
+.sg-catch { background: linear-gradient(#1b1f3b, #2d2a5e); color: #fff; }
+.sg-catch .sg-hint { color: rgba(255, 255, 255, 0.7); }
+.sg-fall {
+  position: absolute;
+  top: -48px;
+  width: 40px;
+  height: 40px;
+  margin-left: -20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 30px;
+  line-height: 1;
+  touch-action: manipulation;
+  animation-name: sg-drop;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  transition: transform 0.2s, opacity 0.2s;
+}
+.sg-fall.is-gone { transform: scale(1.7); opacity: 0; pointer-events: none; }
+.sg-boom {
+  position: absolute;
+  bottom: 40px;
+  margin-left: -28px;
+  width: 56px;
+  text-align: center;
+  color: #ffd27a;
+  font-size: 15px;
+  font-weight: 800;
+  pointer-events: none;
+  animation: sg-burst-up 0.6s ease-out forwards;
+}
+@keyframes sg-drop { from { top: -48px; } to { top: 100%; } }
+@keyframes sg-burst-up { 0% { opacity: 1; transform: translateY(0) scale(0.8); } 100% { opacity: 0; transform: translateY(-26px) scale(1.2); } }

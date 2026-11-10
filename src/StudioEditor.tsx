@@ -16,9 +16,22 @@ const KINDS: { kind: Kind; label: string; text: string }[] = [
   { kind: "extension", label: "拡張機能", text: "HTML・CSS・JavaScript で作るミニアプリ。隔離された枠の中で動きます" }
 ];
 
-// 拡張機能の大きさの上限（サーバーと同じ）
-const EXT_LIMITS = { html: 60_000, css: 60_000, js: 150_000 };
-const EXT_EXTERNAL = /(https?:|wss?:)\/\/|\bwww\./i;
+// 拡張機能の大きさの上限（HTML・CSS・JavaScript の合計。サーバーと同じ）
+const EXT_TOTAL_MAX = 150_000;
+// 読み込んでよいライブラリの配信元（サーバーの EXT_CDN_HOSTS と同じ）
+const EXT_CDN_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "cdn.tailwindcss.com", "code.jquery.com", "fonts.googleapis.com", "fonts.gstatic.com"];
+const EXT_URL = /(?:\b(https?|wss?):)?\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
+// 外のサイトのURLが混ざっていれば、その理由を返す（サーバーの externalUrlProblem と同じ判定）
+const externalUrlProblem = (code: string): string | null => {
+  if (/\bwww\./i.test(code)) return "外部サイトのURL";
+  for (const match of code.matchAll(EXT_URL)) {
+    const scheme = (match[1] ?? "https").toLowerCase();
+    const host = match[2].toLowerCase();
+    if (scheme.startsWith("ws")) return "通信用のURL（ws・wss）";
+    if (!EXT_CDN_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return `許可されていない外部サイトのURL（${host}）`;
+  }
+  return null;
+};
 const EXT_BLOCKED_JS = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts)\b|\bnavigator\s*\.\s*sendBeacon\b|\bimport\s*\(|\b(window\s*\.\s*)?(top|parent|opener)\s*\./;
 
 // はじめて作るときの見本（カウンター）
@@ -123,10 +136,13 @@ export function StudioEditor({
     if (kind === "extension") {
       list.push({ label: "HTML か JavaScript を入力", ok: Boolean(code.html.trim() || code.js.trim()) });
       list.push({
-        label: "大きさ（HTML・CSS 6万文字、JavaScript 15万文字まで）",
-        ok: code.html.length <= EXT_LIMITS.html && code.css.length <= EXT_LIMITS.css && code.js.length <= EXT_LIMITS.js
+        label: "大きさ（HTML・CSS・JavaScript を合わせて 15万文字まで）",
+        ok: code.html.length + code.css.length + code.js.length <= EXT_TOTAL_MAX
       });
-      list.push({ label: "外部サイトのURL・通信（fetch など）を使わない", ok: ![code.html, code.css, code.js].some((c) => EXT_EXTERNAL.test(c)) && !EXT_BLOCKED_JS.test(code.js) });
+      list.push({
+        label: "通信（fetch など）を使わず、読み込むのはライブラリの配信元だけ",
+        ok: ![code.html, code.css, code.js].some((c) => externalUrlProblem(c)) && !EXT_BLOCKED_JS.test(code.js)
+      });
     }
     return list;
   }, [allText, code, colors, currentThumb, description, editing, kind, nameTrim, priceNumber, questions, stamps.length]);
@@ -307,12 +323,12 @@ export function StudioEditor({
                 onChange={(e) => setCode((c) => ({ ...c, [codeTab]: e.target.value }))}
               />
               <small className="dev-muted">
-                {code[codeTab].length.toLocaleString("ja-JP")} / {EXT_LIMITS[codeTab].toLocaleString("ja-JP")} 文字
+                {(code.html.length + code.css.length + code.js.length).toLocaleString("ja-JP")} / {EXT_TOTAL_MAX.toLocaleString("ja-JP")} 文字（HTML・CSS・JavaScript の合計）
               </small>
               <h4 className="dev-ext-h">試し表示（買った人と同じ、隔離された枠で動きます）</h4>
               <ExtensionPreview html={code.html} css={code.css} js={code.js} />
               <p className="dev-muted">
-                外のサイトへの通信や、ソラチャットの画面・アカウント情報へのアクセスはできません。画像は data: で埋め込めます。買った人はいつでも開いて使えます。
+                通信（fetch など）や、ソラチャットの画面・アカウント情報へのアクセスはできません。ライブラリは cdnjs・jsdelivr・unpkg などの配信元から読み込めます（https のURLで指定）。画像は data: で埋め込めます。買った人はいつでも開いて使えます。
               </p>
             </div>
           )}

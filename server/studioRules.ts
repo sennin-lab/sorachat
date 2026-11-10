@@ -13,9 +13,19 @@ export const STAMP_MAX_SIDE = 512;
 export const STAMP_MIN_SIDE = 16;
 export const QUIZ_MIN_QUESTIONS = 5; // 対戦の5問に足りるように
 export const QUIZ_MAX_QUESTIONS = 50;
-export const EXT_HTML_MAX = 60_000; // 文字数
-export const EXT_CSS_MAX = 60_000;
-export const EXT_JS_MAX = 150_000;
+// 拡張機能のコードは、HTML・CSS・JavaScript を合わせて 15万文字まで（文字数）
+export const EXT_TOTAL_MAX = 150_000;
+// 外部から読み込んでよいライブラリの配信元（この中のホストの https だけ使える）。
+// ここに無いホストの URL は書けないし、読み込みも CSP で止まる。増やすときは、ここと EXTENSION_CSP を一緒に見直す。
+export const EXT_CDN_HOSTS = [
+  "cdnjs.cloudflare.com",
+  "cdn.jsdelivr.net",
+  "unpkg.com",
+  "cdn.tailwindcss.com",
+  "code.jquery.com",
+  "fonts.googleapis.com",
+  "fonts.gstatic.com"
+] as const;
 
 // 禁止語（最低限の例）。運営が増やしてください。ここに当たる文字列は公開できません。
 export const BLOCKED_WORDS = ["死ね", "殺してやる", "自殺しろ"];
@@ -181,10 +191,25 @@ export function checkBasics(name: unknown, description: unknown): string | null 
 
 export type ExtensionPayload = { html: string; css: string; js: string };
 
-// 外部の読み込み・別ページの埋め込み・ページの書き換えにつながるタグ
-const EXT_BLOCKED_TAGS = /<\s*(iframe|frame|frameset|object|embed|base|meta|link|portal|applet)\b|<\s*script[^>]*\bsrc\s*=/i;
-// 外のサイトを指す書き方（http(s)・ //ホスト・www.）
-const EXT_EXTERNAL = /(https?:|wss?:)\/\/|(^|[\s"'(=])\/\/[a-z0-9-]+\.|\bwww\./i;
+// 別ページの埋め込み・ページの書き換え・基準の場所の変更につながるタグ（外部の script・link は、下の配信元の確認で見る）
+const EXT_BLOCKED_TAGS = /<\s*(iframe|frame|frameset|object|embed|base|meta|portal|applet)\b/i;
+// URL（http(s)・ws(s)・ //ホスト）。ホストは「名前.名前」の形のものだけ拾う（コメントの // を巻き込まないように）
+const EXT_URL = /(?:\b(https?|wss?):)?\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
+// 読み込みに使うタグの src・href の値（script と link のときだけ）
+const EXT_LOAD_ATTR = /<\s*(?:script|link)\b[^>]*?\b(?:src|href)\s*=\s*["']?([^"'\s>]*)/gi;
+
+// 外のサイトの URL を使っていないか。配信元の一覧（EXT_CDN_HOSTS）の https だけ許す。問題があれば理由を返す
+export function externalUrlProblem(code: string): string | null {
+  if (/\bwww\./i.test(code)) return "外部サイトのURL";
+  for (const match of code.matchAll(EXT_URL)) {
+    const scheme = (match[1] ?? "https").toLowerCase();
+    const host = match[2].toLowerCase();
+    if (scheme.startsWith("ws")) return "通信用のURL（ws・wss）";
+    const allowed = EXT_CDN_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+    if (!allowed) return `許可されていない外部サイトのURL（${host}）`;
+  }
+  return null;
+}
 // 通信・親ページへの手出し・動的な読み込み（枠が止めるが、先に分かるものは公開前に断る）
 const EXT_BLOCKED_JS =
   /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|SharedWorker|ServiceWorker|RTCPeerConnection)\b|\bnavigator\s*\.\s*(sendBeacon|serviceWorker)\b|\bimport\s*\(|\b(window\s*\.\s*)?(top|parent|opener)\s*\./;
@@ -196,12 +221,20 @@ export function checkExtension(value: unknown): { ok: true; payload: ExtensionPa
   const css = typeof v.css === "string" ? v.css : "";
   const js = typeof v.js === "string" ? v.js : "";
   if (!html.trim() && !js.trim()) return { ok: false, error: "HTML か JavaScript のどちらかは入力してください。" };
-  if (html.length > EXT_HTML_MAX) return { ok: false, error: `HTML は ${EXT_HTML_MAX.toLocaleString("ja-JP")} 文字までです。` };
-  if (css.length > EXT_CSS_MAX) return { ok: false, error: `CSS は ${EXT_CSS_MAX.toLocaleString("ja-JP")} 文字までです。` };
-  if (js.length > EXT_JS_MAX) return { ok: false, error: `JavaScript は ${EXT_JS_MAX.toLocaleString("ja-JP")} 文字までです。` };
-  if (EXT_BLOCKED_TAGS.test(html)) return { ok: false, error: "HTML に iframe・embed・meta・link・外部 script などは使えません。" };
+  const total = html.length + css.length + js.length;
+  if (total > EXT_TOTAL_MAX) {
+    return { ok: false, error: `コードは HTML・CSS・JavaScript を合わせて ${EXT_TOTAL_MAX.toLocaleString("ja-JP")} 文字までです（今は ${total.toLocaleString("ja-JP")} 文字）。` };
+  }
+  if (EXT_BLOCKED_TAGS.test(html)) return { ok: false, error: "HTML に iframe・embed・meta・base などは使えません。" };
+  // 読み込むライブラリ（script・link）は、https の完全な URL で書く（相対の読み込みは使えない）
+  for (const match of html.matchAll(EXT_LOAD_ATTR)) {
+    if (!/^https:\/\//i.test(match[1])) return { ok: false, error: "ライブラリは https:// で始まる URL で指定してください。" };
+  }
   for (const [label, code] of [["HTML", html], ["CSS", css], ["JavaScript", js]] as const) {
-    if (EXT_EXTERNAL.test(code)) return { ok: false, error: `${label}に外部サイトのURLは書けません。画像などは data: で埋め込んでください。` };
+    const problem = externalUrlProblem(code);
+    if (problem) {
+      return { ok: false, error: `${label}に${problem}は書けません。使えるのは ${EXT_CDN_HOSTS.slice(0, 5).join("・")} などのライブラリの配信元だけです。画像などは data: で埋め込んでください。` };
+    }
   }
   if (EXT_BLOCKED_JS.test(js)) return { ok: false, error: "JavaScript に通信（fetch など）や親ページへのアクセスは使えません。" };
   if (/@import\b/i.test(css)) return { ok: false, error: "CSS の @import は使えません。" };
@@ -209,14 +242,16 @@ export function checkExtension(value: unknown): { ok: true; payload: ExtensionPa
 }
 
 // 隔離して表示するための HTML 文書を作る。配信するときは、必ず sandbox と下の CSP を付ける。
+// 外部から読めるのは、ライブラリの配信元（EXT_CDN_HOSTS）の https だけ。通信（connect-src）は今まで通り止める。
+const EXT_CDN_SOURCES = EXT_CDN_HOSTS.map((host) => `https://${host}`).join(" ");
 export const EXTENSION_CSP = [
   "sandbox allow-scripts",
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  "img-src data: blob:",
+  `script-src 'unsafe-inline' ${EXT_CDN_SOURCES}`,
+  `style-src 'unsafe-inline' ${EXT_CDN_SOURCES}`,
+  `img-src data: blob: ${EXT_CDN_SOURCES}`,
   "media-src data: blob:",
-  "font-src data:",
+  `font-src data: ${EXT_CDN_SOURCES}`,
   "connect-src 'none'",
   "form-action 'none'",
   "base-uri 'none'",

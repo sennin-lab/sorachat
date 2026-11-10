@@ -39,11 +39,13 @@ const CATEGORIES: { id: string; label: string; match: (item: StoreItemView) => b
   { id: "ext", label: "拡張機能", match: (i) => i.kind === "extension" && i.studioKind !== "quiz" && i.studioKind !== "ai_style" }
 ];
 
+// 「デフォルトを含む」を選んだときだけ、運営の基本の商品（source が store）を一覧に出す。それ以外の並び替えでは出さない
 const SORTS = [
   { id: "new", label: "新着順" },
   { id: "rating", label: "評価の高い順" },
   { id: "sales", label: "購入の多い順" },
-  { id: "price", label: "価格の安い順" }
+  { id: "price", label: "価格の安い順" },
+  { id: "with-default", label: "デフォルトを含む" }
 ] as const;
 type Sort = (typeof SORTS)[number]["id"];
 
@@ -202,8 +204,10 @@ export function StorePage({
   const shown = useMemo(() => {
     const tab = CATEGORIES.find((c) => c.id === category) ?? CATEGORIES[0];
     const q = query.trim().toLowerCase();
+    const withDefault = sort === "with-default";
     const filtered = allItems.filter(
       (item) =>
+        (withDefault || item.source !== "store") &&
         tab.match(item) &&
         (!q || item.name.toLowerCase().includes(q) || (item.creatorName ?? "").toLowerCase().includes(q) || item.description.toLowerCase().includes(q))
     );
