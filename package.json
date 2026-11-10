@@ -13,7 +13,8 @@
     "test:senninai": "tsx test/senninai-parse.test.ts && tsx test/senninai-flow.test.ts",
     "encrypt:backfill": "tsx server/scripts/encrypt-existing.ts",
     "test:pay": "tsx test/pay-helpers.test.ts && tsx test/pay-transfer.test.ts",
-    "test:studio": "tsx test/studio-extension.test.ts"
+    "test:studio": "tsx test/studio-extension.test.ts && tsx test/extension-points.test.ts",
+    "test:extension-points": "tsx test/extension-points.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",

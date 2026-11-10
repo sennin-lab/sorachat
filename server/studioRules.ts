@@ -259,6 +259,74 @@ export const EXTENSION_CSP = [
   "frame-ancestors 'self'"
 ].join("; ");
 
+// ---------- 拡張機能からのポイント配布・アカウント情報（ブリッジ） ----------
+// 枠の中のコードは、サーバーへ直接は通信できない（CSP の connect-src none）。
+// 代わりに window.sorachat という窓口を使い、ソラチャットの画面へ postMessage で頼む。
+// ソラチャットの画面は、頼まれた内容を確かめてからサーバーへ取り次ぐ（配布の上限・利用者の許可はサーバーが確かめる）。
+// 下の値は、ブリッジの仕組み・上限・開発者ドキュメント（senninstudio の仕様）の全部で同じものを使う。
+export const EXT_BRIDGE = {
+  channel: "sorachat-ext",
+  version: 1,
+  awardMin: 1, // 1回に配れる最小
+  awardMaxPerCall: 500, // 1回に配れる最大（1回の呼び出し）
+  reasonMax: 40, // 理由の最大文字数
+  requestIdMin: 8, // 同じ配布を押し直すための ID（省略すると毎回新しい ID）
+  requestIdMax: 64,
+  timeoutMs: 20_000
+} as const;
+
+// 枠の中で動くブリッジ。ユーザーのコードより先に読み込む。
+function extensionBridgeScript(): string {
+  const config = JSON.stringify({ channel: EXT_BRIDGE.channel, timeoutMs: EXT_BRIDGE.timeoutMs });
+  return `(function () {
+  var CONFIG = ${config};
+  var pending = Object.create(null);
+  var seq = 0;
+  function newId() { seq += 1; return seq + "-" + Math.random().toString(36).slice(2, 10); }
+  function call(type, data) {
+    return new Promise(function (resolve, reject) {
+      var id = newId();
+      var timer = setTimeout(function () {
+        delete pending[id];
+        var e = new Error("ソラチャットからの応答がありませんでした。");
+        e.code = "timeout";
+        reject(e);
+      }, CONFIG.timeoutMs);
+      pending[id] = { resolve: resolve, reject: reject, timer: timer };
+      window.parent.postMessage({ channel: CONFIG.channel, id: id, type: type, data: data || {} }, "*");
+    });
+  }
+  window.addEventListener("message", function (event) {
+    if (event.source !== window.parent) return;
+    var msg = event.data;
+    if (!msg || msg.channel !== CONFIG.channel || !pending[msg.id]) return;
+    var p = pending[msg.id];
+    delete pending[msg.id];
+    clearTimeout(p.timer);
+    if (msg.ok) {
+      p.resolve(msg.data);
+    } else {
+      var e = new Error(msg.error || "失敗しました。");
+      e.code = msg.code || "error";
+      e.data = msg.data || {};
+      p.reject(e);
+    }
+  });
+  window.sorachat = {
+    version: ${EXT_BRIDGE.version},
+    getAccount: function () { return call("account"); },
+    requestAccess: function () { return call("consent"); },
+    awardPoints: function (amount, reason, requestId) {
+      return call("award", {
+        amount: amount,
+        reason: reason || "",
+        requestId: requestId || (Date.now().toString(36) + "-" + newId())
+      });
+    }
+  };
+})();`;
+}
+
 export function buildExtensionDocument(payload: Partial<ExtensionPayload>): string {
   const html = payload.html ?? "";
   const css = (payload.css ?? "").replace(/<\/style/gi, "<\\/style");
@@ -280,6 +348,9 @@ window.addEventListener("error", function (event) {
   box.textContent = String((event && event.message) || "エラーが起きました");
   document.body.appendChild(box);
 });
+</script>
+<script>
+${extensionBridgeScript()}
 </script>
 <script>
 ${js}

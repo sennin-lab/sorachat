@@ -586,6 +586,64 @@ function StudioDocs() {
           ))}
         </section>
       ))}
+      <ExtensionSpec />
     </div>
+  );
+}
+
+// 拡張機能の仕様（AI に渡せる文書）。サーバーの定数（上限・窓口の名前・エラーの code）から作るので、ここには手で書かない
+function ExtensionSpec() {
+  const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/studio/extensions/spec", { credentials: "same-origin" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      })
+      .then((body) => {
+        if (alive) setText(body);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const copy = async () => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <section className="dev-doc dev-spec">
+      <h3>拡張機能の仕様（AI に渡す文書）</h3>
+      <p>
+        ポイントを配るゲームなどを作るときは、この文書を AI に渡してください。配れる上限・窓口の名前・エラーの code は、ソラチャットの実際の仕様から自動で作られます。
+      </p>
+      <div className="dev-spec-actions">
+        <button type="button" className="btn-small" onClick={copy} disabled={!text}>
+          {copied ? "コピーしました" : "文書をコピー"}
+        </button>
+      </div>
+      {failed ? (
+        <p className="notice error">仕様を読み込めませんでした。時間をおいてお試しください。</p>
+      ) : text === null ? (
+        <p className="dev-muted">読み込み中…</p>
+      ) : (
+        <pre className="dev-spec-text">{text}</pre>
+      )}
+    </section>
   );
 }

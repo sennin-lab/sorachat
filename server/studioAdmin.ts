@@ -7,6 +7,7 @@ import { requireAdmin } from "./admin.js";
 import { sb } from "./supabase.js";
 import { retryPayout } from "./studioPayout.js";
 import { imagesByWork, WORK_PREFIX } from "./studioData.js";
+import { ExtensionError, readExtensionGrant, setExtensionGrant } from "./extensionPoints.js";
 
 export const studioAdmin = Router();
 studioAdmin.use("/admin/studio", requireAdmin);
@@ -121,8 +122,34 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
       reporterName: reporterNames.get(r.reporter_id as string) ?? "",
       reason: r.reason,
       createdAt: r.created_at
-    }))
+    })),
+    // 拡張機能のときだけ、ポイント配布の上限（管理者が決める）を返す
+    grant: work.kind === "extension" ? await readExtensionGrant(id) : null
   });
+});
+
+// 拡張機能からのポイント配布の上限を決める。0 にするか active を false にすると、配布は止まる
+const grantSchema = z.object({
+  maxPoints: z.number().int().min(0).max(10_000_000),
+  active: z.boolean()
+});
+studioAdmin.put("/admin/studio/works/:id/grant", async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  const parsed = grantSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "配れるポイントは 0 以上の整数で、有効かどうかも指定してください。" });
+    return;
+  }
+  try {
+    res.json({ ok: true, grant: await setExtensionGrant(id, parsed.data) });
+  } catch (error) {
+    if (error instanceof ExtensionError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
 });
 
 const statusSchema = z.object({

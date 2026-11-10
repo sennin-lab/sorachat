@@ -12,6 +12,15 @@ import { canUseItem } from "./storeAccess.js";
 import { displayImagesFor, loadWork, toStudioItem, WORK_PREFIX } from "./studioData.js";
 import { ratingsByWork } from "./studioReviews.js";
 import {
+  awardExtensionPoints,
+  checkAwardRequest,
+  extensionAccess,
+  extensionSpecMarkdown,
+  ExtensionError,
+  grantExtensionConsent,
+  revokeExtensionConsent
+} from "./extensionPoints.js";
+import {
   buildExtensionDocument,
   checkAiStyle,
   checkBasics,
@@ -473,6 +482,94 @@ studio.post("/studio/extensions/preview", urlencoded({ extended: false, limit: "
     return;
   }
   sendExtensionDocument(res, checked.payload);
+});
+
+// ---- 拡張機能のブリッジ（ポイント配布・利用者の情報の許可） ----
+// 枠の中の拡張機能からの依頼は、ソラチャットの画面が取り次いでここに届く。許可・上限・配布はすべてここで確かめる。
+function extensionFail(res: import("express").Response, error: unknown) {
+  if (error instanceof ExtensionError) {
+    res.status(error.status).json({
+      ok: false,
+      error: error.message,
+      code: error.code,
+      ...(error.remaining !== undefined ? { remaining: error.remaining } : {})
+    });
+    return;
+  }
+  throw error;
+}
+
+// 開発者向けの仕様（AI に渡せる文書）。上の定数から作るので、ブリッジの実際の仕様と食い違わない
+studio.get("/studio/extensions/spec", (_req, res) => {
+  res.type("text/markdown; charset=utf-8").send(extensionSpecMarkdown());
+});
+
+// 拡張機能を開く前の状態。許可していない人には、アカウントの情報を返さない
+studio.get("/studio/extensions/:id/access", async (req, res) => {
+  const me = currentUserId(res);
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).json({ ok: false, error: "見つかりません。", code: "not_found" });
+    return;
+  }
+  try {
+    res.json({ ok: true, ...(await extensionAccess(me, id)) });
+  } catch (error) {
+    extensionFail(res, error);
+  }
+});
+
+// 情報の許可（この拡張機能に、アカウント情報を渡してよい）
+studio.post("/studio/extensions/:id/consent", async (req, res) => {
+  const me = currentUserId(res);
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).json({ ok: false, error: "見つかりません。", code: "not_found" });
+    return;
+  }
+  try {
+    await grantExtensionConsent(me, id);
+    res.json({ ok: true, consented: true });
+  } catch (error) {
+    extensionFail(res, error);
+  }
+});
+
+// 情報の許可を取り消す
+studio.delete("/studio/extensions/:id/consent", async (req, res) => {
+  const me = currentUserId(res);
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).json({ ok: false, error: "見つかりません。", code: "not_found" });
+    return;
+  }
+  await revokeExtensionConsent(me, id);
+  res.json({ ok: true, consented: false });
+});
+
+// ポイントを配る（許可した本人にだけ・管理者の上限の中で）
+studio.post("/studio/extensions/:id/award", async (req, res) => {
+  const me = currentUserId(res);
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).json({ ok: false, error: "見つかりません。", code: "not_found" });
+    return;
+  }
+  const checked = checkAwardRequest(req.body);
+  if (!checked.ok) {
+    res.status(400).json({ ok: false, error: checked.error, code: "invalid" });
+    return;
+  }
+  try {
+    const result = await awardExtensionPoints(me, id, {
+      amount: checked.amount,
+      reason: checked.reason,
+      requestId: checked.requestId
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    extensionFail(res, error);
+  }
 });
 
 // 作品の画像（サムネイル・スタンプ）。ログインしている人だけが見られる

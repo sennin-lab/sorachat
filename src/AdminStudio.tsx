@@ -31,7 +31,10 @@ type WorkDetail = {
   images: { id: string; role: string }[];
   creator: { id: string; name: string; suspended: boolean; suspendedReason: string | null };
   reports: { reporterName: string; reason: string; createdAt: string }[];
+  grant: GrantInfo | null;
 };
+// 拡張機能からのポイント配布の上限（管理者が決める）
+type GrantInfo = { maxPoints: number; usedPoints: number; active: boolean };
 type ReportRow = { id: string; name: string; kind: string; status: string; hiddenReason: string | null; creatorName: string; reportCount: number; latestAt: string };
 type PayoutRow = { id: string; creatorName: string; workName: string; amount: number; status: string; attempts: number; lastError: string | null; createdAt: string };
 
@@ -148,6 +151,61 @@ function WorksList({ openId, onOpen }: { openId: string | null; onOpen: (id: str
   );
 }
 
+// 拡張機能の配布の上限を決める（0 にするか、配布を許可しないにすると止まる）
+function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: GrantInfo | null; onChanged: () => Promise<void> }) {
+  const [max, setMax] = useState(String(grant?.maxPoints ?? 0));
+  const [active, setActive] = useState(grant?.active ?? false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    setMax(String(grant?.maxPoints ?? 0));
+    setActive(grant?.active ?? false);
+  }, [grant?.maxPoints, grant?.active]);
+
+  const save = async () => {
+    const n = Number(max);
+    if (!Number.isInteger(n) || n < 0) {
+      setMessage({ ok: false, text: "0 以上の整数で入力してください。" });
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      await adminApi(`/api/admin/studio/works/${id}/grant`, { method: "PUT", body: JSON.stringify({ maxPoints: n, active }) });
+      setMessage({ ok: true, text: "保存しました。" });
+      await onChanged();
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="admin-grant">
+      <h4 className="admin-subtitle">ポイントの配布の上限</h4>
+      <p className="admin-meta">
+        この拡張機能が利用者に配れる、合計のポイントです（利用者ごとではなく全体）。作者は変えられません。
+      </p>
+      <p className="admin-meta">配布済み：{grant?.usedPoints ?? 0} pt</p>
+      <div className="admin-grant-row">
+        <label>
+          上限{" "}
+          <input type="number" inputMode="numeric" min={0} value={max} onChange={(e) => setMax(e.target.value)} disabled={busy} /> pt
+        </label>
+        <label className="admin-grant-check">
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={busy} /> 配布を許可する
+        </label>
+      </div>
+      <button type="button" className="btn-small" disabled={busy} onClick={save}>
+        保存
+      </button>
+      {message && <p className={`notice center${message.ok ? "" : " error"}`}>{message.text}</p>}
+    </section>
+  );
+}
+
 function WorkDetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const [work, setWork] = useState<WorkDetail | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -214,6 +272,8 @@ function WorkDetailView({ id, onBack }: { id: string; onBack: () => void }) {
         {work.hiddenReason && `（${REASON[work.hiddenReason] ?? work.hiddenReason}）`}
       </p>
       <p className="admin-desc">{work.description || "（説明なし）"}</p>
+
+      {work.kind === "extension" && <ExtensionGrantEditor id={work.id} grant={work.grant} onChanged={load} />}
 
       <div className="admin-thumbs">
         {work.images.map((img) => (
