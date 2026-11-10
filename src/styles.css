@@ -2934,6 +2934,8 @@ textarea.dev-input { resize: vertical; }
 .ext-consent-small { font-size: 12px; color: var(--muted); }
 .ext-consent-list { margin: 0; padding: 10px 14px 10px 30px; border-radius: 12px; background: var(--raised); font-size: 14px; line-height: 1.8; }
 .ext-consent .confirm-actions { margin-top: 6px; }
+/* 拡張機能の全画面（z-index 60）より前に出す。これがないと、シートが画面の裏に隠れて白い画面になる */
+.ext-consent-backdrop { z-index: 70; }
 
 /* 管理者：拡張機能の配布の上限 */
 .admin-grant { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; padding: 12px; border-radius: 12px; background: var(--raised); }

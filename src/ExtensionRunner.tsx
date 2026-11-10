@@ -192,7 +192,7 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
         ) : loadError ? (
           <p className="notice error center">{loadError}</p>
         ) : (
-          <div className="ext-wait">{asking ? "" : "読み込み中…"}</div>
+          <div className="ext-wait">{asking ? "アカウント情報の許可を確認してください" : "読み込み中…"}</div>
         )}
         <p className="ext-note">
           この拡張機能は作者が作ったものです。ソラチャットのアカウント情報は、あなたが許可した範囲でだけ渡されます。
