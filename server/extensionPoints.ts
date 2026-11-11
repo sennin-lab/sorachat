@@ -12,7 +12,7 @@ import { sb } from "./supabase.js";
 import { adjustPoints, DEFINITE_FAILURE, isLinked, SenninError } from "./senninPoints.js";
 import { recordSale } from "./studioPayout.js";
 import { config } from "./config.js";
-import { EXT_BRIDGE, EXT_CDN_HOSTS, EXT_TOTAL_MAX } from "./studioRules.js";
+import { EXT_BRIDGE, EXT_TOTAL_MAX } from "./studioRules.js";
 
 // 利用者が1分間に配布を頼める回数（連打・暴走の防止）
 const AWARD_PER_MINUTE = 60;
@@ -396,11 +396,11 @@ export function extensionSpecMarkdown(): string {
 拡張機能は、HTML・CSS・JavaScript で作るミニアプリです。ソラチャットの画面の中ではなく、隔離された枠（iframe の sandbox）の中で動きます。
 
 ## 書けるもの
-- HTML：合計 ${EXT_TOTAL_MAX.toLocaleString("en-US")} 文字まで（HTML・CSS・JavaScript の合計）。iframe・embed・meta・base は使えません。
-- CSS：@import は使えません。
-- JavaScript：fetch・XMLHttpRequest・WebSocket など通信、window.parent / top への手出しは使えません。
-- 読み込めるライブラリは、https:// で始まる次の配信元だけです：${EXT_CDN_HOSTS.join("、")}
-- 画像は data: で埋め込みます。
+- HTML：合計 ${EXT_TOTAL_MAX.toLocaleString("en-US")} 文字まで（HTML・CSS・JavaScript の合計）。iframe・embed・meta・base など隔離境界に影響する要素は使えません。
+- CSS：@import と外部スタイルシートを利用できます。
+- JavaScript：fetch・XMLHttpRequest・WebSocket などの通信 API を利用できます。
+- HTTPS の外部ライブラリ・画像・フォントなどを利用できます。
+- 拡張機能は sandbox 内で動作し、SoraChat 本体の認証情報や DOM にはアクセスできません。
 
 ## ソラチャットの窓口：window.sorachat
 枠の中から、ソラチャットに頼みごとをするための窓口です。すべて Promise を返します。

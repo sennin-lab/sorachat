@@ -18,21 +18,6 @@ const KINDS: { kind: Kind; label: string; text: string }[] = [
 
 // 拡張機能の大きさの上限（HTML・CSS・JavaScript の合計。サーバーと同じ）
 const EXT_TOTAL_MAX = 150_000;
-// 読み込んでよいライブラリの配信元（サーバーの EXT_CDN_HOSTS と同じ）
-const EXT_CDN_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "cdn.tailwindcss.com", "code.jquery.com", "fonts.googleapis.com", "fonts.gstatic.com"];
-const EXT_URL = /(?:\b(https?|wss?):)?\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
-// 外のサイトのURLが混ざっていれば、その理由を返す（サーバーの externalUrlProblem と同じ判定）
-const externalUrlProblem = (code: string): string | null => {
-  if (/\bwww\./i.test(code)) return "外部サイトのURL";
-  for (const match of code.matchAll(EXT_URL)) {
-    const scheme = (match[1] ?? "https").toLowerCase();
-    const host = match[2].toLowerCase();
-    if (scheme.startsWith("ws")) return "通信用のURL（ws・wss）";
-    if (!EXT_CDN_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return `許可されていない外部サイトのURL（${host}）`;
-  }
-  return null;
-};
-const EXT_BLOCKED_JS = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts)\b|\bnavigator\s*\.\s*sendBeacon\b|\bimport\s*\(|\b(window\s*\.\s*)?(top|parent|opener)\s*\./;
 
 // はじめて作るときの見本（カウンター）
 const EXT_STARTER = {
@@ -140,8 +125,8 @@ export function StudioEditor({
         ok: code.html.length + code.css.length + code.js.length <= EXT_TOTAL_MAX
       });
       list.push({
-        label: "通信（fetch など）を使わず、読み込むのはライブラリの配信元だけ",
-        ok: ![code.html, code.css, code.js].some((c) => externalUrlProblem(c)) && !EXT_BLOCKED_JS.test(code.js)
+        label: "外部リソース・通信 API（sandbox 内で利用可能）",
+        ok: true
       });
     }
     return list;
@@ -328,7 +313,7 @@ export function StudioEditor({
               <h4 className="dev-ext-h">試し表示（買った人と同じ、隔離された枠で動きます）</h4>
               <ExtensionPreview html={code.html} css={code.css} js={code.js} />
               <p className="dev-muted">
-                通信（fetch など）や、ソラチャットの画面・アカウント情報へのアクセスはできません。ライブラリは cdnjs・jsdelivr・unpkg などの配信元から読み込めます（https のURLで指定）。画像は data: で埋め込めます。買った人はいつでも開いて使えます。
+                HTTPS の外部ライブラリ・画像・フォントや fetch などの通信 API を利用できます。拡張機能は sandbox 内で動作し、ソラチャット本体の画面や認証情報には直接アクセスできません。アカウント情報は window.sorachat の許可機能を通して利用できます。買った人はいつでも開いて使えます。
               </p>
             </div>
           )}
