@@ -2949,22 +2949,43 @@ textarea.dev-input { resize: vertical; }
 .dev-spec-text { margin: 0; padding: 14px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.7; border-radius: 12px; background: var(--raised); }
 
 /* ポイントでの支払いの確認画面（拡張機能から頼まれたとき、ソラチャットの画面の中に出る） */
-.ext-pay-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.42); }
-.ext-pay { width: min(360px, 100%); overflow: hidden; border-radius: 22px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); animation: fade-in .22s ease both; }
-.ext-pay-head { display: flex; flex-direction: column; gap: 2px; padding: 16px 20px 12px; background: linear-gradient(135deg, var(--accent), var(--accent-ink)); color: #fff; }
-.ext-pay-brand { font-size: 12px; letter-spacing: .04em; opacity: .9; }
-.ext-pay-app { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ext-pay-body { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px 6px; }
+.ext-pay-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(12, 22, 36, 0.46); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); animation: ext-pay-fade 0.2s ease both; }
+.ext-pay-backdrop.is-leaving { animation: ext-pay-fade-out 0.2s ease both; }
+.ext-pay { width: min(340px, 100%); overflow: hidden; border-radius: 24px; background: var(--panel); color: var(--text); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.06); animation: ext-pay-pop 0.36s var(--ease-spring) both; }
+.ext-pay.is-leaving { animation: ext-pay-drop 0.2s var(--ease-out) both; }
+.ext-pay-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 18px; background: linear-gradient(135deg, var(--accent) 0%, var(--accent-ink) 100%); color: #fff; }
+.ext-pay-coin { flex: none; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: #fff; color: var(--accent-ink); font-size: 14px; font-weight: 800; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14); }
+.ext-pay-head-text { display: flex; flex-direction: column; min-width: 0; }
+.ext-pay-brand { font-size: 11px; letter-spacing: 0.06em; opacity: 0.9; }
+.ext-pay-app { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-pay-body { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 20px 20px 6px; text-align: center; }
+.ext-pay-label { margin: 0; font-size: 12px; color: var(--muted); letter-spacing: 0.04em; }
 .ext-pay-title { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.5; word-break: break-word; }
-.ext-pay-amount { margin: 0; font-size: 34px; font-weight: 800; line-height: 1.1; color: var(--accent-ink); }
-.ext-pay-amount span { font-variant-numeric: tabular-nums; }
-.ext-pay-rows { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--raised); }
+.ext-pay-amount { margin: 2px 0 4px; font-weight: 800; line-height: 1.1; color: var(--accent-ink); }
+.ext-pay-amount span { display: inline-block; font-size: 42px; font-variant-numeric: tabular-nums; animation: ext-pay-count 0.42s var(--ease-out) both; }
+.ext-pay-amount small { font-size: 16px; font-weight: 700; }
+.ext-pay-rows { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border-radius: 16px; background: var(--raised); text-align: left; }
 .ext-pay-rows > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; }
 .ext-pay-rows dt { color: var(--muted); }
-.ext-pay-rows dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
-.ext-pay-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.ext-pay-rows dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ext-pay-note { margin: 2px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
 .ext-pay-body .notice { margin: 0; }
-.ext-pay-done { color: var(--accent-ink); }
-.ext-pay-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 20px calc(16px + env(safe-area-inset-bottom, 0px)); }
-.ext-pay-actions button { padding: 12px 0; border-radius: 12px; }
+.ext-pay-done { color: var(--accent-ink); font-weight: 700; }
+.ext-pay-check { align-self: center; display: grid; place-items: center; width: 68px; height: 68px; border-radius: 50%; background: var(--accent); box-shadow: 0 8px 22px rgba(53, 127, 185, 0.35); animation: ext-pay-pop 0.45s var(--ease-spring) both; }
+.ext-pay-check svg { width: 34px; height: 34px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 32; stroke-dashoffset: 32; animation: ext-pay-draw 0.45s 0.18s var(--ease-out) forwards; }
+.ext-pay-err { animation: ext-pay-shake 0.36s ease both; }
+.ext-pay-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px 20px calc(18px + env(safe-area-inset-bottom, 0px)); }
+.ext-pay-actions button { padding: 13px 0; border-radius: 14px; font-weight: 700; transition: transform 0.12s var(--ease-out), opacity 0.2s; }
+.ext-pay-actions button:not(:disabled):active { transform: scale(0.97); }
 .ext-pay-actions > :only-child { grid-column: 1 / -1; }
+@keyframes ext-pay-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ext-pay-fade-out { to { opacity: 0; } }
+@keyframes ext-pay-pop { from { opacity: 0; transform: translateY(20px) scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes ext-pay-drop { to { opacity: 0; transform: translateY(14px) scale(0.96); } }
+@keyframes ext-pay-count { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes ext-pay-draw { to { stroke-dashoffset: 0; } }
+@keyframes ext-pay-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+@media (prefers-reduced-motion: reduce) {
+  .ext-pay-backdrop, .ext-pay, .ext-pay-amount span, .ext-pay-check, .ext-pay-err { animation: none !important; }
+  .ext-pay-check svg { animation: none !important; stroke-dashoffset: 0; }
+}
