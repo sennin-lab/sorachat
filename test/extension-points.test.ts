@@ -64,3 +64,13 @@ assert.equal(checkChargeRequest({ amount: 10, title: "ヒント" }).ok, false);
 assert.ok(doc.includes("charge: function"), "支払いの窓口がブリッジにある");
 assert.ok(doc.includes("CONFIG.chargeTimeoutMs"), "支払いは確認を待つ長さで待つ");
 assert.ok(extensionSpecMarkdown().includes("window.sorachat.charge(amount, title, requestId)"), "仕様に支払いが書いてある");
+
+// 1分あたりの上限（1人・1分間に受け取れるポイント）と、拡張機能内課金の実装手順：仕様書に書いてある
+assert.ok(spec.includes("minute_limit"), "1分あたりの上限のエラー code を書いている");
+assert.ok(spec.includes("1人が1分間に受け取れるポイントにも上限"), "1分あたりの上限を書いている");
+assert.ok(spec.includes("拡張機能内課金の実装手順"), "課金の実装手順を書いている");
+assert.ok(spec.includes("拡張機能内課金の完全な例"), "課金の完全な例を書いている");
+assert.ok(spec.includes("localStorage"), "枠の中で購入状態を保存できないことを書いている");
+assert.ok(!spec.includes("${"), "仕様書に未展開の式が残っていない");
+
+console.log("extension-points: charge and minute limit ok");

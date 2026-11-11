@@ -55,6 +55,7 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
    - `supabase/schema_v32.sql`（senningames：ゲームの追加）
    - `supabase/schema_v33.sql`（拡張機能からのポイント配布の上限・利用者の情報の許可・配布の記録）
    - `supabase/schema_v34.sql`（拡張機能の中のポイント支払い（確認画面つき）・認定開発者）
+   - `supabase/schema_v35.sql`（拡張機能の配布：1人が1分間に受け取れるポイントの上限）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。
@@ -166,9 +167,10 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
 
 - 拡張機能を開くと、先に「アカウント情報の許可」の確認（下から出るシート）が出ます。許可するまで枠は開きません。許可したアカウントの情報（ユーザー名・表示名・ID、仙人アカウントの連携の有無と仙人ID）だけを、拡張機能に渡します。許可は「許可を取り消して閉じる」からいつでも取り消せます。
 - `window.sorachat.awardPoints(amount, reason, requestId)` で、許可した本人に仙人アカウントのポイントを配ります。配れる量は、**管理者が拡張機能ごとに決めた上限**の中だけです（管理者パネル → 作品 → 「ポイントの配布の上限」）。上限を超えると 409 で断ります。作者は上限を変えられません。
+- 1人が1分間に受け取れるポイントの上限（`per_user_minute_max`。0 は制限なし）も、管理者が拡張機能ごとに決めます（超えると 429・code: `minute_limit`）。
 - 配布は `POST /api/studio/extensions/:id/award` で行い、枠の確保（`sc_extension_reserve`）と記録は DB の関数で1つにまとめます。`requestId` が同じなら二重には配りません。仙人アカウントへの加算は `idempotency_key`（`ext-award-配布ID`）で行います。
 - 開発者向けの仕様は、senninstudio の「ドキュメント」タブに出ます（`GET /api/studio/extensions/spec`）。上限・窓口の名前・エラーの code は、サーバーの定数（`EXT_BRIDGE` と `server/extensionPoints.ts`）から自動で作られるので、文書を手で直す必要はありません。AI に渡すときは、その文書をコピーしてください。
-- 注意: `supabase/schema_v33.sql` の実行が必要です。
+- 注意: `supabase/schema_v33.sql` と `supabase/schema_v35.sql` の実行が必要です。
 - 検査: `npm run test:extension-points`（ブリッジの構文・仕様の内容）。配布の枠の関数は、PostgreSQL で確かめ済みです。
 
 ## 画像・ファイルの保存先（Turso）

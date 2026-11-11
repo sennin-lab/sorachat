@@ -130,16 +130,18 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
 });
 
 // 拡張機能からのポイント配布の上限を決める。0 にするか active を false にすると、配布は止まる
+// perUserMinuteMax：1人が1分間に受け取れるポイントの上限（0 は制限なし。省略すると今の値を残す）
 const grantSchema = z.object({
   maxPoints: z.number().int().min(0).max(10_000_000),
-  active: z.boolean()
+  active: z.boolean(),
+  perUserMinuteMax: z.number().int().min(0).max(10_000_000).optional()
 });
 studioAdmin.put("/admin/studio/works/:id/grant", async (req, res) => {
   const id = idParam(req, res);
   if (!id) return;
   const parsed = grantSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "配れるポイントは 0 以上の整数で、有効かどうかも指定してください。" });
+    res.status(400).json({ error: "配れるポイントと1分あたりの上限は 0 以上の整数で、有効かどうかも指定してください。" });
     return;
   }
   try {

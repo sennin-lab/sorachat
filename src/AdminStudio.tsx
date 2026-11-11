@@ -34,7 +34,7 @@ type WorkDetail = {
   grant: GrantInfo | null;
 };
 // 拡張機能からのポイント配布の上限（管理者が決める）
-type GrantInfo = { maxPoints: number; usedPoints: number; active: boolean };
+type GrantInfo = { maxPoints: number; usedPoints: number; active: boolean; perUserMinuteMax: number };
 type ReportRow = { id: string; name: string; kind: string; status: string; hiddenReason: string | null; creatorName: string; reportCount: number; latestAt: string };
 type PayoutRow = { id: string; creatorName: string; workName: string; amount: number; status: string; attempts: number; lastError: string | null; createdAt: string };
 
@@ -154,25 +154,31 @@ function WorksList({ openId, onOpen }: { openId: string | null; onOpen: (id: str
 // 拡張機能の配布の上限を決める（0 にするか、配布を許可しないにすると止まる）
 function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: GrantInfo | null; onChanged: () => Promise<void> }) {
   const [max, setMax] = useState(String(grant?.maxPoints ?? 0));
+  const [perMinute, setPerMinute] = useState(String(grant?.perUserMinuteMax ?? 0));
   const [active, setActive] = useState(grant?.active ?? false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     setMax(String(grant?.maxPoints ?? 0));
+    setPerMinute(String(grant?.perUserMinuteMax ?? 0));
     setActive(grant?.active ?? false);
-  }, [grant?.maxPoints, grant?.active]);
+  }, [grant?.maxPoints, grant?.perUserMinuteMax, grant?.active]);
 
   const save = async () => {
     const n = Number(max);
-    if (!Number.isInteger(n) || n < 0) {
+    const m = Number(perMinute);
+    if (!Number.isInteger(n) || n < 0 || !Number.isInteger(m) || m < 0) {
       setMessage({ ok: false, text: "0 以上の整数で入力してください。" });
       return;
     }
     setBusy(true);
     setMessage(null);
     try {
-      await adminApi(`/api/admin/studio/works/${id}/grant`, { method: "PUT", body: JSON.stringify({ maxPoints: n, active }) });
+      await adminApi(`/api/admin/studio/works/${id}/grant`, {
+        method: "PUT",
+        body: JSON.stringify({ maxPoints: n, active, perUserMinuteMax: m })
+      });
       setMessage({ ok: true, text: "保存しました。" });
       await onChanged();
     } catch (e) {
@@ -189,10 +195,25 @@ function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: Gra
         この拡張機能が利用者に配れる、合計のポイントです（利用者ごとではなく全体）。作者は変えられません。
       </p>
       <p className="admin-meta">配布済み：{grant?.usedPoints ?? 0} pt</p>
+      <p className="admin-meta">
+        1人が1分間に受け取れるポイントの上限です。0 にすると、1分あたりの制限はありません。
+      </p>
       <div className="admin-grant-row">
         <label>
           上限{" "}
           <input type="number" inputMode="numeric" min={0} value={max} onChange={(e) => setMax(e.target.value)} disabled={busy} /> pt
+        </label>
+        <label>
+          1人・1分あたり{" "}
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={perMinute}
+            onChange={(e) => setPerMinute(e.target.value)}
+            disabled={busy}
+          />{" "}
+          pt
         </label>
         <label className="admin-grant-check">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={busy} /> 配布を許可する

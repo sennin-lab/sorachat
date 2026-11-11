@@ -385,56 +385,40 @@ function PaySheet({
   const canPay = !busy && !paid && !needsLink && balance !== null && !shortage;
   const after = balance === null ? null : paid && paidPoints !== null ? paidPoints : balance - request.amount;
 
+  // 見た目は、アプリのほかの確認画面（ConfirmDialog）と同じ。処理は変えていない
   return (
-    <div className={`ext-pay-backdrop${leaving ? " is-leaving" : ""}`}>
-      <div className={`ext-pay${leaving ? " is-leaving" : ""}${paid ? " is-paid" : ""}`} role="dialog" aria-modal="true" aria-label="ポイントでの支払い">
-        <div className="ext-pay-head">
-          <span className="ext-pay-coin" aria-hidden="true">pt</span>
-          <span className="ext-pay-head-text">
-            <span className="ext-pay-brand">ソラチャット ポイント</span>
-            <span className="ext-pay-app">{extName}</span>
-          </span>
-        </div>
+    <div className={`sheet-backdrop confirm-backdrop ext-pay-backdrop${leaving ? " is-closing" : ""}`}>
+      <div className={`sheet confirm-sheet ext-pay${leaving ? " is-closing" : ""}`} role="dialog" aria-modal="true" aria-label="ポイントでの支払い">
+        <strong className="confirm-title">ポイントで支払う</strong>
+        <p className="ext-pay-app">{extName}</p>
+
+        <p className="ext-pay-title">{request.title}</p>
+        <p className="ext-pay-amount">{request.amount.toLocaleString("ja-JP")} pt</p>
+
+        <dl className="ext-pay-rows">
+          <div>
+            <dt>{paid ? "支払い前の残高" : "いまの残高"}</dt>
+            <dd>{balance === null ? (needsLink ? "—" : "読み込み中…") : `${balance.toLocaleString("ja-JP")} pt`}</dd>
+          </div>
+          <div>
+            <dt>{paid ? "支払い後の残高" : "支払い後"}</dt>
+            <dd>{after === null ? "—" : `${after.toLocaleString("ja-JP")} pt`}</dd>
+          </div>
+        </dl>
 
         <div className="ext-pay-body">
-          {paid ? (
-            <div className="ext-pay-check" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M5 12.5l4.5 4.5L19 7.5" />
-              </svg>
-            </div>
-          ) : (
-            <p className="ext-pay-label">お支払い内容</p>
-          )}
-          <p className="ext-pay-title">{request.title}</p>
-          <p className="ext-pay-amount">
-            <span>{request.amount.toLocaleString("ja-JP")}</span>
-            <small> pt</small>
-          </p>
-
-          <dl className="ext-pay-rows">
-            <div>
-              <dt>{paid ? "支払い前の残高" : "いまの残高"}</dt>
-              <dd>{balance === null ? (needsLink ? "—" : "読み込み中…") : `${balance.toLocaleString("ja-JP")} pt`}</dd>
-            </div>
-            <div>
-              <dt>{paid ? "支払い後の残高" : "支払い後"}</dt>
-              <dd>{after === null ? "—" : `${after.toLocaleString("ja-JP")} pt`}</dd>
-            </div>
-          </dl>
-
           <p className="ext-pay-note">お支払いは、この拡張機能の作者へ全額届きます。</p>
-          {needsLink && <p className="notice error center ext-pay-err">ポイントで支払うには、仙人アカウントとの連携が必要です。</p>}
-          {shortage && !needsLink && <p className="notice error center ext-pay-err">ポイントが足りません。</p>}
-          {paid && <p className="notice center ext-pay-done">支払いが完了しました。</p>}
+          {needsLink && <p className="notice error ext-pay-err">ポイントで支払うには、仙人アカウントとの連携が必要です。</p>}
+          {shortage && !needsLink && <p className="notice error ext-pay-err">ポイントが足りません。</p>}
+          {paid && <p className="notice ext-pay-done">支払いが完了しました。</p>}
           {error && (
-            <p key={errorTick} className="notice error center ext-pay-err">
+            <p key={errorTick} className="notice error ext-pay-err">
               {error}
             </p>
           )}
         </div>
 
-        <div className="ext-pay-actions">
+        <div className="confirm-actions">
           {paid ? (
             <button type="button" className="btn-primary" onClick={close}>
               閉じる

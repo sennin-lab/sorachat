@@ -180,7 +180,14 @@ export async function awardExtensionPoints(
     p_reason: request.reason
   });
   if (error) throw error;
-  const reserved = (data ?? {}) as { result: string; id?: string; status?: string; points?: number; remaining?: number };
+  const reserved = (data ?? {}) as {
+    result: string;
+    id?: string;
+    status?: string;
+    points?: number;
+    remaining?: number;
+    limit?: number;
+  };
 
   if (reserved.result === "inactive") {
     throw new ExtensionError(403, "inactive", "この拡張機能は、ポイントを配る許可がありません。");
@@ -188,6 +195,16 @@ export async function awardExtensionPoints(
   if (reserved.result === "exhausted") {
     const remaining = Number(reserved.remaining ?? 0);
     throw new ExtensionError(409, "exhausted", `この拡張機能が配れるポイントは、あと ${remaining}pt です。`, remaining);
+  }
+  if (reserved.result === "minute_exhausted") {
+    const remaining = Math.max(0, Number(reserved.remaining ?? 0));
+    const limit = Number(reserved.limit ?? 0);
+    throw new ExtensionError(
+      429,
+      "minute_limit",
+      `この拡張機能は、1人が1分間に受け取れるのは ${limit}pt までです。あと ${remaining}pt です。少し待ってからお試しください。`,
+      remaining
+    );
   }
   if (reserved.result === "exists" && reserved.status === "done") {
     return { awarded: Number(reserved.points), replayed: true, points: null as number | null };
@@ -352,14 +369,17 @@ export async function chargeExtensionPoints(me: string, workId: string, request:
 
 // ---- 管理者：配布の上限 ----
 
-export async function setExtensionGrant(workId: string, args: { maxPoints: number; active: boolean }) {
+export async function setExtensionGrant(
+  workId: string,
+  args: { maxPoints: number; active: boolean; perUserMinuteMax?: number }
+) {
   const work = await loadWork(workId);
   if (!work || work.kind !== "extension") {
     throw new ExtensionError(404, "not_found", "拡張機能が見つかりません。");
   }
   const { data: current, error: readError } = await sb
     .from("sc_extension_grants")
-    .select("used_points")
+    .select("used_points, per_user_minute_max")
     .eq("work_id", workId)
     .maybeSingle();
   if (readError) throw readError;
@@ -367,24 +387,37 @@ export async function setExtensionGrant(workId: string, args: { maxPoints: numbe
   if (args.maxPoints < used) {
     throw new ExtensionError(400, "invalid", `すでに ${used}pt 配られているため、上限は ${used}pt より少なくできません。`);
   }
+  // 1分あたりの上限は、指定がなければ今の値を残す
+  const perUserMinuteMax = args.perUserMinuteMax ?? Number(current?.per_user_minute_max ?? 0);
   // used_points は触らない（すでに配った分を残すため）。行がなければ 0 で作られる
   const { error } = await sb.from("sc_extension_grants").upsert(
-    { work_id: workId, max_points: args.maxPoints, active: args.active, updated_at: new Date().toISOString() },
+    {
+      work_id: workId,
+      max_points: args.maxPoints,
+      active: args.active,
+      per_user_minute_max: perUserMinuteMax,
+      updated_at: new Date().toISOString()
+    },
     { onConflict: "work_id" }
   );
   if (error) throw error;
-  return { maxPoints: args.maxPoints, usedPoints: used, active: args.active };
+  return { maxPoints: args.maxPoints, usedPoints: used, active: args.active, perUserMinuteMax };
 }
 
 export async function readExtensionGrant(workId: string) {
   const { data, error } = await sb
     .from("sc_extension_grants")
-    .select("max_points, used_points, active")
+    .select("max_points, used_points, active, per_user_minute_max")
     .eq("work_id", workId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return { maxPoints: Number(data.max_points), usedPoints: Number(data.used_points), active: Boolean(data.active) };
+  return {
+    maxPoints: Number(data.max_points),
+    usedPoints: Number(data.used_points),
+    active: Boolean(data.active),
+    perUserMinuteMax: Number(data.per_user_minute_max ?? 0)
+  };
 }
 
 // ---- 開発者向けの仕様（senninstudio のドキュメントに表示する。上の定数から作るので、食い違わない） ----
@@ -485,11 +518,73 @@ document.getElementById("buy").onclick = async () => {
 - 支払いの確認画面の代わりになる画面（偽の支払い画面、残高の偽装など）を、枠の中に作ってはいけません。確認画面は、ソラチャットが出すものだけです。
 - 支払いを頼んだあとは、結果（成功・キャンセル・失敗）に合わせて表示を変えてください。
 
+### 拡張機能内課金の実装手順
+1. 買うボタンを作ります。押す前に、何が手に入るか・いくら払うかを枠の中に表示してください（確認画面に出るのと同じ金額にします）。
+2. ボタンが押されたら、requestId を1回だけ作ります（例：「buy-」+ 時刻 + ランダムな文字）。同じ購入を押し直すときは、同じ requestId を使います。
+3. window.sorachat.charge(金額, 品名, requestId) を呼びます。確認画面が出ているあいだは、ボタンを押せないようにしてください。
+4. 結果で分けます。成功なら、買ったものを使えるようにします。cancelled なら何もしません。unknown か timeout なら、「同じ購入を押し直せば、二重には払われません」と伝えます。それ以外のエラーは、理由を表示して、次の購入では新しい requestId を作ります。
+5. 結果を受けたら、ボタンを押せる状態に戻します。
+
+### 拡張機能内課金の注意
+- 枠は sandbox で動くため、localStorage・sessionStorage・Cookie は使えません。次に開いたときに「買ったかどうか」を覚える仕組みは、ソラチャットにはありません。何度でも買える商品（消費型）として作るか、買った記録を作者側で持つ場合は、その記録の正しさをソラチャットは保証しない、と考えてください。
+- timeout のあとも、確認画面が開いたままのことがあります。その場合、利用者が「支払う」を押すと払われますが、結果は拡張機能に返りません。同じ requestId で頼み直すと、利用者にはもう一度確認画面が出ますが、払われるのは一度だけです（replayed が true で返ります）。
+- 支払いの金額・品名は、確認画面に出る値がそのまま使われます。枠の中で値を変えて払わせることはできません。
+
+### 拡張機能内課金の完全な例（購入の結果を分けて扱う）
+\`\`\`html
+<button id="buy" type="button">ヒントを買う（50pt）</button>
+<p id="msg"></p>
+<script>
+var buy = document.getElementById("buy");
+var msg = document.getElementById("msg");
+var pendingId = ""; // 同じ購入を押し直すときに使う requestId
+
+function say(text) { msg.textContent = text; }
+
+function explain(e) {
+  switch (e.code) {
+    case "insufficient_points": return "ポイントが足りません。";
+    case "not_linked": return "ポイントで買うには、仙人アカウントとの連携が必要です。";
+    case "busy": return "ほかの支払いの確認が出ています。終わってから、もう一度押してください。";
+    case "rate_limited": return "押しすぎです。少し待ってから、もう一度押してください。";
+    case "not_consented": return "拡張機能を開き直して、アカウント情報の許可をしてください。";
+    default: return "買えませんでした：" + e.message;
+  }
+}
+
+function openHint() {
+  say("ヒントを開きます。");
+  // ここで、買ったヒントを画面に出す（作者の処理）
+}
+
+buy.onclick = async function () {
+  buy.disabled = true;
+  if (!pendingId) pendingId = "hint-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+  say("確認画面を開いています…");
+  try {
+    await window.sorachat.charge(50, "ヒント（1回分）", pendingId);
+    pendingId = "";
+    openHint();
+  } catch (e) {
+    if (e.code === "unknown" || e.code === "timeout") {
+      // 結果が分からない。同じ requestId で押し直すと、二重には払われない
+      say("結果を確かめられませんでした。もう一度押してください。二重には払われません。");
+    } else {
+      pendingId = "";
+      say(e.code === "cancelled" ? "" : explain(e));
+    }
+  } finally {
+    buy.disabled = false;
+  }
+};
+</script>
+\`\`\`
+
 ## 配布のルール（必ず守られます）
 1. 配れるのは、この拡張機能を開いて、アカウント情報の許可をした本人だけです。他の人には配れません。
 2. 配れる量は、運営（管理者）が拡張機能ごとに決めた上限の中だけです。上限を超えると code: "exhausted" になり、残りの量が返ります。作者が上限を変えることはできません。
 3. 利用者が仙人アカウントと連携していないと、配れません（code: "not_linked"）。
-4. 1回に配れるのは ${awardMin}〜${awardMaxPerCall}pt です。1分に配布を頼める回数にも上限があります。
+4. 1回に配れるのは ${awardMin}〜${awardMaxPerCall}pt です。1分に配布を頼める回数にも上限があります。さらに、1人が1分間に受け取れるポイントにも上限があります（運営が拡張機能ごとに決めます。0 は制限なし）。超えると code: "minute_limit" になり、error.data.remaining で、その分の残りが分かります。
 5. 配布は仙人アカウントの履歴に残ります（理由つき）。
 6. 上限を決めていない拡張機能は、配布できません（code: "inactive"）。運営に配布の許可を頼んでください。
 
@@ -502,6 +597,9 @@ document.getElementById("buy").onclick = async () => {
 - busy：ほかの支払いの確認が出ている（終わってから、もう一度頼んでください）
 - inactive：配布の許可がない
 - rate_limited：頼みすぎ。少し待つ
+- minute_limit：1人が1分間に受け取れるポイントの上限に達した（error.data.remaining で残りが分かる）
+- failed：同じ requestId の配布・支払いが失敗している。新しい requestId で頼み直す
+- invalid：依頼の中身が正しくない（金額・品名・requestId の形など）
 - unknown：結果を確かめられなかった。同じ requestId で押し直す
 - timeout：ソラチャットから応答がない（${Math.round(timeoutMs / 1000)} 秒）
 
