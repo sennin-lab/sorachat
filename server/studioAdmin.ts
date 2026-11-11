@@ -7,7 +7,7 @@ import { requireAdmin } from "./admin.js";
 import { sb } from "./supabase.js";
 import { retryPayout } from "./studioPayout.js";
 import { imagesByWork, WORK_PREFIX } from "./studioData.js";
-import { ExtensionError, readExtensionGrant, setExtensionGrant } from "./extensionPoints.js";
+import { ExtensionError, readExtensionGrant, setCertifiedCreator, setExtensionGrant } from "./extensionPoints.js";
 
 export const studioAdmin = Router();
 studioAdmin.use("/admin/studio", requireAdmin);
@@ -97,7 +97,7 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
   const [images, reportRows, creatorRow, names] = await Promise.all([
     imagesByWork([id]),
     sb.from("sc_studio_reports").select("reporter_id, reason, created_at").eq("work_id", id).order("created_at", { ascending: false }),
-    sb.from("sc_studio_creators").select("suspended, suspended_reason").eq("user_id", work.creator_id as string).maybeSingle(),
+    sb.from("sc_studio_creators").select("suspended, suspended_reason, certified").eq("user_id", work.creator_id as string).maybeSingle(),
     namesOf([work.creator_id as string])
   ]);
   const reporterNames = await namesOf((reportRows.data ?? []).map((r) => r.reporter_id as string));
@@ -116,7 +116,8 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
       id: work.creator_id,
       name: names.get(work.creator_id as string) ?? "",
       suspended: Boolean(creatorRow.data?.suspended),
-      suspendedReason: (creatorRow.data?.suspended_reason as string | null) ?? null
+      suspendedReason: (creatorRow.data?.suspended_reason as string | null) ?? null,
+      certified: Boolean(creatorRow.data?.certified)
     },
     reports: (reportRows.data ?? []).map((r) => ({
       reporterName: reporterNames.get(r.reporter_id as string) ?? "",
@@ -215,6 +216,31 @@ studioAdmin.get("/admin/studio/images/:id", async (req, res) => {
   res.setHeader("content-type", image.type);
   res.setHeader("cache-control", "no-store");
   res.send(image.buffer);
+});
+
+const certifiedSchema = z.object({ certified: z.boolean() });
+
+// 認定開発者の指定・解除。認定の作者の拡張機能は、1回に払わせられる上限が高くなる（隔離は変わらない）
+studioAdmin.post("/admin/studio/creators/:userId/certified", async (req, res) => {
+  const userId = String(req.params.userId);
+  if (!UUID.test(userId)) {
+    res.status(404).json({ error: "見つかりません。" });
+    return;
+  }
+  const parsed = certifiedSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "認定するか、外すかを選んでください。" });
+    return;
+  }
+  try {
+    res.json({ ok: true, ...(await setCertifiedCreator(userId, parsed.data.certified)) });
+  } catch (error) {
+    if (error instanceof ExtensionError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
 });
 
 const suspendSchema = z.object({ suspended: z.boolean(), reason: z.string().max(200).optional() });

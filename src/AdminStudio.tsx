@@ -29,7 +29,7 @@ type WorkDetail = {
   payload: Record<string, unknown> | null;
   createdAt: string;
   images: { id: string; role: string }[];
-  creator: { id: string; name: string; suspended: boolean; suspendedReason: string | null };
+  creator: { id: string; name: string; suspended: boolean; suspendedReason: string | null; certified: boolean };
   reports: { reporterName: string; reason: string; createdAt: string }[];
   grant: GrantInfo | null;
 };
@@ -241,6 +241,12 @@ function WorkDetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const setStatus = (status: "published" | "hidden" | "removed", label: string) =>
     act(label, () => adminApi(`/api/admin/studio/works/${id}/status`, post({ status, reason: reason.trim() || undefined })));
 
+  // 認定開発者：拡張機能の支払いの上限が高くなる（隔離・通信禁止は、認定の有無に関係なく同じ）
+  const certify = (certified: boolean) =>
+    act(certified ? "認定開発者にしました" : "認定を外しました", () =>
+      adminApi(`/api/admin/studio/creators/${work?.creator.id}/certified`, post({ certified }))
+    );
+
   const suspend = (suspended: boolean) =>
     act(suspended ? "作者を停止" : "作者の停止を解除", () =>
       adminApi(`/api/admin/studio/creators/${work?.creator.id}/suspend`, post({ suspended, reason: reason.trim() || undefined }))
@@ -352,6 +358,19 @@ function WorkDetailView({ id, onBack }: { id: string; onBack: () => void }) {
         )}
       </div>
       {work.creator.suspended && <p className="admin-state">作者は停止中です。{work.creator.suspendedReason && `（${work.creator.suspendedReason}）`}</p>}
+
+      <div className="admin-actions">
+        {work.creator.certified ? (
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => certify(false)}>
+            認定開発者を外す
+          </button>
+        ) : (
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => certify(true)}>
+            認定開発者にする
+          </button>
+        )}
+      </div>
+      {work.creator.certified && <p className="admin-state">この作者は認定開発者です（拡張機能の支払いの上限が高くなります）。</p>}
 
       {message && <p className={`notice center ${message.ok ? "" : "error"}`}>{message.text}</p>}
     </div>

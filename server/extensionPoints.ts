@@ -10,10 +10,14 @@ import { canUseItem } from "./storeAccess.js";
 import { loadWork, toStudioItem, type WorkRow } from "./studioData.js";
 import { sb } from "./supabase.js";
 import { adjustPoints, DEFINITE_FAILURE, isLinked, SenninError } from "./senninPoints.js";
+import { recordSale } from "./studioPayout.js";
+import { config } from "./config.js";
 import { EXT_BRIDGE, EXT_CDN_HOSTS, EXT_TOTAL_MAX } from "./studioRules.js";
 
 // 利用者が1分間に配布を頼める回数（連打・暴走の防止）
 const AWARD_PER_MINUTE = 60;
+// 利用者が1分間に支払いを頼める回数（確認画面を通すので、少なめ）
+const CHARGE_PER_MINUTE = 20;
 
 export class ExtensionError extends Error {
   status: number;
@@ -212,6 +216,140 @@ export async function awardExtensionPoints(
   }
 }
 
+// ---- 拡張機能の中の支払い（ポイント） ----
+// 支払いは、ソラチャットの確認画面（利用者が押すまで払われない）を通ったときだけ、画面が取り次ぐ。
+// 枠の中のコードは、この API を直接呼べない（通信禁止・sandbox）。金額と品名は、確認画面に出る値がそのまま払われる。
+
+export function checkChargeRequest(body: unknown): { ok: true; amount: number; title: string; requestId: string } | { ok: false; error: string } {
+  const v = (body ?? {}) as Record<string, unknown>;
+  const amount = v.amount;
+  if (typeof amount !== "number" || !Number.isInteger(amount) || amount < EXT_BRIDGE.chargeMin) {
+    return { ok: false, error: `支払うポイントは ${EXT_BRIDGE.chargeMin} 以上の整数で指定してください。` };
+  }
+  const title = typeof v.title === "string" ? v.title.trim() : "";
+  if (!title || title.length > EXT_BRIDGE.chargeTitleMax) {
+    return { ok: false, error: `品名は 1〜${EXT_BRIDGE.chargeTitleMax} 文字で指定してください。` };
+  }
+  const requestId = typeof v.requestId === "string" ? v.requestId : "";
+  const idPattern = new RegExp(`^[A-Za-z0-9_-]{${EXT_BRIDGE.requestIdMin},${EXT_BRIDGE.requestIdMax}}$`);
+  if (!idPattern.test(requestId)) {
+    return { ok: false, error: `requestId は英数字・-・_ の ${EXT_BRIDGE.requestIdMin}〜${EXT_BRIDGE.requestIdMax} 文字で指定してください。` };
+  }
+  return { ok: true, amount, title, requestId };
+}
+
+// 作者が認定開発者か（管理者が指定）。認定の有無で、1回に払わせられる上限が変わる
+export async function isCertifiedCreator(userId: string): Promise<boolean> {
+  const { data, error } = await sb.from("sc_studio_creators").select("certified").eq("user_id", userId).maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.certified);
+}
+
+// 管理者：認定開発者を指定する・外す
+export async function setCertifiedCreator(userId: string, certified: boolean) {
+  const { error } = await sb.from("sc_studio_creators").upsert({ user_id: userId, certified }, { onConflict: "user_id" });
+  if (error) throw error;
+  return { certified };
+}
+
+const chargeHits = new Map<string, number[]>();
+function chargeAllowed(me: string): boolean {
+  const now = Date.now();
+  const recent = (chargeHits.get(me) ?? []).filter((t) => now - t < 60_000);
+  if (recent.length >= CHARGE_PER_MINUTE) {
+    chargeHits.set(me, recent);
+    return false;
+  }
+  recent.push(now);
+  chargeHits.set(me, recent);
+  return true;
+}
+
+// 利用者から、拡張機能の作者へ、ポイントを支払う。作者へは全額が払われる（手数料なし）。
+// 同じ requestId で押し直しても二重には払わない（支払いID を idempotency_key にする）。
+export async function chargeExtensionPoints(me: string, workId: string, request: { amount: number; title: string; requestId: string }) {
+  if (!chargeAllowed(me)) {
+    throw new ExtensionError(429, "rate_limited", "支払いの操作が多すぎます。少し待ってからお試しください。");
+  }
+  const work = await loadExtensionWork(workId);
+  if (!(await canOpen(me, work))) {
+    throw new ExtensionError(403, "not_owned", "この拡張機能はまだ購入していません。");
+  }
+  const maxPerCharge = (await isCertifiedCreator(work.creator_id as string)) ? EXT_BRIDGE.chargeMaxCertified : EXT_BRIDGE.chargeMaxDefault;
+  if (request.amount > maxPerCharge) {
+    throw new ExtensionError(400, "invalid", `1回に支払えるのは ${maxPerCharge}pt までです。`);
+  }
+  if (!(await isLinked(me))) {
+    throw new ExtensionError(403, "not_linked", "ポイントで支払うには、仙人アカウントとの連携が必要です。");
+  }
+  // 自分の拡張機能への支払いは運営へ返す。運営の設定がなければ、払えない（ポイントだけ消えないように）
+  if (work.creator_id === me && !config.operatorUserId) {
+    throw new ExtensionError(400, "invalid", "運営の設定がないため、自分の拡張機能へは支払えません。");
+  }
+
+  // 同じ requestId の支払いが既にあれば、その今の状態で答える
+  const { data: existing, error: readError } = await sb
+    .from("sc_extension_charges")
+    .select("id, amount, status")
+    .eq("user_id", me)
+    .eq("work_id", workId)
+    .eq("request_id", request.requestId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (existing) {
+    if (Number(existing.amount) !== request.amount) {
+      throw new ExtensionError(409, "invalid", "同じ requestId で、金額の違う支払いは作れません。");
+    }
+    if (existing.status === "done") {
+      return { charged: request.amount, replayed: true, points: null as number | null };
+    }
+    if (existing.status === "failed") {
+      throw new ExtensionError(409, "failed", "この支払いは失敗しています。新しい requestId で、もう一度お試しください。");
+    }
+  }
+
+  let chargeId = existing ? String(existing.id) : "";
+  if (!existing) {
+    const { data: created, error: insertError } = await sb
+      .from("sc_extension_charges")
+      .insert({ user_id: me, work_id: workId, request_id: request.requestId, amount: request.amount, title: request.title, status: "reserved" })
+      .select("id")
+      .single();
+    if (insertError) throw insertError;
+    chargeId = String(created.id);
+  }
+
+  const label = `拡張機能「${work.name}」：${request.title}`.slice(0, 100);
+  try {
+    const result = await adjustPoints(me, { amount: -request.amount, reason: label, idempotencyKey: `ext-charge-${chargeId}` });
+    const { error: doneError } = await sb
+      .from("sc_extension_charges")
+      .update({ status: "done", updated_at: new Date().toISOString() })
+      .eq("id", chargeId);
+    if (doneError) throw doneError;
+
+    // 作者へ全額を支払う。自分の拡張機能なら、運営へ返す（store.ts と同じ扱い）
+    const payee = work.creator_id === me ? config.operatorUserId || null : (work.creator_id as string);
+    if (payee) {
+      await recordSale({ creatorId: payee, workId, chargeId, amount: request.amount }).catch((error) =>
+        console.error("[studio] 拡張機能の支払いの売上の記録に失敗:", error)
+      );
+    }
+    return { charged: request.amount, replayed: result.replayed, points: result.points };
+  } catch (error) {
+    if (error instanceof SenninError && DEFINITE_FAILURE.has(error.code)) {
+      // 確実に引かれなかった失敗は、支払いを失敗として閉じる
+      await sb
+        .from("sc_extension_charges")
+        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .eq("id", chargeId);
+      const status = error.code === "insufficient_points" ? 402 : error.code === "scope" || error.code === "not_linked" ? 403 : error.code === "daily_limit" ? 429 : 409;
+      throw new ExtensionError(status, error.code, error.message);
+    }
+    throw new ExtensionError(503, "unknown", "支払いの結果を確かめられませんでした。同じ requestId で、もう一度お試しください。");
+  }
+}
+
 // ---- 管理者：配布の上限 ----
 
 export async function setExtensionGrant(workId: string, args: { maxPoints: number; active: boolean }) {
@@ -290,6 +428,16 @@ export function extensionSpecMarkdown(): string {
 - requestId：任意。${requestIdMin}〜${requestIdMax} 文字の英数字・-・_。同じ配布を押し直すときに同じ ID を使うと、二重には配られません。省略すると毎回新しい ID になります。
 成功したときの値：\`{ awarded: 配ったpt, replayed: 同じ配布の押し直しか, points: 配布後の残高（取れたとき）}\`
 
+### window.sorachat.charge(amount, title, requestId)
+利用者に、ポイントでの支払いを頼みます。ソラチャットの確認画面が出て、利用者が「支払う」を押したときだけ払われます（枠の中から、勝手に払うことはできません）。
+- amount：${EXT_BRIDGE.chargeMin} 以上の整数（pt）。1回の上限は、通常 ${EXT_BRIDGE.chargeMaxDefault}pt、認定開発者の作品は ${EXT_BRIDGE.chargeMaxCertified}pt です。
+- title：確認画面に出す品名（1〜${EXT_BRIDGE.chargeTitleMax} 文字）。利用者が見て、何にお金を払うのかが分かる名前にしてください。
+- requestId：任意。${requestIdMin}〜${requestIdMax} 文字の英数字・-・_。同じ支払いを押し直すときに同じ ID を使うと、二重には払われません。
+成功したときの値：\`{ charged: 払ったpt, replayed: 同じ支払いの押し直しか, points: 支払い後の残高（取れたとき） }\`
+- 支払いは、作者へ全額が払われます（手数料はありません）。
+- 利用者が「キャンセル」を押したときは code: "cancelled" になります。
+- 確認画面は、枠の外（ソラチャットの画面）に出ます。確認を待つあいだ、枠は止まらず動きます。
+
 ## 配布のルール（必ず守られます）
 1. 配れるのは、この拡張機能を開いて、アカウント情報の許可をした本人だけです。他の人には配れません。
 2. 配れる量は、運営（管理者）が拡張機能ごとに決めた上限の中だけです。上限を超えると code: "exhausted" になり、残りの量が返ります。作者が上限を変えることはできません。
@@ -302,6 +450,9 @@ export function extensionSpecMarkdown(): string {
 - not_consented：利用者が許可していない（拡張機能は許可がないと開けないので、通常は起きません）
 - not_linked：仙人アカウントと未連携
 - exhausted：上限に達した（error.data.remaining で残りのptが分かる）
+- cancelled：利用者が支払いを取り消した
+- insufficient_points：ポイントが足りない
+- busy：ほかの支払いの確認が出ている（終わってから、もう一度頼んでください）
 - inactive：配布の許可がない
 - rate_limited：頼みすぎ。少し待つ
 - unknown：結果を確かめられなかった。同じ requestId で押し直す

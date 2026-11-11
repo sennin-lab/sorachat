@@ -2947,3 +2947,24 @@ textarea.dev-input { resize: vertical; }
 /* 開発者ドキュメント：拡張機能の仕様（AI に渡す文書） */
 .dev-spec-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .dev-spec-text { margin: 0; padding: 14px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.7; border-radius: 12px; background: var(--raised); }
+
+/* ポイントでの支払いの確認画面（拡張機能から頼まれたとき、ソラチャットの画面の中に出る） */
+.ext-pay-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.42); }
+.ext-pay { width: min(360px, 100%); overflow: hidden; border-radius: 22px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); animation: fade-in .22s ease both; }
+.ext-pay-head { display: flex; flex-direction: column; gap: 2px; padding: 16px 20px 12px; background: linear-gradient(135deg, var(--accent), var(--accent-ink)); color: #fff; }
+.ext-pay-brand { font-size: 12px; letter-spacing: .04em; opacity: .9; }
+.ext-pay-app { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-pay-body { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px 6px; }
+.ext-pay-title { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.5; word-break: break-word; }
+.ext-pay-amount { margin: 0; font-size: 34px; font-weight: 800; line-height: 1.1; color: var(--accent-ink); }
+.ext-pay-amount span { font-variant-numeric: tabular-nums; }
+.ext-pay-rows { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--raised); }
+.ext-pay-rows > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; }
+.ext-pay-rows dt { color: var(--muted); }
+.ext-pay-rows dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ext-pay-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.ext-pay-body .notice { margin: 0; }
+.ext-pay-done { color: var(--accent-ink); }
+.ext-pay-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 20px calc(16px + env(safe-area-inset-bottom, 0px)); }
+.ext-pay-actions button { padding: 12px 0; border-radius: 12px; }
+.ext-pay-actions > :only-child { grid-column: 1 / -1; }

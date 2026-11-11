@@ -272,18 +272,28 @@ export const EXT_BRIDGE = {
   reasonMax: 40, // 理由の最大文字数
   requestIdMin: 8, // 同じ配布を押し直すための ID（省略すると毎回新しい ID）
   requestIdMax: 64,
-  timeoutMs: 20_000
+  timeoutMs: 20_000,
+  // 拡張機能からの支払い（利用者が確認画面で押すまで待つので、長めに待つ）
+  chargeMin: 10, // 1回に払う最小（pt）
+  chargeMaxDefault: 1000, // 作者が通常の拡張機能の1回に払わせられる最大（pt）
+  chargeMaxCertified: 5000, // 認定開発者の拡張機能の1回の最大（pt）。管理者が認定を決める
+  chargeTitleMax: 40, // 確認画面に出す品名の最大文字数
+  chargeTimeoutMs: 180_000
 } as const;
 
 // 枠の中で動くブリッジ。ユーザーのコードより先に読み込む。
 function extensionBridgeScript(): string {
-  const config = JSON.stringify({ channel: EXT_BRIDGE.channel, timeoutMs: EXT_BRIDGE.timeoutMs });
+  const config = JSON.stringify({
+    channel: EXT_BRIDGE.channel,
+    timeoutMs: EXT_BRIDGE.timeoutMs,
+    chargeTimeoutMs: EXT_BRIDGE.chargeTimeoutMs
+  });
   return `(function () {
   var CONFIG = ${config};
   var pending = Object.create(null);
   var seq = 0;
   function newId() { seq += 1; return seq + "-" + Math.random().toString(36).slice(2, 10); }
-  function call(type, data) {
+  function call(type, data, timeoutMs) {
     return new Promise(function (resolve, reject) {
       var id = newId();
       var timer = setTimeout(function () {
@@ -291,7 +301,7 @@ function extensionBridgeScript(): string {
         var e = new Error("ソラチャットからの応答がありませんでした。");
         e.code = "timeout";
         reject(e);
-      }, CONFIG.timeoutMs);
+      }, timeoutMs || CONFIG.timeoutMs);
       pending[id] = { resolve: resolve, reject: reject, timer: timer };
       window.parent.postMessage({ channel: CONFIG.channel, id: id, type: type, data: data || {} }, "*");
     });
@@ -322,6 +332,13 @@ function extensionBridgeScript(): string {
         reason: reason || "",
         requestId: requestId || (Date.now().toString(36) + "-" + newId())
       });
+    },
+    charge: function (amount, title, requestId) {
+      return call("charge", {
+        amount: amount,
+        title: title || "",
+        requestId: requestId || (Date.now().toString(36) + "-" + newId())
+      }, CONFIG.chargeTimeoutMs);
     }
   };
 })();`;

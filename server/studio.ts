@@ -13,7 +13,9 @@ import { displayImagesFor, loadWork, toStudioItem, WORK_PREFIX } from "./studioD
 import { ratingsByWork } from "./studioReviews.js";
 import {
   awardExtensionPoints,
+  chargeExtensionPoints,
   checkAwardRequest,
+  checkChargeRequest,
   extensionAccess,
   extensionSpecMarkdown,
   ExtensionError,
@@ -564,6 +566,31 @@ studio.post("/studio/extensions/:id/award", async (req, res) => {
     const result = await awardExtensionPoints(me, id, {
       amount: checked.amount,
       reason: checked.reason,
+      requestId: checked.requestId
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    extensionFail(res, error);
+  }
+});
+
+// 利用者がポイントで支払う（確認画面で「支払う」を押したときだけ、画面がここに取り次ぐ）。作者へ全額が払われる
+studio.post("/studio/extensions/:id/charge", async (req, res) => {
+  const me = currentUserId(res);
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).json({ ok: false, error: "見つかりません。", code: "not_found" });
+    return;
+  }
+  const checked = checkChargeRequest(req.body);
+  if (!checked.ok) {
+    res.status(400).json({ ok: false, error: checked.error, code: "invalid" });
+    return;
+  }
+  try {
+    const result = await chargeExtensionPoints(me, id, {
+      amount: checked.amount,
+      title: checked.title,
       requestId: checked.requestId
     });
     res.json({ ok: true, ...result });

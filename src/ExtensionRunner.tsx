@@ -41,6 +41,16 @@ async function call(path: string, init?: RequestInit): Promise<CallResult> {
 
 type Reply = { ok: boolean; data?: unknown; code?: string; error?: string };
 
+// 拡張機能からの支払いの依頼。確認画面で利用者が決めるまで、依頼の答えは返さない
+type PayRequest = {
+  amount: number;
+  title: string;
+  requestId: string;
+  resolve: (reply: Reply) => void;
+  settled: boolean;
+  inFlight: boolean; // サーバーへ払いを頼んでいる最中は、閉じない（払われたかどうかが分からなくなるため）
+};
+
 // 買った拡張機能を、全画面で開く
 export function ExtensionRunner({ workId, name, onClose }: { workId: string; name: string; onClose: () => void }) {
   const base = `/api/studio/extensions/${encodeURIComponent(workId)}`;
@@ -51,6 +61,26 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
   const [sheetError, setSheetError] = useState<string | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const accessRef = useRef<Access | null>(null);
+  const [pay, setPay] = useState<PayRequest | null>(null);
+  const payRef = useRef<PayRequest | null>(null);
+
+  // 支払いの答えを、拡張機能に一度だけ返す
+  const settlePay = useCallback((reply: Reply) => {
+    const current = payRef.current;
+    if (!current || current.settled) return;
+    current.settled = true;
+    current.resolve(reply);
+  }, []);
+
+  // 支払いの確認画面を閉じる（答えが返っていなければ、取り消しとして返す）
+  const closePay = useCallback(() => {
+    settlePay({ ok: false, code: "cancelled", error: "お支払いを取り消しました。" });
+    payRef.current = null;
+    setPay(null);
+  }, [settlePay]);
+
+  // 閉じるとき、確認待ちの支払いを取り消しとして終わらせる（拡張機能を待たせない）
+  useEffect(() => () => settlePay({ ok: false, code: "cancelled", error: "お支払いを取り消しました。" }), [settlePay]);
 
   // 今の許可の状態を、サーバーから読み直す
   const refresh = useCallback(async (): Promise<Access | null> => {
@@ -117,6 +147,27 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
           data: { consented: true, sorachat: latest.sorachat, sennin: latest.sennin, grant: latest.grant }
         };
       }
+      if (type === "charge") {
+        if (!accessRef.current?.consented) {
+          return { ok: false, code: "not_consented", error: "アカウント情報の許可がありません。拡張機能を開き直すと、確認が出ます。" };
+        }
+        const amount = data.amount;
+        const title = typeof data.title === "string" ? data.title.trim() : "";
+        const requestId = typeof data.requestId === "string" ? data.requestId : "";
+        if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 1) {
+          return { ok: false, code: "invalid", error: "支払うポイントは 1 以上の整数で指定してください。" };
+        }
+        if (!title) return { ok: false, code: "invalid", error: "品名を指定してください。" };
+        if (payRef.current) {
+          return { ok: false, code: "busy", error: "ほかの支払いの確認が出ています。終わってから、もう一度お試しください。" };
+        }
+        // 確認画面を出し、利用者が決めるまで待つ（支払うと押したときだけ、サーバーで払われる）
+        return new Promise<Reply>((resolve) => {
+          const request: PayRequest = { amount, title, requestId, resolve, settled: false, inFlight: false };
+          payRef.current = request;
+          setPay(request);
+        });
+      }
       if (type === "consent") {
         return accessRef.current?.consented
           ? { ok: true, data: { consented: true } }
@@ -157,6 +208,11 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (payRef.current) {
+        // 支払いの確認が出ているときは、確認画面だけを閉じる（支払いの通信中は閉じない）
+        if (!payRef.current.inFlight) closePay();
+        return;
+      }
       if (asking) {
         setAsking(false);
         if (!accessRef.current?.consented) onClose();
@@ -166,7 +222,7 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [asking, onClose]);
+  }, [asking, onClose, closePay]);
 
   const consented = Boolean(access?.consented);
 
@@ -206,6 +262,16 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
           )}
         </p>
       </div>
+      {pay && (
+        <PaySheet
+          key={pay.requestId}
+          base={base}
+          extName={name}
+          request={pay}
+          onSettle={settlePay}
+          onClose={closePay}
+        />
+      )}
       {asking && (
         <div className="sheet-backdrop ext-consent-backdrop">
           <div className="sheet ext-consent" role="dialog" aria-modal="true" aria-label="アカウント情報の許可">
@@ -233,6 +299,129 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
       )}
     </>,
     document.body
+  );
+}
+
+// ポイントでの支払いの確認画面（ソラチャットの画面の中に出る。拡張機能の枠の中からは、見ても押してもいけない）
+// 金額・品名・残高は、この画面が出した値をそのまま使う。支払うを押したときだけ、サーバーへ払いを頼む。
+function PaySheet({
+  base,
+  extName,
+  request,
+  onSettle,
+  onClose
+}: {
+  base: string;
+  extName: string;
+  request: PayRequest;
+  onSettle: (reply: Reply) => void;
+  onClose: () => void;
+}) {
+  const [balance, setBalance] = useState<number | null>(null);
+  const [needsLink, setNeedsLink] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [paidPoints, setPaidPoints] = useState<number | null | undefined>(undefined);
+
+  // 残高を読む（支払う前に、足りるかを見せる）
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const result = await call("/api/store/balance");
+      if (!alive) return;
+      if (result.ok && typeof result.body.points === "number") {
+        setBalance(result.body.points);
+      } else if (result.body.code === "not_linked") {
+        setNeedsLink(true);
+      } else {
+        setError(result.body.error ?? "残高を読めませんでした。");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const pay = async () => {
+    setBusy(true);
+    setError(null);
+    request.inFlight = true;
+    const result = await call(`${base}/charge`, post({ amount: request.amount, title: request.title, requestId: request.requestId }));
+    request.inFlight = false;
+    setBusy(false);
+    if (!result.ok) {
+      // 同じ requestId で押し直せるので、確認画面は開いたままにする
+      setError(result.body.error ?? "支払えませんでした。もう一度お試しください。");
+      return;
+    }
+    const points = typeof result.body.points === "number" ? result.body.points : null;
+    setPaidPoints(points);
+    if (points !== null) setBalance(points);
+    onSettle({ ok: true, data: { charged: request.amount, replayed: Boolean(result.body.replayed), points } });
+  };
+
+  const cancel = () => {
+    if (busy) return;
+    onSettle({ ok: false, code: "cancelled", error: "お支払いを取り消しました。" });
+    onClose();
+  };
+
+  const shortage = balance !== null && balance < request.amount;
+  const paid = paidPoints !== undefined;
+  const canPay = !busy && !paid && !needsLink && balance !== null && !shortage;
+
+  return (
+    <div className="sheet-backdrop ext-pay-backdrop">
+      <div className="ext-pay" role="dialog" aria-modal="true" aria-label="ポイントでの支払い">
+        <div className="ext-pay-head">
+          <span className="ext-pay-brand">ソラチャット ポイント</span>
+          <span className="ext-pay-app">{extName}</span>
+        </div>
+        <div className="ext-pay-body">
+          <p className="ext-pay-title">{request.title}</p>
+          <p className="ext-pay-amount">
+            <span>{request.amount.toLocaleString("ja-JP")}</span> pt
+          </p>
+          <dl className="ext-pay-rows">
+            <div>
+              <dt>いまの残高</dt>
+              <dd>{balance === null ? (needsLink ? "—" : "読み込み中…") : `${balance.toLocaleString("ja-JP")} pt`}</dd>
+            </div>
+            <div>
+              <dt>支払い後</dt>
+              <dd>
+                {balance === null || paid
+                  ? paid && paidPoints !== null
+                    ? `${paidPoints.toLocaleString("ja-JP")} pt`
+                    : "—"
+                  : `${(balance - request.amount).toLocaleString("ja-JP")} pt`}
+              </dd>
+            </div>
+          </dl>
+          <p className="ext-pay-note">お支払いは、この拡張機能の作者へ全額届きます。</p>
+          {needsLink && <p className="notice error center">ポイントで支払うには、仙人アカウントとの連携が必要です。</p>}
+          {shortage && !needsLink && <p className="notice error center">ポイントが足りません。</p>}
+          {paid && <p className="notice center ext-pay-done">支払いが完了しました。</p>}
+          {error && <p className="notice error center">{error}</p>}
+        </div>
+        <div className="ext-pay-actions">
+          {paid ? (
+            <button type="button" className="btn-primary" onClick={onClose}>
+              閉じる
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn-secondary" disabled={busy} onClick={cancel}>
+                キャンセル
+              </button>
+              <button type="button" className="btn-primary" disabled={!canPay} onClick={pay}>
+                {busy ? "支払い中…" : "支払う"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

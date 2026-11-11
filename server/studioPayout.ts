@@ -7,18 +7,23 @@ import { sb } from "./supabase.js";
 import { adjustPoints, SenninError, withLock } from "./senninPoints.js";
 
 // 購入の記録に続けて、作者への支払いを作って払おうとする（失敗しても購入は成立している。あとで再送される）
-export async function recordSale(args: { creatorId: string; workId: string; purchaseId: string; amount: number }) {
+// 支払いの元は、ストアの購入（purchaseId）か、拡張機能の中の支払い（chargeId）のどちらか1つ。
+export async function recordSale(args: { creatorId: string; workId: string; purchaseId?: string; chargeId?: string; amount: number }) {
+  if (Boolean(args.purchaseId) === Boolean(args.chargeId)) {
+    throw new Error("支払いの元は、購入か拡張機能の支払いのどちらか1つにしてください。");
+  }
   const id = randomUUID();
   const { error } = await sb.from("sc_studio_payouts").insert({
     id,
     creator_id: args.creatorId,
     work_id: args.workId,
-    purchase_id: args.purchaseId,
+    purchase_id: args.purchaseId ?? null,
+    charge_id: args.chargeId ?? null,
     amount: args.amount,
     status: "pending"
   });
   if (error) {
-    // 同じ購入の支払いが既にあれば何もしない
+    // 同じ購入（または同じ拡張機能の支払い）の支払いが既にあれば何もしない
     if (error.code === "23505") return;
     throw error;
   }

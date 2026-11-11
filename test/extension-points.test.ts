@@ -1,7 +1,7 @@
 import "./env.ts";
 // 拡張機能のポイント配布（ブリッジ）と、利用者の情報の許可の検査。実際のSupabaseには接続しない。
 import assert from "node:assert/strict";
-import { checkAwardRequest, extensionSpecMarkdown } from "../server/extensionPoints.ts";
+import { checkAwardRequest, checkChargeRequest, extensionSpecMarkdown } from "../server/extensionPoints.ts";
 import { buildExtensionDocument, EXT_BRIDGE, EXTENSION_CSP } from "../server/studioRules.ts";
 
 // 配布の依頼：範囲・整数・理由の長さ・requestId の形
@@ -49,3 +49,18 @@ for (const code of ["not_consented", "not_linked", "exhausted", "inactive", "rat
 }
 
 console.log("extension-points: ok");
+
+// 支払い（拡張機能の中のポイント支払い）：金額・品名・requestId の形
+assert.equal(checkChargeRequest({ amount: 100, title: "ヒント", requestId: "charge-0001" }).ok, true);
+assert.equal(checkChargeRequest({ amount: EXT_BRIDGE.chargeMin - 1, title: "ヒント", requestId: "charge-0001" }).ok, false);
+assert.equal(checkChargeRequest({ amount: 10.5, title: "ヒント", requestId: "charge-0001" }).ok, false);
+assert.equal(checkChargeRequest({ amount: "10", title: "ヒント", requestId: "charge-0001" }).ok, false);
+assert.equal(checkChargeRequest({ amount: 10, title: "", requestId: "charge-0001" }).ok, false);
+assert.equal(checkChargeRequest({ amount: 10, title: "x".repeat(EXT_BRIDGE.chargeTitleMax + 1), requestId: "charge-0001" }).ok, false);
+assert.equal(checkChargeRequest({ amount: 10, title: "ヒント", requestId: "short" }).ok, false);
+assert.equal(checkChargeRequest({ amount: 10, title: "ヒント" }).ok, false);
+
+// ブリッジには支払いの窓口があり、枠の中の支払いは確認画面を経由する（ブリッジから直接は払えない＝サーバーへの直接の通信は CSP で止まる）
+assert.ok(doc.includes("charge: function"), "支払いの窓口がブリッジにある");
+assert.ok(doc.includes("CONFIG.chargeTimeoutMs"), "支払いは確認を待つ長さで待つ");
+assert.ok(extensionSpecMarkdown().includes("window.sorachat.charge(amount, title, requestId)"), "仕様に支払いが書いてある");

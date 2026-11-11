@@ -54,6 +54,7 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
    - `supabase/schema_v31.sql`（senningames：ゲームのポイント・200ptからの出金）
    - `supabase/schema_v32.sql`（senningames：ゲームの追加）
    - `supabase/schema_v33.sql`（拡張機能からのポイント配布の上限・利用者の情報の許可・配布の記録）
+   - `supabase/schema_v34.sql`（拡張機能の中のポイント支払い（確認画面つき）・認定開発者）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。
