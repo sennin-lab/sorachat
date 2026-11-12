@@ -217,7 +217,7 @@ export type PollView = {
   voterDetails: PollPerson[][] | null;
 };
 
-export type GameKind = "tictactoe" | "quiz" | "janken" | "guess";
+export type GameKind = "tictactoe" | "quiz" | "janken" | "guess" | "tap" | "reflex";
 export type GameHand = "rock" | "scissors" | "paper";
 
 // ミニゲームの画面用の形（サーバーの gameLogic.ts の GameView と同じ）
@@ -266,6 +266,24 @@ export type GameView = {
     guesses: { by: string; value: number; result: "higher" | "lower" | "correct" }[];
     secret: number | null;
     winner: string | null;
+  };
+  // 連打バトル：counts は全員の回数。deadlineIn は「スタート」まで／終わるまで（ミリ秒）
+  tap: null | {
+    phase: "count" | "run" | "done";
+    counts: Record<string, number>;
+    deadlineIn: number | null;
+  };
+  // 反射神経バトル：GO の前は deadlineIn が null（待ち時間を見せない）
+  reflex: null | {
+    round: number;
+    total: number;
+    phase: "wait" | "go" | "revealed" | "done";
+    reacted: string[];
+    falseStart: string[];
+    myMs: number | null;
+    scores: Record<string, number>;
+    last: { round: number; winner: string | null; times: Record<string, number | null>; falseStart: string[] } | null;
+    deadlineIn: number | null;
   };
 };
 

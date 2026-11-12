@@ -2,7 +2,7 @@
 // 状態の更新（reduce）と、各人に見せてよい形への変換（viewOf）だけを担当する。
 // 答えや相手の手など、まだ見せてはいけない情報は viewOf で取り除く。
 
-export const GAME_KINDS = ["tictactoe", "quiz", "janken", "guess"] as const;
+export const GAME_KINDS = ["tictactoe", "quiz", "janken", "guess", "tap", "reflex"] as const;
 export type GameKind = (typeof GAME_KINDS)[number];
 export type GameStatus = "waiting" | "playing" | "finished";
 export type Hand = "rock" | "scissors" | "paper";
@@ -13,8 +13,16 @@ export const GAME_CONFIG: Record<GameKind, { min: number; max: number }> = {
   tictactoe: { min: 2, max: 2 },
   quiz: { min: 2, max: 8 },
   janken: { min: 2, max: 10 },
-  guess: { min: 2, max: 10 }
+  guess: { min: 2, max: 10 },
+  tap: { min: 2, max: 10 },
+  reflex: { min: 2, max: 8 }
 };
+
+// 連打バトル：1秒あたりに数えてよい最大の回数（端末の連打の上限より少し多め）と、最初の余裕
+export const TAP_MAX_PER_SECOND = 14;
+export const TAP_GRACE = 15;
+// 反射神経バトル：何ラウンドやるか
+export const REFLEX_ROUNDS = 3;
 
 export const GUESS_MAX = 100;
 export const QUIZ_ROUNDS = 5;
@@ -59,7 +67,13 @@ export const TIMING = {
   quizAnswer: 10_000, // 押した人が答えるまで
   quizReveal: 6_000, // 正解を見せてから次の問題へ
   jankenHand: 15_000, // 手を出すまで（出さなかった人はランダムの手）
-  jankenReveal: 6_000 // 結果を見せてから次の回へ
+  jankenReveal: 6_000, // 結果を見せてから次の回へ
+  tapCountdown: 3_000, // 連打バトル：「スタート」の前のカウントダウン
+  tapRun: 10_000, // 連打バトル：連打する時間
+  reflexWaitMin: 2_000, // 反射神経：GO までの待ち時間（最短）
+  reflexWaitMax: 5_000, // 反射神経：GO までの待ち時間（最長）
+  reflexGoWindow: 4_000, // GO のあと、押すまでの時間（押さない人は失敗扱い）
+  reflexReveal: 3_000 // 結果を見せてから次のラウンドへ
 } as const;
 export type QuizQuestion = { q: string; options: string[]; answer: number };
 type QuizResult = { answer: number; choice: number | null; by: string | null; correct: boolean };
@@ -91,7 +105,26 @@ type GuessPlay = {
   guesses: { by: string; value: number; result: "higher" | "lower" | "correct" }[];
   winner: string | null;
 };
-export type Play = TttPlay | QuizPlay | JankenPlay | GuessPlay;
+type TapPlay = {
+  kind: "tap";
+  phase: "count" | "run" | "done";
+  runStart: number | null;
+  counts: Record<string, number>;
+  deadline: number | null;
+};
+type ReflexResult = { round: number; winner: string | null; times: Record<string, number | null>; falseStart: string[] };
+type ReflexPlay = {
+  kind: "reflex";
+  round: number;
+  phase: "wait" | "go" | "revealed" | "done";
+  goAt: number | null;
+  reacted: Record<string, number>;
+  falseStart: string[];
+  scores: Record<string, number>;
+  last: ReflexResult | null;
+  deadline: number | null;
+};
+export type Play = TttPlay | QuizPlay | JankenPlay | GuessPlay | TapPlay | ReflexPlay;
 
 // DB に保存する形（答えや秘密の数字も含むので、そのままでは画面に出さない）
 export type Stored = { players: string[]; cancelled: boolean; play: Play | null };
@@ -143,15 +176,39 @@ export type GameView = {
     secret: number | null;
     winner: string | null;
   };
+  tap: null | {
+    phase: "count" | "run" | "done";
+    // 各人のこれまでの回数（画面の全員分。締め切りのあとは最終結果）
+    counts: Record<string, number>;
+    // 「スタート」まで・終わるまでの残り（ミリ秒）
+    deadlineIn: number | null;
+  };
+  reflex: null | {
+    round: number;
+    total: number;
+    phase: "wait" | "go" | "revealed" | "done";
+    // 押した人（GO の前に押した人は falseStart）
+    reacted: string[];
+    falseStart: string[];
+    // 自分の反応時間（ミリ秒）。まだ押していなければ null
+    myMs: number | null;
+    scores: Record<string, number>;
+    last: ReflexResult | null;
+    // GO の前は秘密（待ち時間を見せない）。GO のあとは押すまでの残り
+    deadlineIn: number | null;
+  };
 };
 
 export type GameAction = {
   // tick は制限時間のタイマーからだけ送る（画面からは送らない）
-  action: "join" | "start" | "cancel" | "move" | "buzz" | "answer" | "next" | "hand" | "guess" | "tick";
+  // tap：連打バトルの回数（value）。react：反射神経バトルで押した（反応時間は下の rttMs で補正する）
+  action: "join" | "start" | "cancel" | "move" | "buzz" | "answer" | "next" | "hand" | "guess" | "tap" | "react" | "tick";
   index?: number;
   choice?: number;
   hand?: Hand;
   value?: number;
+  // サーバーだけが入れる：押した人の往復時間（ミリ秒）。画面からは受け取らない
+  rttMs?: number;
 };
 
 export class GameError extends Error {
@@ -173,6 +230,17 @@ const shuffle = <T>(list: T[], random: () => number): T[] => {
 // quizQuestions は senninai が作った問題（足りないときは固定の問題を使う）
 function startPlay(kind: GameKind, players: string[], random: () => number, now: number, quizQuestions?: QuizQuestion[]): Play {
   if (kind === "tictactoe") return { kind, board: Array(9).fill(""), turn: "X", winner: null, line: null };
+  if (kind === "tap") {
+    const counts: Record<string, number> = {};
+    for (const uid of players) counts[uid] = 0;
+    return { kind, phase: "count", runStart: null, counts, deadline: now + TIMING.tapCountdown };
+  }
+  if (kind === "reflex") {
+    const scores: Record<string, number> = {};
+    for (const uid of players) scores[uid] = 0;
+    const goAt = now + reflexWait(random);
+    return { kind, round: 1, phase: "wait", goAt, reacted: {}, falseStart: [], scores, last: null, deadline: goAt };
+  }
   if (kind === "quiz") {
     const scores: Record<string, number> = {};
     for (const uid of players) scores[uid] = 0;
@@ -200,8 +268,8 @@ function startPlay(kind: GameKind, players: string[], random: () => number, now:
 export function isFinished(play: Play | null): boolean {
   if (!play) return false;
   if (play.kind === "tictactoe") return play.winner !== null;
-  if (play.kind === "quiz" || play.kind === "janken") return play.phase === "done";
-  return play.winner !== null;
+  if (play.kind === "guess") return play.winner !== null;
+  return play.phase === "done";
 }
 
 // 次の締め切り（ミリ秒の時刻）。締め切りのないゲームは null
@@ -210,13 +278,78 @@ export function deadlineOf(play: Play | null): number | null {
   return typeof play.deadline === "number" ? play.deadline : null;
 }
 
-function remainingOf(play: QuizPlay | JankenPlay, now: number): number | null {
+function remainingOf(play: { phase: string; deadline: number | null }, now: number): number | null {
   if (play.phase === "done" || typeof play.deadline !== "number") return null;
   return Math.max(0, play.deadline - now);
 }
 
+// 反射神経：GO までの待ち時間（ミリ秒）
+function reflexWait(random: () => number): number {
+  return Math.round(TIMING.reflexWaitMin + random() * (TIMING.reflexWaitMax - TIMING.reflexWaitMin));
+}
+
+// 反射神経の1ラウンドを締める（押した人の中で一番早い人が1点。GO の前に押した人と、押さなかった人は点なし）
+function resolveReflex(play: ReflexPlay, players: string[], now: number) {
+  const times: Record<string, number | null> = {};
+  let winner: string | null = null;
+  let best = Infinity;
+  for (const uid of players) {
+    const ms = play.falseStart.includes(uid) ? null : (play.reacted[uid] ?? null);
+    times[uid] = ms;
+    if (ms !== null && ms < best) {
+      best = ms;
+      winner = uid;
+    }
+  }
+  if (winner) play.scores[winner] = (play.scores[winner] ?? 0) + 1;
+  play.last = { round: play.round, winner, times, falseStart: [...play.falseStart] };
+  play.phase = "revealed";
+  play.deadline = now + TIMING.reflexReveal;
+}
+
+function nextReflexRound(play: ReflexPlay, random: () => number, now: number) {
+  if (play.round >= REFLEX_ROUNDS) {
+    play.phase = "done";
+    play.deadline = null;
+    return;
+  }
+  play.round += 1;
+  play.phase = "wait";
+  play.goAt = now + reflexWait(random);
+  play.deadline = play.goAt;
+  play.reacted = {};
+  play.falseStart = [];
+}
+
 // 制限時間を過ぎていたら、サーバーが次へ進める（押し忘れ・出し忘れで止まらないように）
 function applyDeadline(play: Play, players: string[], now: number, random: () => number) {
+  if (play.kind === "tap") {
+    if (play.phase === "done" || typeof play.deadline !== "number" || play.deadline > now) return;
+    if (play.phase === "count") {
+      play.phase = "run";
+      play.runStart = play.deadline;
+      play.deadline = play.deadline + TIMING.tapRun;
+      return;
+    }
+    play.phase = "done";
+    play.deadline = null;
+    return;
+  }
+  if (play.kind === "reflex") {
+    if (play.phase === "done" || typeof play.deadline !== "number" || play.deadline > now) return;
+    if (play.phase === "wait") {
+      // GO の合図。ここから押すまでの時間を数える
+      play.phase = "go";
+      play.deadline = (play.goAt ?? now) + TIMING.reflexGoWindow;
+      return;
+    }
+    if (play.phase === "go") {
+      resolveReflex(play, players, now);
+      return;
+    }
+    nextReflexRound(play, random, now);
+    return;
+  }
   if (play.kind === "quiz") {
     if (play.phase === "done" || typeof play.deadline !== "number" || play.deadline > now) return;
     if (play.phase === "revealed") {
@@ -375,6 +508,39 @@ function jankenAction(play: JankenPlay, me: string, input: GameAction, now: numb
   }
 }
 
+function tapAction(play: TapPlay, me: string, input: GameAction, now: number) {
+  if (input.action !== "tap") throw new GameError("この操作はできません。");
+  if (play.phase !== "run") throw new GameError("まだ始まっていないか、終わっています。");
+  const n = input.value;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 30) throw new GameError("回数が正しくありません。");
+  // 送られた回数は、経過した時間で上限を決めて抑える（不正な連打の防止）
+  const elapsed = Math.max(0, now - (play.runStart ?? now));
+  const cap = Math.floor((TAP_MAX_PER_SECOND * elapsed) / 1000) + TAP_GRACE;
+  play.counts[me] = Math.min(cap, (play.counts[me] ?? 0) + n);
+}
+
+function reflexAction(play: ReflexPlay, players: string[], me: string, input: GameAction, now: number) {
+  if (input.action !== "react") throw new GameError("この操作はできません。");
+  if (play.phase === "wait") {
+    // GO の前に押した：フライング（このラウンドは点なし）
+    if (!play.falseStart.includes(me)) play.falseStart.push(me);
+    return;
+  }
+  if (play.phase !== "go") throw new GameError("今は押せません。");
+  if (play.falseStart.includes(me) || me in play.reacted) throw new GameError("もう押しています。");
+  // 反応時間 = 届いた時刻 − GO の時刻 − 往復時間（GO の知らせが届くまでと、押した知らせが届くまでの分を引く）
+  const rtt = Math.min(2_000, Math.max(0, input.rttMs ?? 0));
+  const ms = now - (play.goAt ?? now) - rtt;
+  if (ms < 0) {
+    // 補正しても GO より前：フライング
+    play.falseStart.push(me);
+  } else {
+    play.reacted[me] = Math.round(ms);
+  }
+  const everyoneDone = players.every((uid) => uid in play.reacted || play.falseStart.includes(uid));
+  if (everyoneDone) resolveReflex(play, players, now);
+}
+
 function guessAction(play: GuessPlay, me: string, input: GameAction) {
   if (input.action !== "guess") throw new GameError("この操作はできません。");
   const value = input.value;
@@ -387,8 +553,12 @@ function guessAction(play: GuessPlay, me: string, input: GameAction) {
   if (result === "correct") play.winner = me;
 }
 
-function playAction(play: Play, players: string[], me: string, input: GameAction, now: number) {
-  if (play.kind === "tictactoe") {
+function playAction(play: Play, players: string[], me: string, input: GameAction, now: number, random: () => number) {
+  if (play.kind === "tap") {
+    tapAction(play, me, input, now);
+  } else if (play.kind === "reflex") {
+    reflexAction(play, players, me, input, now);
+  } else if (play.kind === "tictactoe") {
     if (input.action !== "move") throw new GameError("この操作はできません。");
     tttMove(play, players, me, input.index);
   } else if (play.kind === "quiz") {
@@ -451,7 +621,7 @@ export function reduce(
     default: {
       if (!stored.play) throw new GameError("まだ始まっていません。");
       if (!stored.players.includes(me)) throw new GameError("参加者だけができます。");
-      playAction(stored.play, stored.players, me, input, now);
+      playAction(stored.play, stored.players, me, input, now, random);
     }
   }
 
@@ -474,7 +644,9 @@ export function viewOf(kind: GameKind, creator: string, stored: Stored, status: 
     tictactoe: null,
     quiz: null,
     janken: null,
-    guess: null
+    guess: null,
+    tap: null,
+    reflex: null
   };
   const play = stored.play;
   if (!play) return view;
@@ -512,6 +684,25 @@ export function viewOf(kind: GameKind, creator: string, stored: Stored, status: 
       last: play.last,
       champion: play.champion,
       deadlineIn: remainingOf(play, now)
+    };
+  } else if (play.kind === "tap") {
+    view.tap = {
+      phase: play.phase,
+      counts: { ...play.counts },
+      deadlineIn: remainingOf(play, now)
+    };
+  } else if (play.kind === "reflex") {
+    view.reflex = {
+      round: play.round,
+      total: REFLEX_ROUNDS,
+      phase: play.phase,
+      reacted: Object.keys(play.reacted),
+      falseStart: [...play.falseStart],
+      myMs: play.reacted[viewer] ?? null,
+      scores: { ...play.scores },
+      last: play.last,
+      // GO の前は待ち時間を見せない（押すタイミングを知られないように）
+      deadlineIn: play.phase === "wait" ? null : remainingOf(play, now)
     };
   } else {
     const revealed = status === "finished";

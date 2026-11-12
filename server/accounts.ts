@@ -12,6 +12,9 @@ import { befriendTeam } from "./team.js";
 import { attachSenninAccount, SenninError } from "./senninPoints.js";
 import { grantLoginBonus } from "./loginBonus.js";
 import { retryCreatorPayouts } from "./studioPayout.js";
+import { requestIp, manualIp, isIpBanned } from "./ipBans.js";
+import { withKeyedLock } from "./keyedLock.js";
+import { checkInvite, findInviterId, normalizeInviteCode, recordReferral, REFERRAL_ON, ReferralError, retryPendingReferrals } from "./referral.js";
 
 export const accounts = Router();
 
@@ -45,7 +48,15 @@ const passwordSchema = z
   .max(72, "パスワードは72文字以内にしてください。");
 const nameSchema = z.string().trim().min(1, "表示名を入力してください。").max(40, "表示名は40文字以内にしてください。");
 
-const registerSchema = z.object({ username: usernameSchema, password: passwordSchema, displayName: nameSchema });
+const registerSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  displayName: nameSchema,
+  // 招待コード（任意）。招待されて登録するとき、招待した人とされた人に報酬が付く
+  inviteCode: z.string().max(16).optional(),
+  // IP が取得できなかったときだけ、利用者が手入力する IP
+  manualIp: z.string().max(64).optional()
+});
 const loginSchema = z.object({
   username: z.string().trim().toLowerCase().min(1).max(20),
   password: z.string().min(1).max(72)
@@ -116,27 +127,75 @@ async function loadMe(userId: string) {
   };
 }
 
+// ユーザーを作る（IP を記録する）。ユーザー名が使われていれば 23505 のエラーを投げる
+async function createUser(username: string, password: string, displayName: string, ip: string): Promise<string> {
+  const { data, error } = await sb.rpc("sc_register", {
+    p_username: username,
+    p_password: password,
+    p_name: displayName
+  });
+  if (error) throw error;
+  const userId = data as string;
+  const { error: ipError } = await sb.from("sc_users").update({ signup_ip: ip, last_ip: ip }).eq("id", userId);
+  if (ipError) console.error("[register] 登録時の IP を保存できませんでした:", ipError);
+  return userId;
+}
+
 accounts.post("/auth/register", authLimit, async (req, res) => {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0].message });
     return;
   }
-  const { data, error } = await sb.rpc("sc_register", {
-    p_username: parsed.data.username,
-    p_password: parsed.data.password,
-    p_name: parsed.data.displayName
-  });
-  if (error) {
-    if (error.code === "23505") {
+  // IP の確認：取得できないときは、利用者に IP を手入力してもらう（画面にモーダルを出す）
+  const ip = requestIp(req) ?? manualIp(parsed.data.manualIp);
+  if (!ip) {
+    res.status(428).json({ code: "ip_required", error: "IPアドレスを取得できませんでした。IPアドレスを入力してください。" });
+    return;
+  }
+  if (isIpBanned(ip)) {
+    res.status(403).json({ error: "このネットワークからは利用できません。" });
+    return;
+  }
+  const { username, password, displayName } = parsed.data;
+  const code = normalizeInviteCode(parsed.data.inviteCode);
+  let inviterId: string | null = null;
+  if (code && REFERRAL_ON) {
+    inviterId = await findInviterId(code);
+    if (!inviterId) {
+      res.status(400).json({ error: "招待コードが見つかりません。" });
+      return;
+    }
+  }
+  let userId: string;
+  try {
+    if (inviterId) {
+      // 同じ招待者への登録は1件ずつ確かめる（同時に来ても、同じ回線からの2件目は必ず弾く）
+      const inviter = inviterId;
+      userId = await withKeyedLock(`referral:${inviter}`, async () => {
+        await checkInvite(inviter, ip);
+        const id = await createUser(username, password, displayName, ip);
+        await recordReferral(inviter, id, null, ip);
+        return id;
+      });
+    } else {
+      userId = await createUser(username, password, displayName, ip);
+    }
+  } catch (error) {
+    if (error instanceof ReferralError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    if ((error as { code?: string })?.code === "23505") {
       res.status(409).json({ error: "そのユーザー名は使われています。" });
       return;
     }
     throw error;
   }
   // 新しい人には、開発チームを友だちに追加しておく（お知らせを受け取れるように）
-  await befriendTeam(data as string).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
-  await startSession(res, data as string);
+  await befriendTeam(userId).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
+  await startSession(res, userId);
+  void retryPendingReferrals(userId);
   res.json({ ok: true });
 });
 
@@ -156,7 +215,13 @@ accounts.post("/auth/login", authLimit, async (req, res) => {
     return;
   }
   // 利用停止中でもログインは通す。アプリ側で利用停止の画面（期限つき）を出す
+  const loginIp = requestIp(req);
+  if (loginIp) {
+    const { error: ipError } = await sb.from("sc_users").update({ last_ip: loginIp }).eq("id", data as string);
+    if (ipError) console.error("[login] 最後の IP を保存できませんでした:", ipError);
+  }
   await startSession(res, data as string);
+  void retryPendingReferrals(data as string);
   res.json({ ok: true });
 });
 
@@ -312,8 +377,9 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
         return;
       }
       await attachSenninAccount(userId, profile.id, tokenData.refresh_token);
-      // 連携できたので、保留になっていた作者への支払いを払う（作者でなければ何もない）
+      // 連携できたので、保留になっていた作者への支払いと招待の報酬を払う（なければ何もない）
       void retryCreatorPayouts(userId).catch((error) => console.error("[studio] 支払いの再送に失敗:", error));
+      void retryPendingReferrals(userId);
       res.clearCookie("sc_oauth", cookieBase);
       res.clearCookie("sc_oauth_link", cookieBase);
       res.redirect(`${config.appOrigin}${returnPath}?store=linked`);
@@ -326,6 +392,7 @@ accounts.get("/auth/sennin/callback", async (req, res) => {
       try {
         await attachSenninAccount(userId, profile.id, tokenData.refresh_token);
         void grantLoginBonus(userId).catch((error) => console.error("[bonus] ログイン特典を付与できませんでした（次回のログインで再試行します）:", error));
+        void retryPendingReferrals(userId);
       } catch (error) {
         console.error("[sennin] ログインで連携情報を保存できませんでした:", error);
       }

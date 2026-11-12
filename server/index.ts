@@ -30,6 +30,8 @@ import { studio } from "./studio.js";
 import { studioAdmin } from "./studioAdmin.js";
 import { studioReviews } from "./studioReviews.js";
 import tubeRouter from "./tube/router.js";
+import { ipBanGate, reloadIpBans } from "./ipBans.js";
+import { referral } from "./referral.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -38,6 +40,9 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(express.json({ limit: "32kb" }));
 app.use(cookieParser());
+
+// BAN された IP は、管理者と状態表示を除いて /api を使えない（メンテナンスより前に止める）
+app.use(ipBanGate);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, name: "SoraChat" });
@@ -57,6 +62,7 @@ app.use(maintenanceGate);
 app.use("/tube", tubeRouter);
 
 app.use("/api", accounts);
+app.use("/api", referral);
 app.use("/api", dm);
 app.use("/api", friends);
 app.use("/api", push);
@@ -105,6 +111,7 @@ attachRealtime(server);
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`SoraChat listening on ${config.port}`);
   initializeMaintenanceSettings().catch((error) => console.error("メンテナンス設定の初期化に失敗しました", error));
+  reloadIpBans().catch((error) => console.error("IP BAN の一覧を読めませんでした", error));
   // 再起動前に始まったミニゲームの制限時間を引き継ぐ
   resumeGameTimers().catch((error) => console.error("ミニゲームの制限時間を引き継げませんでした", error));
 });

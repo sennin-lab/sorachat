@@ -84,6 +84,18 @@ export function onChatEvent(listener: (event: ChatEvent) => void) {
 const emitChat = (event: ChatEvent) => chatListeners.forEach((listener) => listener(event));
 
 let socket: WebSocket | null = null;
+// 往復時間（ミリ秒）。自分で測った値（EMA）と、サーバーが測った値（ping に入って届く）
+let rttEma: number | null = null;
+let serverRtt: number | null = null;
+let clientPingTimer = 0;
+// 今の往復時間の目安。ミニゲームの画面の表示に使う（測れていなければ 0）
+export function getRttMs(): number {
+  return Math.round(rttEma ?? serverRtt ?? 0);
+}
+function addRttSample(sample: number) {
+  if (!Number.isFinite(sample) || sample < 0 || sample > 10_000) return;
+  rttEma = rttEma === null ? sample : rttEma * 0.7 + sample * 0.3;
+}
 let retryTimer = 0;
 let retryCount = 0;
 let listening = false;
@@ -119,6 +131,30 @@ function rejectAll(reason: string) {
     entry.reject(new Error(reason));
     pending.delete(clientId);
   }
+  for (const [reqId, entry] of pendingGame) {
+    window.clearTimeout(entry.timer);
+    entry.reject(new Error(reason));
+    pendingGame.delete(reqId);
+  }
+}
+
+// ミニゲームの操作の返事（ack / error）を待つ一覧
+const pendingGame = new Map<string, { resolve: () => void; reject: (e: Error) => void; timer: number }>();
+let gameSeq = 0;
+
+// ミニゲームの操作を WebSocket で送る。サーバーが処理したら resolve、できなければ reject（理由つき）
+export function sendGameAction(messageId: string, action: Record<string, unknown>): Promise<void> {
+  if (!isSocketOpen()) return Promise.reject(new Error("接続されていません。"));
+  gameSeq += 1;
+  const reqId = `${Date.now().toString(36)}-${gameSeq}`;
+  return new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      pendingGame.delete(reqId);
+      reject(new Error("操作がタイムアウトしました。"));
+    }, 8_000);
+    pendingGame.set(reqId, { resolve, reject, timer });
+    socket!.send(JSON.stringify({ type: "game-action", reqId, messageId, action }));
+  });
 }
 
 // この端末のWeb Pushの宛先。画面を開いている端末には、同じ通知を重ねて送らないようにサーバーへ伝える
@@ -142,6 +178,11 @@ function openSocket() {
   ws.onopen = () => {
     retryCount = 0;
     sendPresence();
+    // 自分からも ping を送り、返事（pong）で往復時間を測る（サーバーが返さない場合は、サーバーの値を使う）
+    window.clearInterval(clientPingTimer);
+    clientPingTimer = window.setInterval(() => {
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "ping", t: Date.now() }));
+    }, 3_000);
     emitChat({ type: "hello" });
     emit({ kind: "change" });
   };
@@ -153,12 +194,31 @@ function openSocket() {
     } catch {
       return;
     }
+    // サーバーの ping には必ず pong で返す（サーバーはこれで往復時間を測る）
+    if (data.type === "ping") {
+      if (typeof data.rtt === "number") serverRtt = data.rtt;
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "pong", t: data.t }));
+      return;
+    }
+    if (data.type === "pong") {
+      if (typeof data.t === "number") addRttSample(Date.now() - data.t);
+      return;
+    }
     if (data.type === "ack" || data.type === "error") {
       const entry = pending.get(data.clientId);
       if (!entry) return;
       pending.delete(data.clientId);
       window.clearTimeout(entry.timer);
       if (data.type === "ack") entry.resolve(data.message as Message);
+      else entry.reject(new Error(data.error));
+      return;
+    }
+    if (data.type === "game-ack" || data.type === "game-error") {
+      const entry = pendingGame.get(data.reqId);
+      if (!entry) return;
+      pendingGame.delete(data.reqId);
+      window.clearTimeout(entry.timer);
+      if (data.type === "game-ack") entry.resolve();
       else entry.reject(new Error(data.error));
       return;
     }
@@ -174,6 +234,7 @@ function openSocket() {
   };
 
   ws.onclose = (event) => {
+    window.clearInterval(clientPingTimer);
     if (socket === ws) socket = null;
     rejectAll("接続が切れました。");
     // 利用停止になったときは再接続せず、アカウントの状態を確認し直す（利用停止の画面に切り替わる）

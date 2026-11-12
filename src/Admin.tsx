@@ -5,6 +5,7 @@ import { formatRemaining } from "./Banned";
 import { TEAM_ID } from "./team";
 import { StudioPanel } from "./AdminStudio";
 import { AdminPayPanel } from "./AdminPay";
+import { ManualIpModal } from "./ManualIpModal";
 
 import type { BanInfo } from "./types";
 
@@ -25,6 +26,10 @@ type UserDetail = UserSummary & {
   bio: string;
   contact: string;
   profileUrl: string;
+  signupIp: string | null;
+  lastIp: string | null;
+  inviteCode: string | null;
+  invitedCount: number;
   friends: UserSummary[];
   conversations: ConvSummary[];
 };
@@ -172,7 +177,7 @@ function AdminLogin({ onDone }: { onDone: () => void }) {
 type Go = (to: string) => void;
 
 function Dashboard({ go }: { go: Go }) {
-  const [tab, setTab] = useState<"users" | "chats" | "news" | "studio" | "pay" | "maintenance">("users");
+  const [tab, setTab] = useState<"users" | "chats" | "news" | "studio" | "pay" | "maintenance" | "ip">("users");
   return (
     <>
       <div className="admin-segment" role="tablist">
@@ -194,6 +199,9 @@ function Dashboard({ go }: { go: Go }) {
         <button role="tab" aria-selected={tab === "maintenance"} className={tab === "maintenance" ? "on" : ""} onClick={() => setTab("maintenance")}>
           メンテナンス
         </button>
+        <button role="tab" aria-selected={tab === "ip"} className={tab === "ip" ? "on" : ""} onClick={() => setTab("ip")}>
+          IP BAN
+        </button>
       </div>
       {tab === "users" ? (
         <UsersList go={go} />
@@ -205,6 +213,8 @@ function Dashboard({ go }: { go: Go }) {
         <StudioPanel />
       ) : tab === "pay" ? (
         <AdminPayPanel />
+      ) : tab === "ip" ? (
+        <IpBanPanel />
       ) : (
         <MaintenancePanel />
       )}
@@ -546,6 +556,8 @@ function UserPage({ id, go }: { id: string; go: Go }) {
 
       <BanPanel user={user} onChanged={changed} onError={setStatus} />
 
+      <IpPanel user={user} onChanged={changed} onError={setStatus} />
+
       <PasswordPanel user={user} onChanged={changed} onError={setStatus} />
 
       <section className="admin-card">
@@ -726,6 +738,176 @@ function AvatarPanel({ user, onChanged, onError }: { user: UserDetail; onChanged
 }
 
 // 利用停止（BAN）。期間を指定するか、永久にするかを選ぶ
+// IP BAN の一覧（BAN した IP の解除・IP の手入力による追加）
+function IpBanPanel() {
+  const [list, setList] = useState<{ ip: string; reason: string | null; createdAt: string }[] | null>(null);
+  const [ip, setIp] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  const load = () =>
+    adminApi<{ ip: string; reason: string | null; createdAt: string }[]>("/api/admin/ip-bans")
+      .then(setList)
+      .catch((err) => setError(msg(err)));
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const add = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await adminApi("/api/admin/ip-bans", post({ ip: ip.trim(), reason: reason.trim() }));
+      setIp("");
+      setReason("");
+      setNotice("IPを利用停止にしました。");
+      await load();
+    } catch (err) {
+      setError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (target: string) => {
+    if (!window.confirm(`${target} のIP BANを解除しますか？`)) return;
+    setError("");
+    setNotice("");
+    try {
+      await adminApi(`/api/admin/ip-bans/${encodeURIComponent(target)}`, delete_());
+      setNotice("IP BANを解除しました。");
+      await load();
+    } catch (err) {
+      setError(msg(err));
+    }
+  };
+
+  return (
+    <>
+      <section className="admin-card">
+        <h2>IP BAN</h2>
+        <p className="muted small">BAN したIPからは、このアプリの通信（ログイン・登録・トークなど）がすべて止まります。管理者パネルは止まりません。</p>
+        <form className="admin-inline-form" onSubmit={add}>
+          <input className="auth-input" value={ip} onChange={(e) => setIp(e.target.value)} placeholder="IPアドレス（例：203.0.113.10）" autoCapitalize="none" spellCheck={false} />
+          <input className="auth-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="理由（任意）" maxLength={200} />
+          <button className="btn-primary" disabled={busy || !ip.trim()}>
+            {busy ? "追加中…" : "IPをBANする"}
+          </button>
+        </form>
+        {notice && <p className="notice center">{notice}</p>}
+        {error && <p className="notice error center">{error}</p>}
+      </section>
+
+      <section className="admin-card">
+        <h3 className="admin-section-title">BAN中のIP（{list?.length ?? 0}件）</h3>
+        {list === null ? (
+          <p className="muted small">読み込み中…</p>
+        ) : list.length === 0 ? (
+          <p className="muted small">BANしているIPはありません。</p>
+        ) : (
+          <ul className="admin-list">
+            {list.map((row) => (
+              <li key={row.ip}>
+                <div className="admin-row">
+                  <span className="admin-row-text">
+                    <strong>{row.ip}</strong>
+                    <small>
+                      {fmt(row.createdAt)}
+                      {row.reason ? `・理由：${row.reason}` : ""}
+                    </small>
+                  </span>
+                  <button className="btn-secondary" onClick={() => void remove(row.ip)}>
+                    解除
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
+// ユーザーのIP（登録時・最後のログイン時）と、そのIPをBANする。IP が記録されていないときは手入力のモーダルを出す
+function IpPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (message: string) => void; onError: (message: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [manual, setManual] = useState<{ message: string } | null>(null);
+  const [manualError, setManualError] = useState("");
+
+  const ban = async (source: "last" | "signup" | "manual", ip?: string) => {
+    const label = source === "manual" ? "入力されたIP" : source === "last" ? "最後のログインのIP" : "登録時のIP";
+    if (!window.confirm(`${user.displayName} の${label}をBANしますか？\nそのIPからは、どのアカウントでもアプリが使えなくなります。`)) return;
+    setBusy(true);
+    setManualError("");
+    try {
+      await adminApi(`/api/admin/users/${user.id}/ip-ban`, post({ source, ip, reason: `${user.username} の${label}` }));
+      setManual(null);
+      onChanged(`${label}をBANしました。`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 422) {
+        // IP が記録されていない：手入力のモーダルを出す
+        setManual({ message: `${user.displayName} のIPアドレスは記録されていません。\nわかっているIPアドレスを入力してください。` });
+      } else if (manual) {
+        setManualError(msg(err));
+      } else {
+        onError(msg(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="admin-card">
+      <h3 className="admin-section-title">IP・招待</h3>
+      <dl className="admin-facts">
+        <div>
+          <dt>登録時のIP</dt>
+          <dd>{user.signupIp ?? "未記録"}</dd>
+        </div>
+        <div>
+          <dt>最後のログインのIP</dt>
+          <dd>{user.lastIp ?? "未記録"}</dd>
+        </div>
+        <div>
+          <dt>招待コード</dt>
+          <dd>{user.inviteCode ?? "—"}（招待した人 {user.invitedCount}人）</dd>
+        </div>
+      </dl>
+      <div className="admin-ip-actions">
+        <button className="btn-secondary" disabled={busy || !user.lastIp} onClick={() => void ban("last")}>
+          最後のIPをBAN
+        </button>
+        <button className="btn-secondary" disabled={busy || !user.signupIp} onClick={() => void ban("signup")}>
+          登録時のIPをBAN
+        </button>
+        <button className="btn-secondary" disabled={busy} onClick={() => setManual({ message: "IPアドレスを入力すると、そのIPをBANします。" })}>
+          IPを手入力してBAN
+        </button>
+      </div>
+      {manual && (
+        <ManualIpModal
+          title="IPアドレスを入力"
+          message={manual.message}
+          busy={busy}
+          error={manualError}
+          confirmLabel="BANする"
+          onSubmit={(value) => void ban("manual", value)}
+          onCancel={() => {
+            setManual(null);
+            setManualError("");
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
 function BanPanel({ user, onChanged, onError }: { user: UserDetail; onChanged: (message: string) => void; onError: (message: string) => void }) {
   const [mode, setMode] = useState<"duration" | "permanent">("duration");
   const [amount, setAmount] = useState("3");

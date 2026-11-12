@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { GameHand, GameKind, GameView } from "./types";
 
@@ -6,8 +6,13 @@ export const GAME_TITLES: Record<GameKind, string> = {
   tictactoe: "三目並べ",
   quiz: "早押しクイズ",
   janken: "じゃんけん大会",
-  guess: "数当て"
+  guess: "数当て",
+  tap: "連打バトル",
+  reflex: "反射神経バトル"
 };
+
+// 操作を送る関数。成功なら true、できなかったら false（Promise でも、何も返さなくてもよい）
+type ActionFn = (action: string, extra?: Record<string, unknown>) => Promise<boolean> | void;
 
 const HAND_LABEL: Record<GameHand, string> = { rock: "✊ グー", scissors: "✌ チョキ", paper: "✋ パー" };
 
@@ -15,7 +20,7 @@ type Props = {
   game: GameView;
   // メンバーの表示名（ユーザーID → 名前）
   names: Map<string, string>;
-  onAction: (action: string, extra?: Record<string, unknown>) => void;
+  onAction: ActionFn;
 };
 
 // ミニゲームの吹き出しの中身。操作はすべてサーバーに送り、結果は全員の画面に届く
@@ -173,6 +178,8 @@ function GameBody({ game, names, onAction, onExpand }: Props & { onExpand?: () =
       {game.quiz && <Quiz game={game} nameOf={nameOf} canPlay={canPlay} onAction={onAction} />}
       {game.janken && <Janken game={game} nameOf={nameOf} canPlay={canPlay} onAction={onAction} />}
       {game.guess && <Guess game={game} nameOf={nameOf} canPlay={canPlay} onAction={onAction} />}
+      {game.tap && <TapBattle game={game} nameOf={nameOf} canPlay={canPlay} onAction={onAction} />}
+      {game.reflex && <ReflexBattle game={game} nameOf={nameOf} canPlay={canPlay} onAction={onAction} />}
 
       {finished && game.cancelled && <p className="game-result">ゲームは中止されました</p>}
       {game.status !== "waiting" && isCreator && !finished && (
@@ -190,7 +197,7 @@ type Sub = {
   game: GameView;
   nameOf: (uid: string | null | undefined) => string;
   canPlay: boolean;
-  onAction: (action: string, extra?: Record<string, unknown>) => void;
+  onAction: ActionFn;
 };
 
 function TicTacToe({ game, nameOf, canPlay, onAction }: Sub) {
@@ -198,6 +205,18 @@ function TicTacToe({ game, nameOf, canPlay, onAction }: Sub) {
   const mark = (symbol: "X" | "O") => (symbol === "X" ? "×" : "○");
   const mySymbol = game.me === t.symbols.X ? "X" : game.me === t.symbols.O ? "O" : null;
   const myTurn = canPlay && game.status === "playing" && mySymbol !== null && t.turn === mySymbol;
+  // 押した瞬間に自分の印を出す（楽観的な表示）。新しい画面の情報が届いたとき（成功でも失敗でも）に消して、サーバーの状態に合わせる
+  const [pending, setPending] = useState<number | null>(null);
+  useEffect(() => {
+    setPending(null);
+  }, [t]);
+  const place = (index: number) => {
+    if (!myTurn || pending !== null || t.board[index]) return;
+    setPending(index);
+    void Promise.resolve(onAction("move", { index })).then((ok) => {
+      if (ok === false) setPending(null);
+    });
+  };
   const turnUid = t.turn === "X" ? t.symbols.X : t.symbols.O;
   let message = "";
   if (t.winner === "draw") message = "引き分けです";
@@ -214,11 +233,11 @@ function TicTacToe({ game, nameOf, canPlay, onAction }: Sub) {
             key={i}
             type="button"
             className={`ttt-cell${t.line?.includes(i) ? " win" : ""}`}
-            disabled={!myTurn || Boolean(cell)}
-            onClick={() => onAction("move", { index: i })}
+            disabled={!myTurn || Boolean(cell) || pending !== null}
+            onClick={() => place(i)}
             aria-label={`${i + 1}番のマス`}
           >
-            {cell ? mark(cell as "X" | "O") : ""}
+            {cell ? mark(cell as "X" | "O") : pending === i && mySymbol ? mark(mySymbol) : ""}
           </button>
         ))}
       </div>
@@ -453,6 +472,232 @@ function Guess({ game, nameOf, canPlay, onAction }: Sub) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+// ---- 連打バトル（10秒間の連打。押した分は少しずつまとめて送る）----
+const TAP_FLUSH_MS = 100;
+const TAP_BATCH_MAX = 30;
+
+function TapBattle({ game, nameOf, canPlay, onAction }: Sub) {
+  const tap = game.tap!;
+  const seconds = useCountdown(tap.deadlineIn);
+  const running = tap.phase === "run" && canPlay;
+  // localTotal：自分が押した合計。acked：サーバーが受け付けた合計。unsent：まだ送っていない分
+  const localTotal = useRef(0);
+  const acked = useRef(0);
+  const unsent = useRef(0);
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  const onActionRef = useRef(onAction);
+  onActionRef.current = onAction;
+
+  // まとめて送る（送った分は、結果が届くまで「未確定」として画面に足す）
+  const flush = () => {
+    while (unsent.current > 0) {
+      const n = Math.min(TAP_BATCH_MAX, unsent.current);
+      unsent.current -= n;
+      Promise.resolve(onActionRef.current("tap", { value: n })).then(
+        (ok) => {
+          if (ok === false) localTotal.current -= n;
+          else acked.current += n;
+          bump();
+        },
+        () => {
+          localTotal.current -= n;
+          bump();
+        }
+      );
+    }
+  };
+
+  // 実行中だけ一定間隔で送る。終わるとき（画面から離れるときも）残りを送る
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(flush, TAP_FLUSH_MS);
+    return () => {
+      window.clearInterval(timer);
+      flush();
+    };
+    // flush は ref だけを使うので、実行中の切り替えだけで張り直す
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  const press = (event: ReactPointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!running) return;
+    localTotal.current += 1;
+    unsent.current += 1;
+    if (unsent.current >= TAP_BATCH_MAX) flush();
+    bump();
+  };
+
+  const serverMine = tap.counts[game.me] ?? 0;
+  const mine = serverMine + (localTotal.current - acked.current);
+  const counts = game.players.map((uid) => ({ uid, count: uid === game.me ? mine : tap.counts[uid] ?? 0 }));
+  const ranking = [...counts].sort((a, b) => b.count - a.count);
+  const topCount = Math.max(1, ...counts.map((c) => c.count));
+
+  if (tap.phase === "count") {
+    return (
+      <div className="game-tap">
+        <p className="game-big-label">まもなくスタート</p>
+        <div className="game-big-number" aria-live="polite">
+          {seconds ?? "…"}
+        </div>
+        <p className="game-meta">スタートしたら、大きなボタンを連打してください</p>
+      </div>
+    );
+  }
+
+  if (tap.phase === "done") {
+    const top = ranking[0]?.count ?? 0;
+    const winners = ranking.filter((r) => r.count === top).map((r) => nameOf(r.uid));
+    return (
+      <div className="game-tap">
+        <p className="game-result">{winners.join("・")}の優勝！</p>
+        <ol className="game-podium">
+          {ranking.map((row, i) => (
+            <li key={row.uid} className={`rank-${Math.min(i + 1, 4)}`}>
+              <span className="game-rank">{i + 1}</span>
+              <span className="game-podium-name">{nameOf(row.uid)}</span>
+              <strong className="game-podium-count">{row.count}回</strong>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
+  // 実行中
+  return (
+    <div className="game-tap">
+      <div className="game-tap-head">
+        {seconds !== null && <Timer seconds={seconds} label="残り" />}
+        <span className="game-meta">あなた {mine}回</span>
+      </div>
+      <div
+        className={`game-tap-pad${running ? "" : " off"}`}
+        role="button"
+        aria-disabled={!running}
+        aria-label="タップ"
+        onPointerDown={press}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <span>タップ！</span>
+        <strong>{mine}</strong>
+      </div>
+      <ul className="game-bars">
+        {counts.map((row) => (
+          <li key={row.uid} className={row.uid === game.me ? "me" : ""}>
+            <span className="game-bar-name">{nameOf(row.uid)}</span>
+            <span className="game-bar-track">
+              <span className="game-bar-fill" style={{ width: `${Math.max(3, (row.count / topCount) * 100)}%` }} />
+            </span>
+            <strong className="game-bar-count">{row.count}</strong>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ---- 反射神経バトル（GO で一番早く押した人が1点。3ラウンド）----
+function ReflexBattle({ game, nameOf, canPlay, onAction }: Sub) {
+  const r = game.reflex!;
+  const seconds = useCountdown(r.deadlineIn);
+  // 自分が押したラウンド（押した瞬間の表示に使う。失敗したら戻す）
+  const [pressedRound, setPressedRound] = useState<number | null>(null);
+  const pressedHere = pressedRound === r.round;
+  const iFlying = r.falseStart.includes(game.me) || (pressedHere && r.phase === "wait");
+  const iDone = pressedHere || r.reacted.includes(game.me) || r.falseStart.includes(game.me);
+  const padActive = canPlay && (r.phase === "wait" || r.phase === "go") && !iDone;
+
+  const press = (event: ReactPointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!padActive) return;
+    setPressedRound(r.round);
+    void Promise.resolve(onAction("react")).then((ok) => {
+      if (ok === false) setPressedRound(null);
+    });
+  };
+
+  const ranking = game.players.map((uid) => ({ uid, score: r.scores[uid] ?? 0 })).sort((a, b) => b.score - a.score);
+  const roundLabel = `ラウンド ${r.round} / ${r.total}`;
+
+  if (r.phase === "done") {
+    const top = ranking[0]?.score ?? 0;
+    const winners = ranking.filter((x) => x.score === top).map((x) => nameOf(x.uid));
+    return (
+      <div className="game-reflex">
+        <p className="game-result">{winners.join("・")}の優勝！（{top}点）</p>
+        <ol className="game-podium">
+          {ranking.map((row, i) => (
+            <li key={row.uid} className={`rank-${Math.min(i + 1, 4)}`}>
+              <span className="game-rank">{i + 1}</span>
+              <span className="game-podium-name">{nameOf(row.uid)}</span>
+              <strong className="game-podium-count">{row.score}点</strong>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
+  if (r.phase === "revealed" && r.last) {
+    const last = r.last;
+    const order = [...game.players].sort((a, b) => {
+      const ta = last.times[a] ?? Infinity;
+      const tb = last.times[b] ?? Infinity;
+      return ta - tb;
+    });
+    return (
+      <div className="game-reflex">
+        <p className="game-meta">{roundLabel}</p>
+        <p className="game-result">{last.winner ? `${nameOf(last.winner)}が1点！` : "今回は点が入りませんでした"}</p>
+        <ul className="game-times">
+          {order.map((uid) => {
+            const ms = last.times[uid];
+            const flying = last.falseStart.includes(uid);
+            return (
+              <li key={uid} className={uid === last.winner ? "win" : ""}>
+                <span>{nameOf(uid)}</span>
+                <strong>{flying ? "フライング" : ms === null || ms === undefined ? "押せず" : `${ms}ms`}</strong>
+                {uid === last.winner && <em>1点</em>}
+              </li>
+            );
+          })}
+        </ul>
+        <ScoreList ranking={ranking} nameOf={nameOf} />
+        {seconds !== null && <p className="game-meta">次のラウンドまで {seconds}秒</p>}
+      </div>
+    );
+  }
+
+  // 待機（GOの前）・GO
+  const isGo = r.phase === "go";
+  const label = iFlying ? "フライング…" : isGo ? (iDone ? "押した！" : "押せ！") : "まだ…";
+  return (
+    <div className="game-reflex">
+      <div className="game-tap-head">
+        <span className="game-meta">{roundLabel}</span>
+        {isGo && seconds !== null && <Timer seconds={seconds} label="残り" />}
+      </div>
+      <div
+        className={`game-reflex-pad ${isGo ? "go" : "wait"}${iDone ? " pressed" : ""}${padActive ? "" : " off"}`}
+        role="button"
+        aria-disabled={!padActive}
+        aria-label="押す"
+        onPointerDown={press}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <span>{label}</span>
+        {!isGo && <small>GOが出るまで待ってください</small>}
+        {r.myMs !== null && <small>あなた {r.myMs}ms</small>}
+      </div>
+      <ScoreList ranking={ranking} nameOf={nameOf} />
     </div>
   );
 }

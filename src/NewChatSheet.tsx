@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, api, post } from "./api";
 import { FriendSelectPage } from "./FriendSelectPage";
 import { Icon } from "./Icon";
@@ -14,6 +14,8 @@ export function NewChatSheet({ onClose, onOpen }: { onClose: () => void; onOpen:
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // 連打対策：開いている途中の要求がある間は、次の要求を送らない（state の反映を待たずに止める）
+  const inFlight = useRef(false);
 
   useEffect(() => {
     api<Friend[]>("/api/friends")
@@ -22,6 +24,8 @@ export function NewChatSheet({ onClose, onOpen }: { onClose: () => void; onOpen:
   }, []);
 
   const openDirect = async (username: string) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError("");
     try {
@@ -30,11 +34,14 @@ export function NewChatSheet({ onClose, onOpen }: { onClose: () => void; onOpen:
     } catch (err) {
       setError(messageOf(err));
       setBusy(false);
+      inFlight.current = false;
     }
   };
 
   const createGroup = async (picked: Friend[], name: string) => {
     // 名前が空なら、選んだ人の名前を並べて自動でつける
+    if (inFlight.current) return;
+    inFlight.current = true;
     const autoTitle = picked.map((f) => f.displayName).join("、").slice(0, 40);
     setBusy(true);
     setError("");
@@ -47,6 +54,7 @@ export function NewChatSheet({ onClose, onOpen }: { onClose: () => void; onOpen:
     } catch (err) {
       setError(messageOf(err));
       setBusy(false);
+      inFlight.current = false;
     }
   };
 

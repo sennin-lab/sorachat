@@ -9,6 +9,7 @@ import { connectRealtime, onDataEvent, startDataSync } from "./realtime";
 import { refreshPush } from "./push";
 import { NotifyPrompt } from "./NotifyPrompt";
 import { OpenChatSheet } from "./OpenChatSheet";
+import { ReferralSheet } from "./ReferralSheet";
 import { StorePage } from "./StorePage";
 import { StudioPage } from "./StudioPage";
 import { TubePage } from "./TubePage";
@@ -95,6 +96,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const [showSettings, setShowSettings] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showOpenChats, setShowOpenChats] = useState(false);
+  const [showReferral, setShowReferral] = useState(false);
   // 仙人アカウントの連携から戻ったときの結果（連携できた・できなかった）。ストアと senninstudio のページに表示する
   const [storeFlash, setStoreFlash] = useState<{ ok: boolean; text: string } | null>(null);
   const [showNotifyPrompt, setShowNotifyPrompt] = useState(() => shouldAskNotify(me));
@@ -289,17 +291,26 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
 
   // 名前（ユーザー名）からトークを開く。友だちの画面から「トーク」を押したとき
   // 成功したら true を返す（失敗時は呼び出し側で案内を出せるようにする）
-  const openDmWith = async (username: string): Promise<boolean> => {
-    try {
-      const result = await api<{ id: string }>("/api/dm/open", post({ username }));
-      setShowAdd(false);
-      setTab("talk");
-      select(result.id, { replace: Boolean(viewUser) });
-      refresh();
-      return true;
-    } catch {
-      return false;
-    }
+  // 連打されても1回だけ要求する（同じ相手への要求が終わるまで、次は待たせる）
+  const openingDm = useRef<Promise<boolean> | null>(null);
+  const openDmWith = (username: string): Promise<boolean> => {
+    if (openingDm.current) return openingDm.current;
+    const run = (async (): Promise<boolean> => {
+      try {
+        const result = await api<{ id: string }>("/api/dm/open", post({ username }));
+        setShowAdd(false);
+        setTab("talk");
+        select(result.id, { replace: Boolean(viewUser) });
+        refresh();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        openingDm.current = null;
+      }
+    })();
+    openingDm.current = run;
+    return run;
   };
 
   // タブを押したら、スマホではトークを閉じて選んだタブの画面に戻る（PCは会話を開いたままにする）
@@ -367,6 +378,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                       <Icon name="users" size={20} />
                     </span>
                     オープンチャット
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
+                  <button onClick={() => setShowReferral(true)}>
+                    <span className="option-icon">
+                      <Icon name="userPlus" size={20} />
+                    </span>
+                    友だち招待
                     <Icon name="chevron" size={18} className="chev" />
                   </button>
                 </li>
@@ -549,6 +569,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       )}
       {onTubePage && <TubePage onBack={closePage} />}
       {onExtensionsPage && <ExtensionsPage me={me} onBack={closePage} onMeChange={onMeChange} />}
+      {showReferral && <ReferralSheet onClose={() => setShowReferral(false)} />}
       {showOpenChats && (
         <OpenChatSheet
           onClose={() => setShowOpenChats(false)}

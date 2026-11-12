@@ -6,6 +6,7 @@ import { removeImage } from "./media.js";
 import { notifyRecipient } from "./push.js";
 import type { GameView } from "./gameLogic.js";
 import { sb } from "./supabase.js";
+import { withKeyedLock } from "./keyedLock.js";
 
 export const UUID = /^[0-9a-f-]{36}$/i;
 export const COLUMNS =
@@ -198,7 +199,13 @@ export async function memberIds(conversationId: string): Promise<string[]> {
 
 // 2人だけの「グループでない」会話を探す。なければ新しく作る（created は新しく作ったかどうか）。
 // グループ（is_group = true）は絶対に返さない。旧DMは is_group が null のことがあるので null は1対1扱い。
-export async function findOrCreateDm(me: string, other: string): Promise<{ id: string; created: boolean }> {
+// 1対1のトークは、同じ2人について必ず1つだけ作る。連打などで同時に来ても、2人ずつ順番に確かめて作るので重複しない。
+export function findOrCreateDm(me: string, other: string): Promise<{ id: string; created: boolean }> {
+  const key = `dm:${[me, other].sort().join(":")}`;
+  return withKeyedLock(key, () => findOrCreateDmUnlocked(me, other));
+}
+
+async function findOrCreateDmUnlocked(me: string, other: string): Promise<{ id: string; created: boolean }> {
   const { data: mine, error: mineError } = await sb.from("sc_members").select("conversation_id").eq("user_id", me);
   if (mineError) throw mineError;
   const myIds = (mine ?? []).map((row: { conversation_id: string }) => row.conversation_id);

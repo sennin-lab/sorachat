@@ -10,6 +10,7 @@ import { decryptText, encryptText } from "./crypto.js";
 import { broadcastList, broadcastToConversation, removeImageIfUnused, UUID } from "./messages.js";
 import { sendAnnouncement, TEAM_ID } from "./team.js";
 import { getMaintenanceSettings, updateMaintenanceSettings } from "./maintenance.js";
+import { addIpBan, manualIp, removeIpBan } from "./ipBans.js";
 
 // 管理者パネル専用のAPI。一般の画面からはこの入口を使わない（管理者パスワードでだけ入れる）
 export const admin = Router();
@@ -162,7 +163,11 @@ admin.get("/admin/users", async (req, res) => {
 admin.get("/admin/users/:id", async (req, res) => {
   const id = idParam(req, res);
   if (!id) return;
-  const { data: user, error } = await sb.from("sc_users").select(USER_COLUMNS).eq("id", id).maybeSingle();
+  const { data: user, error } = await sb
+    .from("sc_users")
+    .select(`${USER_COLUMNS}, signup_ip, last_ip, invite_code`)
+    .eq("id", id)
+    .maybeSingle();
   if (error) throw error;
   if (!user) {
     res.status(404).json({ error: "ユーザーが見つかりません。" });
@@ -180,12 +185,21 @@ admin.get("/admin/users/:id", async (req, res) => {
   const { data: memberRows, error: memberError } = await sb.from("sc_members").select("conversation_id").eq("user_id", id);
   if (memberError) throw memberError;
   const conversations = await loadSummaries((memberRows ?? []).map((row: { conversation_id: string }) => row.conversation_id));
+  const { count: invitedCount } = await sb
+    .from("sc_referrals")
+    .select("id", { count: "exact", head: true })
+    .eq("inviter_id", id);
   res.json({
     ...userSummary(user as UserRow),
     bio: user.bio,
     contact: user.contact ?? "",
     profileUrl: user.profile_url ?? "",
     coverTheme: user.cover_theme ?? "green",
+    // IP（取得できていないときは null。管理者が手入力で BAN することもできる）
+    signupIp: (user.signup_ip as string | null) ?? null,
+    lastIp: (user.last_ip as string | null) ?? null,
+    inviteCode: (user.invite_code as string | null) ?? null,
+    invitedCount: invitedCount ?? 0,
     friends: friends.map(userSummary),
     conversations
   });
@@ -258,6 +272,83 @@ admin.post("/admin/users/:id/unban", async (req, res) => {
   const { error } = await sb.from("sc_users").update({ banned_at: null, banned_until: null, ban_reason: null }).eq("id", id);
   if (error) throw error;
   res.json({ ok: true });
+});
+
+// ---- IP BAN ----
+const ipSchema = z.object({ ip: z.string().trim().max(64), reason: z.string().trim().max(200).optional() });
+
+admin.get("/admin/ip-bans", async (_req, res) => {
+  const { data, error } = await sb.from("sc_ip_bans").select("ip, reason, created_at").order("created_at", { ascending: false });
+  if (error) throw error;
+  res.json(
+    (data ?? []).map((row: { ip: string; reason: string | null; created_at: string }) => ({
+      ip: row.ip,
+      reason: row.reason,
+      createdAt: row.created_at
+    }))
+  );
+});
+
+// IP を手入力して BAN する（IP が取得できなかった人や、既知の IP を止めるとき）
+admin.post("/admin/ip-bans", async (req, res) => {
+  const parsed = ipSchema.safeParse(req.body);
+  const ip = parsed.success ? manualIp(parsed.data.ip) : null;
+  if (!ip) {
+    res.status(400).json({ error: "IPアドレスの形式が正しくありません（例: 203.0.113.10 / 2001:db8::1）。" });
+    return;
+  }
+  await addIpBan(ip, parsed.success && parsed.data.reason ? parsed.data.reason : null);
+  res.json({ ok: true, ip });
+});
+
+admin.delete("/admin/ip-bans/:ip", async (req, res) => {
+  const ip = manualIp(req.params.ip);
+  if (!ip) {
+    res.status(400).json({ error: "IPアドレスの形式が正しくありません。" });
+    return;
+  }
+  await removeIpBan(ip);
+  res.json({ ok: true });
+});
+
+// ユーザーの IP を BAN する。source: last（最後のログイン）/ signup（登録時）/ manual（手入力）
+const userIpSchema = z.object({
+  source: z.enum(["last", "signup", "manual"]),
+  ip: z.string().trim().max(64).optional(),
+  reason: z.string().trim().max(200).optional()
+});
+
+admin.post("/admin/users/:id/ip-ban", async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  const parsed = userIpSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "IPの指定が正しくありません。" });
+    return;
+  }
+  let ip: string | null = null;
+  if (parsed.data.source === "manual") {
+    ip = manualIp(parsed.data.ip);
+    if (!ip) {
+      res.status(400).json({ error: "IPアドレスの形式が正しくありません（例: 203.0.113.10 / 2001:db8::1）。" });
+      return;
+    }
+  } else {
+    const { data, error } = await sb.from("sc_users").select("signup_ip, last_ip").eq("id", id).maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      res.status(404).json({ error: "ユーザーが見つかりません。" });
+      return;
+    }
+    ip = manualIp(parsed.data.source === "last" ? data.last_ip : data.signup_ip);
+  }
+  if (!ip) {
+    // 取得できていないときは、管理者に IP の手入力を求める（画面のモーダルで source: "manual" を送る）
+    res.status(422).json({ code: "ip_unknown", error: "このユーザーのIPアドレスは記録されていません。IPアドレスを手入力してください。" });
+    return;
+  }
+  await addIpBan(ip, parsed.data.reason ? parsed.data.reason : null);
+  res.json({ ok: true, ip });
 });
 
 // アイコン画像の設定・削除（管理者が不適切な画像を外したり、差し替えたりできる）

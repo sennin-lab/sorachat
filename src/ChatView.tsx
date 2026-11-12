@@ -24,7 +24,7 @@ import { CallCard } from "./CallCard";
 import { Icon } from "./Icon";
 import { ImageViewer } from "./ImageViewer";
 import { MessageMenu } from "./MessageMenu";
-import { isSocketOpen, onChatEvent, sendChat, sendTyping } from "./realtime";
+import { isSocketOpen, onChatEvent, sendChat, sendGameAction, sendTyping } from "./realtime";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { AttachSheet } from "./AttachSheet";
 import { StampSheet } from "./StampSheet";
@@ -701,12 +701,24 @@ export function ChatView({
   };
 
   // ミニゲームの操作（参加・開始・中止・プレイ）。結果は全員の画面に届く
-  const gameAction = async (messageId: string, action: string, extra: Record<string, unknown> = {}) => {
+  // 接続中は WebSocket で送る（サーバーのメモリで即座に処理され、全員へすぐ届く）。切断中は HTTP で送る
+  // 成功なら true、できなかったら false（呼び出し側が結果を使えるように。例外は投げない）
+  const gameAction = async (messageId: string, action: string, extra: Record<string, unknown> = {}): Promise<boolean> => {
+    const payload = { action, ...extra };
     try {
-      await api(`/api/dm/messages/${messageId}/game`, post({ action, ...extra }));
-      if (!isSocketOpen()) void load();
+      if (isSocketOpen()) {
+        await sendGameAction(messageId, payload);
+      } else {
+        await api(`/api/dm/messages/${messageId}/game`, post(payload));
+        void load();
+      }
+      return true;
     } catch (err) {
-      setError(errorText(err));
+      // 連打・反射神経の操作は、タイミングが合わなかった分のエラーを出さない（画面の表示で分かるため）
+      if (action !== "tap" && action !== "react") setError(err instanceof Error ? err.message : errorText(err));
+      // 接続が切れた場合は、操作が届いたか分からないので、最新の状態を読み直す（楽観的な表示もここで元に戻る）
+      void load();
+      return false;
     }
   };
 
@@ -1096,7 +1108,7 @@ export function ChatView({
                         <CallCard call={m.call} onJoin={() => joinCallFromMessage(m.call!.callId)} />
                       ) : m.kind === "game" ? (
                         m.game ? (
-                          <GameCard game={m.game} names={memberNames} onAction={(action, extra) => void gameAction(m.id, action, extra)} />
+                          <GameCard game={m.game} names={memberNames} onAction={(action, extra) => gameAction(m.id, action, extra)} />
                         ) : (
                           <p className="game-loading">ミニゲームを読み込み中…</p>
                         )

@@ -2,12 +2,22 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, api, post } from "./api";
 import { Icon } from "./Icon";
 import { RobotFace } from "./robot";
+import { ManualIpModal } from "./ManualIpModal";
 
 type Mode = "start" | "register" | "login";
 
 // サーバーと同じ条件（ユーザー名は前後の空白を消して小文字にしてから判定する）
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 const PASSWORD_MIN = 8;
+
+// 招待のリンク（?invite=コード）から来たときは、招待コードを入れておく
+function readInviteParam(): string {
+  try {
+    return (new URLSearchParams(window.location.search).get("invite") ?? "").trim().toUpperCase().slice(0, 16);
+  } catch {
+    return "";
+  }
+}
 
 // 吹き出しのロゴ（トークの形をモチーフにしたもの）
 function Logo({ size = 72 }: { size?: number }) {
@@ -66,6 +76,11 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [inviteCode, setInviteCode] = useState(readInviteParam);
+  // IP が取得できなかったときに、手入力を求めるモーダル
+  const [ipAsk, setIpAsk] = useState(false);
+  const [ipBusy, setIpBusy] = useState(false);
+  const [ipError, setIpError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(initialError ?? "");
   const [errorKey, setErrorKey] = useState(0);
@@ -90,6 +105,21 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
     setBusy(false);
   };
 
+  // 登録（招待コードがあれば入れる。IP を手入力したときは manualIpValue を付ける）
+  const register = async (manualIpValue?: string) => {
+    await api(
+      "/api/auth/register",
+      post({
+        username: normalizedName,
+        password,
+        displayName: displayName.trim(),
+        inviteCode: inviteCode.trim() || undefined,
+        manualIp: manualIpValue
+      })
+    );
+    window.location.replace("/");
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!ready || busy) return;
@@ -97,13 +127,37 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
     setError("");
     try {
       if (isRegister) {
-        await api("/api/auth/register", post({ username: normalizedName, password, displayName: displayName.trim() }));
+        await register();
       } else {
         await api("/api/auth/login", post({ username: normalizedName, password }));
+        window.location.replace("/");
       }
-      window.location.replace("/");
     } catch (err) {
+      // IP が取得できなかったときは、利用者に IP を入力してもらう
+      if (err instanceof ApiError && err.code === "ip_required") {
+        setBusy(false);
+        setIpError("");
+        setIpAsk(true);
+        return;
+      }
       fail(err instanceof ApiError ? err.message : "通信に失敗しました。");
+    }
+  };
+
+  const submitManualIp = async (ip: string) => {
+    setIpBusy(true);
+    setIpError("");
+    try {
+      await register(ip);
+    } catch (err) {
+      setIpBusy(false);
+      const message = err instanceof ApiError ? err.message : "通信に失敗しました。";
+      if (err instanceof ApiError && err.code === "ip_required") {
+        setIpError(message);
+        return;
+      }
+      setIpAsk(false);
+      fail(message);
     }
   };
 
@@ -193,6 +247,22 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
           </Field>
         )}
 
+        {isRegister && (
+          <Field icon={<UserGlyph />}>
+            <input
+              className="auth-field-input"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+              maxLength={16}
+              placeholder="招待コード（任意）"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          </Field>
+        )}
+        {isRegister && <p className="auth-hint">友だちの招待コードで登録すると、お互いに2,000ptもらえます</p>}
+
         <Field icon={<UserGlyph />} invalid={usernameInvalid}>
           <input
             className="auth-field-input"
@@ -255,6 +325,20 @@ export function AuthScreen({ initialError, onShowIntro }: { initialError: string
           </button>
         </div>
       </form>
+      {ipAsk && (
+        <ManualIpModal
+          title="IPアドレスを入力してください"
+          message={"IPアドレスを自動で取得できませんでした。\nブラウザーで「IPアドレス 確認」と検索すると表示されます。表示された数字（例：203.0.113.10）を入力してください。"}
+          busy={ipBusy}
+          error={ipError}
+          confirmLabel="登録する"
+          onSubmit={(ip) => void submitManualIp(ip)}
+          onCancel={() => {
+            setIpAsk(false);
+            setIpError("");
+          }}
+        />
+      )}
     </div>
   );
 }
