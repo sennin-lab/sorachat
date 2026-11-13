@@ -1,0 +1,141 @@
+/* ガラス（すりガラス）の質感と、iOS 風の動きを、アプリ全体に重ねる層。
+   styles.css と senninpay-motion.css の後に読み込むので、同じ場所の見た目はこちらが上書きする。
+   ・ガラスは「半透明の面 + ぼかし + 細い縁の光 + 上側のハイライト」。文字の読みやすさを保つため、透明度は高すぎないようにしている。
+   ・動きは iOS の標準に近いカーブ（ease-out の押し出し、ばねの跳ね）。
+   ・動きを減らす設定（prefers-reduced-motion）では、すべての動きを止める。 */
+
+:root {
+  /* iOS の画面遷移に近いカーブ */
+  --ios-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* 軽いばね（少しだけ行き過ぎて戻る） */
+  --ios-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-strong: rgba(255, 255, 255, 0.86);
+  --glass-edge: rgba(255, 255, 255, 0.6);
+  --glass-shadow: 0 10px 30px rgba(20, 60, 100, 0.1);
+  --glass-blur: blur(22px) saturate(170%);
+}
+:root[data-theme="dark"] {
+  --glass: rgba(30, 30, 30, 0.6);
+  --glass-strong: rgba(30, 30, 30, 0.82);
+  --glass-edge: rgba(255, 255, 255, 0.09);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+@supports (background: color-mix(in srgb, red 50%, blue)) {
+  :root {
+    --glass: color-mix(in srgb, var(--panel) 70%, transparent);
+    --glass-strong: color-mix(in srgb, var(--panel) 86%, transparent);
+  }
+}
+
+.glass,
+.glass-strong {
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.glass { background: var(--glass); }
+.glass-strong { background: var(--glass-strong); }
+
+/* ---- 面のガラス化 ---- */
+.tabbar {
+  background: var(--glass-strong);
+  border-top-color: var(--glass-edge);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.page-head {
+  background: var(--glass-strong);
+  border-bottom-color: var(--glass-edge);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.sheet,
+.msg-menu {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border-top: 1px solid var(--glass-edge);
+}
+.sheet-backdrop {
+  background: rgba(0, 0, 0, 0.3);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+.more-list,
+.option-list {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+/* ---- 画面の出入り（iOS の押し出し） ---- */
+.page {
+  animation: ios-push 0.46s var(--ios-ease) both;
+}
+@keyframes ios-push {
+  from { opacity: 0; transform: translate3d(28%, 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+.sheet,
+.msg-menu {
+  animation: ios-sheet 0.5s var(--ios-ease) both;
+}
+@keyframes ios-sheet {
+  from { transform: translate3d(0, 100%, 0); }
+  to { transform: none; }
+}
+
+/* ---- 一覧の順番の出現（上から順にふわっと） ---- */
+.more-list li {
+  animation: ios-list-in 0.42s var(--ios-ease) both;
+}
+.more-list li:nth-child(2) { animation-delay: 22ms; }
+.more-list li:nth-child(3) { animation-delay: 44ms; }
+.more-list li:nth-child(4) { animation-delay: 66ms; }
+.more-list li:nth-child(5) { animation-delay: 88ms; }
+.more-list li:nth-child(6) { animation-delay: 110ms; }
+.more-list li:nth-child(7) { animation-delay: 132ms; }
+.more-list li:nth-child(8) { animation-delay: 154ms; }
+.more-list li:nth-child(9) { animation-delay: 176ms; }
+.more-list li:nth-child(10) { animation-delay: 198ms; }
+.more-list li:nth-child(n + 11) { animation-delay: 220ms; }
+@keyframes ios-list-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- 押したときの反応（iOS のように少し沈む） ---- */
+.more-list button,
+.option-list button,
+.page-row,
+.msg-menu > button,
+.bank-rank-row,
+.bank-history-row {
+  transition: transform 0.22s var(--ios-spring), background-color 0.2s ease, opacity 0.2s ease;
+}
+.more-list button:active,
+.option-list button:active,
+.page-row:active,
+.msg-menu > button:active {
+  transform: scale(0.985);
+}
+.tab-icon { transition: transform 0.25s var(--ios-spring); }
+.tab-btn:active .tab-icon {
+  transform: scale(0.86);
+  transition: transform 0.15s var(--ios-ease);
+}
+
+/* ---- 動きを減らす設定 ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

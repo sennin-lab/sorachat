@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { trackKeyboard } from "./keyboard";
 import "./styles.css";
+// ガラスの質感と iOS 風の動き（既存の見た目の後に重ねる）
+import "./glass.css";
 import { applyAppIcon } from "./iconPrefs";
 
 applyAppIcon();

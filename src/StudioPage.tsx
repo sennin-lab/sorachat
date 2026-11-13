@@ -214,6 +214,11 @@ export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: str
                     <strong>{yen(data.pending)} pt</strong>
                   </div>
                   <div className="dev-kpi">
+                    <span>株主配当で引いた額</span>
+                    <strong>{yen(data.dividendWithheld ?? 0)} pt</strong>
+                    <small>売上 {yen(data.grossSales ?? 0)} pt のうち</small>
+                  </div>
+                  <div className="dev-kpi">
                     <span>平均評価</span>
                     <strong>{creator && creator.rating.count > 0 ? creator.rating.avg.toFixed(1) : "—"}</strong>
                     <small>{creator?.rating.count ?? 0} 件のレビュー</small>
@@ -426,6 +431,11 @@ export function StudioPage({ flash, onBack }: { flash?: { ok: boolean; text: str
                   <div className="dev-kpi">
                     <span>未払い</span>
                     <strong>{yen(data.pending)} pt</strong>
+                  </div>
+                  <div className="dev-kpi">
+                    <span>株主配当で引いた額</span>
+                    <strong>{yen(data.dividendWithheld ?? 0)} pt</strong>
+                    <small>売上 {yen(data.grossSales ?? 0)} pt のうち</small>
                   </div>
                 </div>
                 <p className="dev-muted">購入のたびに、作品の価格の全額が支払いとして記録されます（手数料はありません）。</p>

@@ -93,13 +93,21 @@ studio.get("/studio/me", async (_req, res) => {
     for (const row of owned ?? []) sales.set(row.item_id as string, (sales.get(row.item_id as string) ?? 0) + 1);
   }
 
-  const { data: payouts, error: payoutError } = await sb.from("sc_studio_payouts").select("amount, status").eq("creator_id", me);
+  const { data: payouts, error: payoutError } = await sb
+    .from("sc_studio_payouts")
+    .select("amount, status, gross_amount, dividend_amount")
+    .eq("creator_id", me);
   if (payoutError) throw payoutError;
   let earned = 0;
   let pending = 0;
+  // 株主配当（SenninBank の投資家へ配った分）。売上から差し引いた額の合計
+  let dividendWithheld = 0;
+  let grossSales = 0;
   for (const p of payouts ?? []) {
     if (p.status === "paid") earned += Number(p.amount);
     if (p.status === "pending") pending += Number(p.amount);
+    dividendWithheld += Number(p.dividend_amount ?? 0);
+    grossSales += Number(p.gross_amount ?? p.amount);
   }
 
   const workIds = (rows ?? []).map((r) => r.id as string);
@@ -111,6 +119,8 @@ studio.get("/studio/me", async (_req, res) => {
     suspendedReason: creator.reason,
     earned,
     pending,
+    grossSales,
+    dividendWithheld,
     works: (rows ?? []).map((r) => ({
       id: r.id,
       kind: r.kind,

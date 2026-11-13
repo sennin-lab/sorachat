@@ -139,6 +139,9 @@ export type StudioMeView = {
   suspendedReason: string | null;
   earned: number;
   pending: number;
+  // 売上の合計（配当を引く前）と、株主配当で引いた額
+  grossSales?: number;
+  dividendWithheld?: number;
   works: StudioWorkView[];
 };
 

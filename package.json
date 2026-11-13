@@ -17,7 +17,8 @@
     "test:extension-points": "tsx test/extension-points.test.ts",
     "test:battle": "tsx test/battle.test.ts",
     "test:storage": "tsx test/extension-storage.test.ts",
-    "test:live": "tsx test/game-live.test.ts && tsx test/games-realtime.test.ts && tsx test/referral-ip-dm.test.ts"
+    "test:live": "tsx test/game-live.test.ts && tsx test/games-realtime.test.ts && tsx test/referral-ip-dm.test.ts",
+    "test:bank": "tsx test/bank-rules.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",

@@ -19,6 +19,8 @@ import { ChatBootScreen } from "./Loading";
 const SenninPayPage = lazy(() => import("./SenninPayPage").then((m) => ({ default: m.SenninPayPage })));
 // senningames（1人で遊ぶゲーム）も、開くときだけ読み込む
 const SenningamesPage = lazy(() => import("./SenningamesPage").then((m) => ({ default: m.SenningamesPage })));
+// SenninBank（銀行）も、開くときだけ読み込む
+const BankPage = lazy(() => import("./BankPage").then((m) => ({ default: m.BankPage })));
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -53,7 +55,7 @@ const shouldAskNotify = (me: Me) => {
 // URL とタブの対応。プロフィールなどの重ねて表示する画面では null（直前のタブを保つ）
 const tabOfPath = (path: string): Tab | null => {
   if (path.startsWith("/friends")) return "friends";
-  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay") || path.startsWith("/tube") || path.startsWith("/extensions")) return "more";
+  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay") || path.startsWith("/tube") || path.startsWith("/extensions") || path.startsWith("/bank")) return "more";
   if (path === "/" || path.startsWith("/home") || path.startsWith("/dm/") || path.startsWith("/groupchat/")) return "talk";
   return null;
 };
@@ -83,6 +85,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const onStudioPage = path === "/studio" || path.startsWith("/studio/");
   // SenninPay（/pay）も専用のページとして開く
   const onPayPage = path === "/pay" || path.startsWith("/pay/");
+  // SenninBank（/bank）も専用のページとして開く
+  const onBankPage = path === "/bank" || path.startsWith("/bank/");
   // senningames（/senningames）も専用のページとして開く
   const onGamesPage = path === "/senningames" || path.startsWith("/senningames/");
   // 仙人Tube Plus（/tube）も専用のページとして開く
@@ -155,6 +159,7 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
     const studioPage = path.startsWith("/studio");
     const payPage = path.startsWith("/pay");
     const gamesPage = path.startsWith("/senningames");
+    const bankPage = path.startsWith("/bank");
     setStoreFlash(
       linked
         ? {
@@ -165,12 +170,14 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                 ? "仙人アカウントと連携しました。SenninPayが使えます。"
                 : gamesPage
                   ? "仙人アカウントと連携しました。ポイントを出金できます。"
-                  : "仙人アカウントと連携しました。ストアで買い物できます。"
+                  : bankPage
+                    ? "仙人アカウントと連携しました。SenninBank が使えます。"
+                    : "仙人アカウントと連携しました。ストアで買い物できます。"
           }
         : { ok: false, text: error ?? "" }
     );
     setTab("more");
-    navigate(studioPage ? "/studio" : payPage ? "/pay" : gamesPage ? "/senningames" : "/store", { replace: true });
+    navigate(studioPage ? "/studio" : payPage ? "/pay" : gamesPage ? "/senningames" : bankPage ? "/bank" : "/store", { replace: true });
   }, []);
 
   // 専用ページを閉じる（開いた元の画面へ戻る。直接開いたときは「その他」へ）
@@ -427,6 +434,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => navigate("/bank")}>
+                    <span className="option-icon">
+                      <Icon name="bank" size={20} />
+                    </span>
+                    SenninBank
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => navigate("/senningames")}>
                     <span className="option-icon">
                       <Icon name="game" size={20} />
@@ -565,6 +581,11 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
       {onGamesPage && (
         <Suspense fallback={null}>
           <SenningamesPage flash={storeFlash} onBack={closePage} />
+        </Suspense>
+      )}
+      {onBankPage && (
+        <Suspense fallback={null}>
+          <BankPage me={me} flash={storeFlash} onBack={closePage} />
         </Suspense>
       )}
       {onTubePage && <TubePage onBack={closePage} />}

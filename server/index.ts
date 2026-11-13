@@ -34,6 +34,7 @@ import { extensionStorage } from "./extensionStorage.js";
 import tubeRouter from "./tube/router.js";
 import { ipBanGate, reloadIpBans } from "./ipBans.js";
 import { referral } from "./referral.js";
+import { bank } from "./bank.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -75,6 +76,7 @@ app.use("/api", blocks);
 app.use("/api", calls);
 app.use("/api", store);
 app.use("/api", senninPay);
+app.use("/api", bank);
 app.use("/api", senningames);
 app.use("/api", studio);
 app.use("/api", studioReviews);
