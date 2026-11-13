@@ -8,6 +8,7 @@ export const BATTLE = {
   sizeMax: 4,
   inviteMax: 3, // 友だちから誘える人数（主催者を入れて最大 sizeMax 人）
   lobbyTtlMs: 3 * 60_000, // 招待してから、開始されずに消えるまで
+  readyTimeoutMs: 60_000, // マッチングが決まってから、全員が準備OKを押すまでの時間
   queueTtlMs: 5 * 60_000, // ランダムの待ち行列に残れる時間
   closedKeepMs: 60_000, // 終わった部屋を、通知の取りこぼし用に残す時間
   offlineGraceMs: 20_000, // 接続が切れても、この時間内に戻れば対戦を続けられる（スマホの画面オフ対策）

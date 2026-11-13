@@ -9,7 +9,9 @@ import {
   enqueueRandom,
   isBusy,
   leaveRoom,
+  pendingInvitesOf,
   pruneBattles,
+  readyUp,
   relay,
   resetBattlesForTest,
   respondInvite,
@@ -85,13 +87,23 @@ reset();
   const roomId = (b as { roomId: string }).roomId;
   assert.equal(roomIdOf("u-a"), roomId);
   assert.equal(roomIdOf("u-b"), roomId);
+  // まだ始まらない：2人とも「準備OK」を求められる
+  const prepareA = take("u-a").find((p) => p.event === "prepare");
+  assert.ok(prepareA && take("u-b").some((p) => p.event === "prepare"), "2人とも準備OKを求められる");
+  assert.equal(take("u-a").some((p) => p.event === "started"), false, "準備OKがそろうまで始まらない");
+  assert.equal(roomView("u-a", roomId)!.status, "preparing");
+  assert.deepEqual(prepareA!.players, [{ seat: 0, name: "あいこ" }, { seat: 1, name: "ぼたん" }]);
+  // 相手の ID は、知らせに入らない
+  assert.equal(JSON.stringify(prepareA).includes("u-b"), false);
+  readyUp("u-a", roomId);
+  assert.equal(take("u-b").some((p) => p.event === "started"), false, "1人だけでは始まらない");
+  readyUp("u-b", roomId);
   const startedA = take("u-a").find((p) => p.event === "started");
   const startedB = take("u-b").find((p) => p.event === "started");
-  assert.ok(startedA && startedB, "2人とも始まりを知らされる");
+  assert.ok(startedA && startedB, "全員が準備OKで、2人とも始まりを知らされる");
   assert.equal(startedA!.seat, 0);
   assert.equal(startedB!.seat, 1);
   assert.deepEqual(startedA!.players, [{ seat: 0, name: "あいこ" }, { seat: 1, name: "ぼたん" }]);
-  // 相手の ID は、知らせに入らない
   assert.equal(JSON.stringify(startedA).includes("u-b"), false);
   // 待ち行列の残りは、まだ組まれていない
   assert.equal(isBusy("u-x"), true);
@@ -133,6 +145,12 @@ reset();
   // 承諾していない人（f3）は、開始のときに外される
   assert.throws(() => startLobby("f1", room.id), /見つかりません/, "主催者以外は開始できない");
   startLobby("h", room.id);
+  assert.equal(roomView("h", room.id)!.status, "preparing", "開始では、まだ準備OKを待つ");
+  assert.equal(take("h").some((p) => p.event === "started"), false);
+  assert.ok(take("f1").some((p) => p.event === "prepare"), "承諾した人にも準備OKを求める");
+  readyUp("f1", room.id);
+  assert.equal(take("h").some((p) => p.event === "started"), false, "主催者が準備OKを押すまで始まらない");
+  readyUp("h", room.id);
   assert.equal(roomView("h", room.id)!.status, "playing");
   const startedF1 = take("f1").find((p) => p.event === "started");
   assert.ok(startedF1, "承諾した人に開始が届く");
@@ -194,11 +212,54 @@ reset();
   enqueueRandom({ userId: "p1", name: "p1", gameId: "g-w", gameName: "w", size: 2 });
   const matched = enqueueRandom({ userId: "p2", name: "p2", gameId: "g-w", gameName: "w", size: 2 });
   const roomId = (matched as { roomId: string }).roomId;
+  readyUp("p1", roomId);
+  readyUp("p2", roomId);
   userOffline("p1");
   userOnline("p1");
   relay("p2", roomId, { still: "here" });
   assert.equal(roomView("p1", roomId)!.status, "playing", "戻れば対戦は続く");
   assert.ok(take("p1").some((p) => p.event === "message"));
+}
+
+// ---- 準備OK：全員がそろうまで始まらない。時間切れ・途中で抜けたら取り消す ----
+reset();
+{
+  enqueueRandom({ userId: "r1", name: "r1", gameId: "g-r", gameName: "r", size: 2 });
+  const matched = enqueueRandom({ userId: "r2", name: "r2", gameId: "g-r", gameName: "r", size: 2 });
+  const roomId = (matched as { roomId: string }).roomId;
+  assert.throws(() => readyUp("zz", roomId), /参加していません/, "部屋にいない人は準備OKを押せない");
+  readyUp("r1", roomId);
+  readyUp("r1", roomId);
+  assert.equal(take("r2").some((p) => p.event === "started"), false);
+  pruneBattles(Date.now() + BATTLE.readyTimeoutMs + 1);
+  assert.equal(roomView("r1", roomId)!.status, "closed");
+  assert.ok(take("r2").some((p) => p.event === "closed" && p.reason === "ready_timeout"), "時間切れは全員に届く");
+  assert.equal(isBusy("r1"), false, "取り消されたら、また探せる");
+  assert.throws(() => readyUp("r2", roomId), /準備OK/, "閉じた部屋では準備OKを押せない");
+}
+
+// 準備中に1人が抜けると、マッチングは成立させず取り消す
+reset();
+{
+  enqueueRandom({ userId: "r3", name: "r3", gameId: "g-r", gameName: "r", size: 2 });
+  const matched = enqueueRandom({ userId: "r4", name: "r4", gameId: "g-r", gameName: "r", size: 2 });
+  const roomId = (matched as { roomId: string }).roomId;
+  leaveRoom("r4", roomId);
+  assert.equal(roomView("r3", roomId)!.status, "closed");
+  assert.ok(take("r3").some((p) => p.event === "closed" && p.reason === "opponent_left"));
+  assert.equal(isBusy("r3"), false);
+}
+
+// 閉じていた間の招待は、接続し直したときに出せる（承諾すると、もう招待ではない）
+reset();
+{
+  const room = createLobby({ hostId: "hp", hostName: "ホストP", gameId: "g-p", gameName: "パズル", invitees: [{ userId: "fp", name: "fp名" }] });
+  const pending = pendingInvitesOf("fp");
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].roomId, room.id);
+  assert.equal(pending[0].hostName, "ホストP");
+  respondInvite("fp", room.id, true);
+  assert.equal(pendingInvitesOf("fp").length, 0, "承諾したら、もう招待ではない");
 }
 
 // ---- 拡張機能の文書：対戦の窓口が入り、ブリッジの構文が正しい ----

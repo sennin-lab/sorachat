@@ -227,7 +227,7 @@ export const EXT_BRIDGE = {
   channel: "sorachat-ext",
   version: 3,
   awardMin: 1, // 1回に配れる最小
-  awardMaxPerCall: 500, // 1回に配れる最大（1回の呼び出し）
+  awardPerCallDefault: 500, // 1回に配れる量の初期値（管理者が拡張機能ごとに変えられる）
   reasonMax: 40, // 理由の最大文字数
   requestIdMin: 8, // 同じ配布を押し直すための ID（省略すると毎回新しい ID）
   requestIdMax: 64,

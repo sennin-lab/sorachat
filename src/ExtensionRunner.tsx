@@ -17,10 +17,16 @@ const CHANNEL = "sorachat-ext";
 
 type Access = {
   consented: boolean;
+  // ポイントを配る拡張機能か（そのときだけ、ユーザー情報の共有を許可してもらう）
+  needsConsent: boolean;
   grant: { remaining: number } | null;
   sorachat?: { id: string; username: string; displayName: string };
   sennin?: { linked: boolean; senninId: string | null };
 };
+
+// 許可していないときの文言。ポイントを配る拡張機能なら許可を求める、配らない拡張機能ならユーザー情報は使わない
+const noConsentText = (needsConsent: boolean) =>
+  needsConsent ? "ユーザー情報の共有を許可していません。拡張機能を開き直すと、確認が出ます。" : "この拡張機能では、ユーザー情報は使えません。";
 
 type CallResult = { ok: boolean; body: Record<string, unknown> & { error?: string; code?: string } };
 
@@ -65,8 +71,10 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
   const accessRef = useRef<Access | null>(null);
   const [pay, setPay] = useState<PayRequest | null>(null);
   const payRef = useRef<PayRequest | null>(null);
+  // 枠を開いてよいか：ポイントを配らない拡張機能は、許可を求めずに開く
+  const frameOpen = Boolean(access && (access.consented || !access.needsConsent));
   // オンライン対戦：枠からの依頼（battle-*）と、相手からの知らせを、ここで受けて進める
-  const battle = useBattleSession({ workId, joinRoomId, consented: Boolean(access?.consented), frameRef });
+  const battle = useBattleSession({ workId, joinRoomId, consented: frameOpen, frameRef });
   const battleRequest = useRef(battle.request);
   battleRequest.current = battle.request;
   // 閉じるときは、対戦・相手探しを終わらせてから閉じる
@@ -110,7 +118,7 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
   useEffect(() => {
     void (async () => {
       const next = await refresh();
-      if (next && !next.consented) setAsking(true);
+      if (next && next.needsConsent && !next.consented) setAsking(true);
     })();
   }, [refresh]);
 
@@ -175,7 +183,7 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
         const latest = await refresh();
         if (!latest) return { ok: false, code: "error", error: "アカウント情報を取得できませんでした。" };
         if (!latest.consented) {
-          return { ok: false, code: "not_consented", error: "アカウント情報の許可がありません。" };
+          return { ok: false, code: "not_consented", error: noConsentText(latest.needsConsent) };
         }
         return {
           ok: true,
@@ -184,7 +192,7 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
       }
       if (type === "charge") {
         if (!accessRef.current?.consented) {
-          return { ok: false, code: "not_consented", error: "アカウント情報の許可がありません。拡張機能を開き直すと、確認が出ます。" };
+          return { ok: false, code: "not_consented", error: noConsentText(Boolean(accessRef.current?.needsConsent)) };
         }
         const amount = data.amount;
         const title = typeof data.title === "string" ? data.title.trim() : "";
@@ -206,7 +214,7 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
       if (type === "consent") {
         return accessRef.current?.consented
           ? { ok: true, data: { consented: true } }
-          : { ok: false, code: "not_consented", error: "アカウント情報の許可がありません。拡張機能を開き直すと、確認が出ます。" };
+          : { ok: false, code: "not_consented", error: noConsentText(Boolean(accessRef.current?.needsConsent)) };
       }
       if (type === "award") {
         const result = await call(`${base}/award`, post({ amount: data.amount, reason: data.reason, requestId: data.requestId }));
@@ -271,7 +279,7 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
           <h1>{name}</h1>
           <span />
         </header>
-        {consented ? (
+        {frameOpen ? (
           <iframe
             ref={frameRef}
             className="ext-frame"
@@ -311,16 +319,16 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
       {battle.layer}
       {asking && (
         <div className="sheet-backdrop ext-consent-backdrop">
-          <div className="sheet ext-consent" role="dialog" aria-modal="true" aria-label="アカウント情報の許可">
+          <div className="sheet ext-consent" role="dialog" aria-modal="true" aria-label="ユーザー情報の共有を許可しますか">
             <div className="sheet-grip" />
-            <strong className="ext-consent-title">アカウント情報の許可</strong>
+            <strong className="ext-consent-title">ユーザー情報の共有を許可しますか</strong>
             <p className="ext-consent-text">「{name}」に、次の情報を渡してもよいですか？</p>
             <ul className="ext-consent-list">
               <li>ソラチャットのアカウント（ユーザー名・表示名・ID）</li>
               <li>仙人アカウントとの連携の有無と、仙人ID</li>
             </ul>
             <p className="ext-consent-text ext-consent-small">
-              この拡張機能は、運営が決めた上限の中で、あなたのポイントを配ることがあります。許可は、この画面からいつでも取り消せます。
+              この拡張機能は、ポイントを配ります（1回・全体・1分あたりの上限は運営が決めます）。許可は、この画面からいつでも取り消せます。
             </p>
             {sheetError && <p className="notice error center">{sheetError}</p>}
             <div className="confirm-actions">

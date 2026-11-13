@@ -2,7 +2,8 @@
 //
 // ・枠の中の拡張機能は、ソラチャットの画面が取り次いだ依頼だけを、ここで受ける（ブリッジ）。
 // ・配れるのは「その拡張機能を開いて、情報の許可をした本人」だけ。ほかの人には配れない。
-// ・配れる量は管理者が決める（sc_extension_grants.max_points）。枠を超える配布は 409 で断る。
+// ・配れる量は管理者が決める（sc_extension_grants.max_points）。1回の上限も管理者が決める（per_call_max）。
+// ・利用者の情報（許可）は、ポイントを配る拡張機能でだけ求める（ユーザー情報を渡すのは配布のときだけ）。
 // ・配布の枠の確保と記録は DB の関数（sc_extension_reserve）で行い、仙人アカウントへの加算は
 //   idempotency_key（ext-award-配布ID）で行う。同じ requestId で押し直しても二重には入らない。
 // ・許可（sc_extension_consents）は、いつでも取り消せる。
@@ -18,6 +19,8 @@ import { STORAGE } from "./extensionStorageRules.js";
 
 // 利用者が1分間に配布を頼める回数（連打・暴走の防止）
 const AWARD_PER_MINUTE = 60;
+// 1回に配れる量の、データ上の最大（DB の integer に入る範囲）。実際の上限は管理者が決める
+const AWARD_INT_MAX = 2_147_483_647;
 // 利用者が1分間に支払いを頼める回数（確認画面を通すので、少なめ）
 const CHARGE_PER_MINUTE = 20;
 
@@ -73,8 +76,10 @@ export async function extensionAccess(me: string, workId: string) {
     .maybeSingle();
   if (grantError) throw grantError;
   const grantInfo = grant && grant.active ? { remaining: Number(grant.max_points) - Number(grant.used_points) } : null;
+  // ポイントを配る拡張機能（配布が有効）のときだけ、ユーザー情報の共有を求める
+  const needsConsent = Boolean(grant && grant.active);
 
-  if (!consented) return { consented: false, grant: grantInfo };
+  if (!consented) return { consented: false, needsConsent, grant: grantInfo };
 
   const { data: user, error: userError } = await sb
     .from("sc_users")
@@ -86,6 +91,7 @@ export async function extensionAccess(me: string, workId: string) {
   const senninId = (user.sennin_id as string | null) ?? null;
   return {
     consented: true,
+    needsConsent,
     grant: grantInfo,
     sorachat: {
       id: user.id as string,
@@ -121,8 +127,8 @@ export async function revokeExtensionConsent(me: string, workId: string) {
 export function checkAwardRequest(body: unknown): { ok: true; amount: number; reason: string; requestId: string } | { ok: false; error: string } {
   const v = (body ?? {}) as Record<string, unknown>;
   const amount = v.amount;
-  if (typeof amount !== "number" || !Number.isInteger(amount) || amount < EXT_BRIDGE.awardMin || amount > EXT_BRIDGE.awardMaxPerCall) {
-    return { ok: false, error: `配るポイントは ${EXT_BRIDGE.awardMin}〜${EXT_BRIDGE.awardMaxPerCall} の整数で指定してください。` };
+  if (typeof amount !== "number" || !Number.isInteger(amount) || amount < EXT_BRIDGE.awardMin || amount > AWARD_INT_MAX) {
+    return { ok: false, error: `配るポイントは ${EXT_BRIDGE.awardMin} 以上の整数で指定してください。` };
   }
   const reason = typeof v.reason === "string" ? v.reason.trim() : "";
   if (reason.length > EXT_BRIDGE.reasonMax) {
@@ -172,6 +178,18 @@ export async function awardExtensionPoints(
   }
   if (!(await isLinked(me))) {
     throw new ExtensionError(403, "not_linked", "ポイントを受け取るには、仙人アカウントとの連携が必要です。");
+  }
+
+  // 1回に配れる量（管理者が拡張機能ごとに決める）を超えていれば、配布の枠を使う前に断る
+  const { data: limitRow, error: limitError } = await sb
+    .from("sc_extension_grants")
+    .select("per_call_max")
+    .eq("work_id", workId)
+    .maybeSingle();
+  if (limitError) throw limitError;
+  const perCall = Number(limitRow?.per_call_max ?? EXT_BRIDGE.awardPerCallDefault);
+  if (request.amount > perCall) {
+    throw new ExtensionError(400, "per_call_limit", `1回に配れるのは ${perCall}pt までです。`);
   }
 
   const { data, error } = await sb.rpc("sc_extension_reserve", {
@@ -373,7 +391,7 @@ export async function chargeExtensionPoints(me: string, workId: string, request:
 
 export async function setExtensionGrant(
   workId: string,
-  args: { maxPoints: number; active: boolean; perUserMinuteMax?: number }
+  args: { maxPoints: number; active: boolean; perUserMinuteMax?: number; perCallMax?: number }
 ) {
   const work = await loadWork(workId);
   if (!work || work.kind !== "extension") {
@@ -381,11 +399,13 @@ export async function setExtensionGrant(
   }
   const { data: current, error: readError } = await sb
     .from("sc_extension_grants")
-    .select("used_points, per_user_minute_max")
+    .select("used_points, per_user_minute_max, per_call_max")
     .eq("work_id", workId)
     .maybeSingle();
   if (readError) throw readError;
   const used = Number(current?.used_points ?? 0);
+  // 1回の上限は、指定がなければ今の値を残す（初期値は 500pt）
+  const perCallMax = args.perCallMax ?? Number(current?.per_call_max ?? EXT_BRIDGE.awardPerCallDefault);
   if (args.maxPoints < used) {
     throw new ExtensionError(400, "invalid", `すでに ${used}pt 配られているため、上限は ${used}pt より少なくできません。`);
   }
@@ -398,18 +418,19 @@ export async function setExtensionGrant(
       max_points: args.maxPoints,
       active: args.active,
       per_user_minute_max: perUserMinuteMax,
+      per_call_max: perCallMax,
       updated_at: new Date().toISOString()
     },
     { onConflict: "work_id" }
   );
   if (error) throw error;
-  return { maxPoints: args.maxPoints, usedPoints: used, active: args.active, perUserMinuteMax };
+  return { maxPoints: args.maxPoints, usedPoints: used, active: args.active, perUserMinuteMax, perCallMax };
 }
 
 export async function readExtensionGrant(workId: string) {
   const { data, error } = await sb
     .from("sc_extension_grants")
-    .select("max_points, used_points, active, per_user_minute_max")
+    .select("max_points, used_points, active, per_user_minute_max, per_call_max")
     .eq("work_id", workId)
     .maybeSingle();
   if (error) throw error;
@@ -418,14 +439,15 @@ export async function readExtensionGrant(workId: string) {
     maxPoints: Number(data.max_points),
     usedPoints: Number(data.used_points),
     active: Boolean(data.active),
-    perUserMinuteMax: Number(data.per_user_minute_max ?? 0)
+    perUserMinuteMax: Number(data.per_user_minute_max ?? 0),
+    perCallMax: Number(data.per_call_max ?? EXT_BRIDGE.awardPerCallDefault)
   };
 }
 
 // ---- 開発者向けの仕様（senninstudio のドキュメントに表示する。上の定数から作るので、食い違わない） ----
 
 export function extensionSpecMarkdown(): string {
-  const { awardMin, awardMaxPerCall, reasonMax, requestIdMin, requestIdMax, timeoutMs } = EXT_BRIDGE;
+  const { awardMin, awardPerCallDefault, reasonMax, requestIdMin, requestIdMax, timeoutMs } = EXT_BRIDGE;
   return `# senninstudio 拡張機能の仕様（AI・開発者向け）
 
 拡張機能は、HTML・CSS・JavaScript で作るミニアプリです。ソラチャットの画面の中ではなく、隔離された枠（iframe の sandbox）の中で動きます。
@@ -454,11 +476,11 @@ export function extensionSpecMarkdown(): string {
 
 ### window.sorachat.requestAccess()
 許可されているかを確かめます。許可済みなら { consented: true } を返します。
-許可していなければ code: "not_consented" のエラーになります。許可の確認は、拡張機能を開いたときに利用者へ出るので、利用者に許可してもらうには開き直してもらってください。
+許可していなければ code: "not_consented" のエラーになります。許可の確認は、ポイントを配る拡張機能を開いたときに利用者へ出ます。ポイントを配らない拡張機能では、ユーザー情報は渡りません。
 
 ### window.sorachat.awardPoints(amount, reason, requestId)
 利用者（今この拡張機能を開いている本人）に、仙人アカウントのポイントを配ります。
-- amount：${awardMin}〜${awardMaxPerCall} の整数（pt）。
+- amount：${awardMin} 以上の整数（pt）。1回の上限は、運営が拡張機能ごとに決めます（初期値 ${awardPerCallDefault}pt）。超えると code: "per_call_limit" になります。
 - reason：理由（任意・${reasonMax} 文字まで）。仙人アカウント側の履歴に出ます。
 - requestId：任意。${requestIdMin}〜${requestIdMax} 文字の英数字・-・_。同じ配布を押し直すときに同じ ID を使うと、二重には配られません。省略すると毎回新しい ID になります。
 成功したときの値：\`{ awarded: 配ったpt, replayed: 同じ配布の押し直しか, points: 配布後の残高（取れたとき）}\`
@@ -586,7 +608,7 @@ buy.onclick = async function () {
 
 拡張機能の中のデータ（進み具合・設定・記録など）を、仙人アカウントにひもづけて保存できます。保存先は「仙人アカウント × この拡張機能」なので、ソラチャットのアカウントを作り直しても、同じ仙人アカウントなら同じデータを読めます。料金はかかりません。
 
-- 使うには、この拡張機能を買っていて、情報の許可をしていて、仙人アカウントと連携している必要があります。連携していなければ、code が "not_linked" のエラーになります。
+- 使うには、この拡張機能を買っていて、仙人アカウントと連携している必要があります。連携していなければ、code が "not_linked" のエラーになります。
 - キーは英数字と _ . : - だけで、${STORAGE.keyMax} 文字までです。
 - 値は JSON にできるものだけで、1つ ${STORAGE.valueMaxBytes / 1024}KB までです。1人・1つの拡張機能で ${STORAGE.keysMax} 件までです。
 - 1分に ${STORAGE.writesPerMinute} 回まで書けます（超えると code が "rate_limited" になります）。
@@ -615,7 +637,7 @@ buy.onclick = async function () {
 2人以上で遊ぶ対戦を、ソラチャットが相手探し・部屋・中継を受け持ちます。枠の中のコードに渡るのは、相手の席の番号（seat）と表示名だけです。相手のIDなどは渡りません。
 
 - 対戦は、サブスク（1週間 ${BATTLE.subscriptionPoints}pt）に入っている人だけが使えます。自動更新をオンにしていると、期限が切れて対戦を始めるときに1回分が引かれます。入っていない人には、ソラチャットの画面がサブスクの案内を出します。
-- 対戦を始める人（と相手）は、この拡張機能を買っていて、情報の許可をしている必要があります。
+- 対戦を始める人（と相手）は、この拡張機能を買っている必要があります。
 - 対戦の結果の判定・ポイントの扱いは、作者が書きます（ソラチャットは勝敗を判定しません）。対戦中のデータは、同じ部屋の人へ中継されるだけです。
 
 ### window.sorachat.battle.subscription()
@@ -781,7 +803,7 @@ event.type は次のどれかです。
 
 ## 作り方：データ保存（手順と完全な例）
 
-拡張機能の中のデータを、仙人アカウントにひもづけて保存できます（無料）。保存先は「仙人アカウント × この拡張機能」です。使うには、この拡張機能を買っていて、情報の許可をしていて、仙人アカウントと連携している必要があります。
+拡張機能の中のデータを、仙人アカウントにひもづけて保存できます（無料）。保存先は「仙人アカウント × この拡張機能」です。使うには、この拡張機能を買っていて、仙人アカウントと連携している必要があります。
 
 ### 手順
 1. 起動したときに、get で前の値を読む（なければ null）。
@@ -833,12 +855,12 @@ event.type は次のどれかです。
 1. 配れるのは、この拡張機能を開いて、アカウント情報の許可をした本人だけです。他の人には配れません。
 2. 配れる量は、運営（管理者）が拡張機能ごとに決めた上限の中だけです。上限を超えると code: "exhausted" になり、残りの量が返ります。作者が上限を変えることはできません。
 3. 利用者が仙人アカウントと連携していないと、配れません（code: "not_linked"）。
-4. 1回に配れるのは ${awardMin}〜${awardMaxPerCall}pt です。1分に配布を頼める回数にも上限があります。さらに、1人が1分間に受け取れるポイントにも上限があります（運営が拡張機能ごとに決めます。0 は制限なし）。超えると code: "minute_limit" になり、error.data.remaining で、その分の残りが分かります。
+4. 1回に配れるのは ${awardMin}pt 以上で、上限は運営が拡張機能ごとに決めます（初期値 ${awardPerCallDefault}pt）。超えると code: "per_call_limit" になります。1分に配布を頼める回数にも上限があります。さらに、1人が1分間に受け取れるポイントにも上限があります（運営が拡張機能ごとに決めます。0 は制限なし）。超えると code: "minute_limit" になり、error.data.remaining で、その分の残りが分かります。
 5. 配布は仙人アカウントの履歴に残ります（理由つき）。
 6. 上限を決めていない拡張機能は、配布できません（code: "inactive"）。運営に配布の許可を頼んでください。
 
 ## エラーの code
-- not_consented：利用者が許可していない（拡張機能は許可がないと開けないので、通常は起きません）
+- not_consented：利用者が許可していない（ポイントを配る拡張機能は、許可がないと開けません。ユーザー情報を使うには許可が必要です）
 - not_linked：仙人アカウントと未連携
 - exhausted：上限に達した（error.data.remaining で残りのptが分かる）
 - cancelled：利用者が支払いを取り消した

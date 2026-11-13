@@ -91,7 +91,7 @@ async function befriend(a: string, b: string) {
   if (deleteError) throw deleteError;
 }
 
-async function usersByIds(ids: string[]): Promise<FriendInfo[]> {
+export async function usersByIds(ids: string[]): Promise<FriendInfo[]> {
   if (!ids.length) return [];
   const { data, error } = await sb
     .from("sc_users")

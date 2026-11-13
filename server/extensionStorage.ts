@@ -46,14 +46,6 @@ async function gate(userId: string, workId: string): Promise<string> {
   if (work.creator_id !== userId && !(await canUseItem(userId, toStudioItem(work)))) {
     throw new StorageError(403, "not_owned", "この拡張機能はまだ購入していません。");
   }
-  const { data: consent, error: consentError } = await sb
-    .from("sc_extension_consents")
-    .select("user_id")
-    .eq("user_id", userId)
-    .eq("work_id", workId)
-    .maybeSingle();
-  if (consentError) throw consentError;
-  if (!consent) throw new StorageError(403, "not_consented", "アカウント情報の許可がありません。拡張機能を開き直すと、確認が出ます。");
   if (!(await isLinked(userId))) {
     throw new StorageError(403, "not_linked", "データを保存するには、仙人アカウントとの連携が必要です。");
   }

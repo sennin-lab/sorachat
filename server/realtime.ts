@@ -13,7 +13,7 @@ import { sb } from "./supabase.js";
 import { isIpBanned, upgradeIp } from "./ipBans.js";
 import { gameAction, gameActionInput } from "./games.js";
 import { GameError } from "./gameLogic.js";
-import { BattleError, relay, userOffline, userOnline } from "./battleRooms.js";
+import { BattleError, pendingInvitesOf, relay, userOffline, userOnline } from "./battleRooms.js";
 import { BATTLE, checkPayload } from "./battleRules.js";
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
@@ -135,6 +135,8 @@ export function rttOf(ws: WebSocket): number {
 function connect(userId: string, ws: WebSocket) {
   addSocket(userId, ws);
   userOnline(userId);
+  // 閉じていた間に届いた、まだ承諾していない対戦の招待を、画面へもう一度出す
+  for (const invite of pendingInvitesOf(userId)) reply(ws, invite);
   // 2秒ごとに ping を送り、返事（pong）で往復時間を測る。遠い人ほど、反応の補正を大きくするため
   const rttTimer = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping", t: Date.now(), rtt: rttOf(ws) }));

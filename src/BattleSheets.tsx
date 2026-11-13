@@ -1,7 +1,10 @@
-import type { BattleMember } from "./battle";
+import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
+import { UserRow } from "./UserRow";
+import { INVITE_MAX, type BattleCandidate, type BattleMember } from "./battle";
 
 // オンライン対戦の画面（ソラチャットの画面の中に出る。拡張機能の枠の外）。見た目だけを持つ部品。
-// 処理（相手探し・招待・開始）は、呼び出し側（拡張機能の画面・招待の受け取り）が行う。
+// 処理（相手探し・招待・準備OK・開始）は、呼び出し側（battleSession.tsx）が行う。
 
 const SHEET_CLASS = "sheet-backdrop confirm-backdrop battle-backdrop";
 
@@ -11,7 +14,7 @@ export function BattleMatchingSheet({ size, onCancel }: { size: number; onCancel
       <div className="sheet confirm-sheet battle-sheet" role="dialog" aria-modal="true" aria-label="対戦相手を探しています">
         <div className="battle-spinner" aria-hidden="true" />
         <strong className="confirm-title">対戦相手を探しています</strong>
-        <p className="confirm-text">同じ拡張機能で遊ぶ人が {size} 人そろうと、すぐ始まります。</p>
+        <p className="confirm-text">同じ拡張機能で遊ぶ人が {size} 人そろうと、準備OKの確認に進みます。</p>
         <div className="confirm-actions">
           <button type="button" className="btn-secondary" onClick={onCancel}>
             探すのをやめる
@@ -22,6 +25,96 @@ export function BattleMatchingSheet({ size, onCancel }: { size: number; onCancel
   );
 }
 
+// 対戦の相手を選ぶ画面（マッチングでも友だちとの対戦でも同じ）。
+// この拡張機能を持っている友だちだけを出し、オンラインの人にはマークを付ける。
+export function BattlePickerPage({
+  mode,
+  candidates,
+  error,
+  onPick,
+  onClose
+}: {
+  mode: "find" | "invite";
+  candidates: BattleCandidate[];
+  error: string;
+  // ランダムに探す（find のときだけ）・友だちを招待（ids）・やめる（null）
+  onPick: (choice: { random: true } | { ids: string[] } | null) => void;
+  onClose: () => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+
+  const toggle = (candidate: BattleCandidate) => {
+    if (candidate.state === "busy") return;
+    setPicked((list) => {
+      if (list.includes(candidate.id)) return list.filter((id) => id !== candidate.id);
+      if (list.length >= INVITE_MAX) return list;
+      return [...list, candidate.id];
+    });
+  };
+
+  return (
+    <div className="page battle-picker" role="dialog" aria-label={mode === "find" ? "対戦相手を選ぶ" : "対戦に招待する友だち"}>
+      <header className="page-bar">
+        <button onClick={onClose} aria-label="閉じる">
+          <Icon name="back" size={26} />
+        </button>
+        <strong>{mode === "find" ? "対戦相手を選ぶ" : "対戦に招待する"}</strong>
+        <button className="bar-action" disabled={picked.length === 0} onClick={() => onPick({ ids: picked })}>
+          招待する
+        </button>
+      </header>
+
+      {mode === "find" && (
+        <button type="button" className="battle-random" onClick={() => onPick({ random: true })}>
+          <span className="battle-random-icon" aria-hidden="true">
+            ?
+          </span>
+          <span className="row-text">
+            <strong>ランダムに探す</strong>
+            <small>同じ拡張機能で遊ぶ人と、自動で組みます</small>
+          </span>
+        </button>
+      )}
+
+      <p className="battle-picker-head muted small">
+        {mode === "find" ? "友だちを選んで招待することもできます" : "友だちを選んでください"}（最大{INVITE_MAX}人）
+      </p>
+
+      {candidates.length === 0 && (
+        <p className="muted center pad">
+          この拡張機能を持っていて、サブスクに入っている友だちがいません。
+        </p>
+      )}
+
+      <ul className="user-list-ul">
+        {candidates.map((f, i) => (
+          <UserRow
+            key={f.id}
+            index={i}
+            userId={f.id}
+            hasAvatar={f.hasAvatar}
+            name={f.displayName}
+            sub={`@${f.username}`}
+            right={<span className={`battle-state is-${f.state}`}>{STATE_TEXT[f.state]}</span>}
+            check={{ checked: picked.includes(f.id), disabled: f.state === "busy" }}
+            onClick={() => toggle(f)}
+          />
+        ))}
+      </ul>
+
+      {candidates.length > 0 && <p className="muted small battle-picker-note">オフラインの友だちにも、端末に招待の通知が届きます。</p>}
+      {error && <p className="notice center error shake">{error}</p>}
+    </div>
+  );
+}
+
+const STATE_TEXT: Record<BattleCandidate["state"], string> = {
+  online: "オンライン",
+  offline: "オフライン",
+  busy: "対戦中"
+};
+
+// 招待したあと、承諾を待つ・開始するための画面（主催者）
 export function BattleLobbySheet({
   members,
   busy,
@@ -40,7 +133,7 @@ export function BattleLobbySheet({
     <div className={SHEET_CLASS}>
       <div className="sheet confirm-sheet battle-sheet" role="dialog" aria-modal="true" aria-label="友だちとの対戦">
         <strong className="confirm-title">友だちを招待しました</strong>
-        <p className="confirm-text">承諾した人が2人以上になると、「開始する」を押せます。</p>
+        <p className="confirm-text">承諾した人が2人以上になると、「開始する」を押せます。開始したあとは、全員の準備OKで始まります。</p>
         <ul className="battle-members">
           {members.map((m, i) => (
             <li key={`${m.name}-${i}`} className={`battle-member is-${m.state}`}>
@@ -56,6 +149,58 @@ export function BattleLobbySheet({
           </button>
           <button type="button" className="btn-primary" disabled={busy || joined < 2} onClick={onStart}>
             {busy ? "…" : "開始する"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 準備OKの画面。マッチングが決まった人・開始された人が、全員そろうまで待つ
+export function BattleReadySheet({
+  members,
+  readyUntil,
+  ready,
+  busy,
+  error,
+  onReady,
+  onLeave
+}: {
+  members: { name: string; ready: boolean }[];
+  readyUntil: number;
+  ready: boolean;
+  busy: boolean;
+  error: string;
+  onReady: () => void;
+  onLeave: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, []);
+  const left = Math.max(0, Math.ceil((readyUntil - now) / 1000));
+  return (
+    <div className={SHEET_CLASS}>
+      <div className="sheet confirm-sheet battle-sheet" role="dialog" aria-modal="true" aria-label="準備OKを押してください">
+        <strong className="confirm-title">対戦の準備ができました</strong>
+        <p className="confirm-text">全員が「準備OK」を押すと、対戦が始まります。</p>
+        <p className="battle-countdown">残り {left} 秒</p>
+        <ul className="battle-members">
+          {members.map((m, i) => (
+            <li key={`${m.name}-${i}`} className={`battle-member ${m.ready ? "is-ready" : "is-waiting"}`}>
+              <span className="battle-member-name">{m.name}</span>
+              <span className="battle-member-state">{m.ready ? "準備OK" : "準備中"}</span>
+            </li>
+          ))}
+        </ul>
+        {error && <p className="notice error">{error}</p>}
+        <div className="confirm-actions">
+          <button type="button" className="btn-secondary" disabled={busy} onClick={onLeave}>
+            やめる
+          </button>
+          <button type="button" className="btn-primary" disabled={busy || ready} onClick={onReady}>
+            {busy ? "…" : ready ? "準備OKです" : "準備OK"}
           </button>
         </div>
       </div>
@@ -80,6 +225,7 @@ export function BattleWaitingSheet({ hostName, busy, onLeave }: { hostName: stri
   );
 }
 
+// 招待が届いたときの画面（ソラチャットを開いている間は、どの画面にも重ねて出す）
 export function BattleInviteSheet({
   hostName,
   gameName,
@@ -97,10 +243,10 @@ export function BattleInviteSheet({
 }) {
   return (
     <div className={SHEET_CLASS}>
-      <div className="sheet confirm-sheet battle-sheet" role="alertdialog" aria-modal="true" aria-label="対戦の招待">
-        <strong className="confirm-title">対戦の招待</strong>
+      <div className="sheet confirm-sheet battle-sheet" role="alertdialog" aria-modal="true" aria-label="招待が来ています">
+        <strong className="confirm-title">招待が来ています</strong>
         <p className="confirm-text">
-          {hostName}さんから「{gameName}」の対戦に招待されました。
+          {hostName}さんから「{gameName}」の対戦に招待されています。
         </p>
         {error && <p className="notice error">{error}</p>}
         <div className="confirm-actions">

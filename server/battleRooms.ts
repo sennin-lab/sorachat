@@ -1,8 +1,10 @@
 // オンライン対戦の部屋と待ち行列（メモリ上。サーバーが再起動すると消えます。通話の部屋と同じ考え方）。
-// ・ランダム：同じ拡張機能・同じ人数の待ち行列に、必要な人数がそろったら部屋を作って始める。
-// ・友だち：主催者が友だちを招待する。招待された人が承諾し、主催者が「開始」を押したら始める。
+// ・ランダム：同じ拡張機能・同じ人数の待ち行列に、必要な人数がそろったら「準備」に入る。
+// ・友だち：主催者が友だちを招待する。招待された人が承諾し、主催者が「開始」を押したら「準備」に入る。
+// ・準備：参加している全員が「準備OK」を押すまで、対戦は始まらない（時間切れ・途中で抜けたら取り消し）。
 // ・中の データ は、サーバーは読まずに、同じ部屋の人へ中継するだけ（ポイントや結果の判定は拡張機能の作者が書く）。
 // 通知は notify（送り先の人と中身）で送る。テストでは notify を差し替えて、WebSocket なしで確かめる。
+// 閉じている端末への Web Push は、battle.ts が notify の中で送る。
 import { randomUUID } from "node:crypto";
 import { BATTLE } from "./battleRules.js";
 
@@ -16,8 +18,8 @@ export class BattleError extends Error {
   }
 }
 
-export type RoomStatus = "lobby" | "playing" | "closed";
-export type Member = { userId: string; name: string; state: "invited" | "joined" };
+export type RoomStatus = "lobby" | "preparing" | "playing" | "closed";
+export type Member = { userId: string; name: string; state: "invited" | "joined"; ready: boolean };
 export type Room = {
   id: string;
   gameId: string;
@@ -28,6 +30,8 @@ export type Room = {
   status: RoomStatus;
   createdAt: number;
   closedAt: number | null;
+  // 準備OKの締め切り（準備中だけ入る）
+  readyUntil: number | null;
   members: Member[];
 };
 type Queued = { userId: string; name: string; gameId: string; gameName: string; size: number; at: number };
@@ -39,7 +43,7 @@ export function setBattleNotifier(next: Notify) {
 }
 
 const rooms = new Map<string, Room>();
-// 参加している部屋（承諾済み・対戦中）。招待だけの人は含まない
+// 参加している部屋（承諾済み・準備中・対戦中）。招待だけの人は含まない
 const roomOf = new Map<string, string>();
 const queue: Queued[] = [];
 const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -62,10 +66,35 @@ function announce(room: Room, targets: Member[], event: string, extra: Record<st
   }
 }
 
+// 準備に入る：参加している全員に「準備OKを押してください」を送る。まだ始めない
+function beginPreparing(room: Room) {
+  room.status = "preparing";
+  room.members = joinedOf(room);
+  room.readyUntil = Date.now() + BATTLE.readyTimeoutMs;
+  for (const m of room.members) {
+    m.ready = false;
+    roomOf.set(m.userId, room.id);
+  }
+  const players = playersOf(room);
+  for (const m of room.members) {
+    notify(m.userId, {
+      type: "battle",
+      roomId: room.id,
+      gameId: room.gameId,
+      event: "prepare",
+      mode: room.mode,
+      size: room.size,
+      seat: seatOf(room, m.userId),
+      players,
+      readyUntil: room.readyUntil
+    });
+  }
+}
+
+// 全員が準備OKを押したら、対戦を始める
 function startRoom(room: Room) {
   room.status = "playing";
-  room.members = joinedOf(room);
-  for (const m of room.members) roomOf.set(m.userId, room.id);
+  room.readyUntil = null;
   const players = playersOf(room);
   for (const m of room.members) {
     notify(m.userId, {
@@ -101,10 +130,11 @@ export function enqueueRandom(args: { userId: string; name: string; gameId: stri
     status: "lobby",
     createdAt: Date.now(),
     closedAt: null,
-    members: group.map((q) => ({ userId: q.userId, name: q.name, state: "joined" as const }))
+    readyUntil: null,
+    members: group.map((q) => ({ userId: q.userId, name: q.name, state: "joined" as const, ready: false }))
   };
   rooms.set(room.id, room);
-  startRoom(room);
+  beginPreparing(room);
   if (!group.some((q) => q.userId === args.userId)) return { status: "waiting" };
   return { status: "matched", roomId: room.id };
 }
@@ -121,6 +151,18 @@ export function cancelQueue(userId: string): boolean {
 }
 
 // ---- 友だちとの対戦（招待） ----
+
+// 招待の知らせの中身（接続中の画面へも、閉じている端末への通知にも使う）
+function inviteOf(room: Room) {
+  const host = room.members.find((m) => m.userId === room.hostId);
+  return {
+    type: "battle-invite",
+    roomId: room.id,
+    gameId: room.gameId,
+    gameName: room.gameName,
+    hostName: host?.name ?? ""
+  };
+}
 
 export function createLobby(args: {
   hostId: string;
@@ -141,23 +183,29 @@ export function createLobby(args: {
     status: "lobby",
     createdAt: Date.now(),
     closedAt: null,
+    readyUntil: null,
     members: [
-      { userId: args.hostId, name: args.hostName, state: "joined" },
-      ...args.invitees.map((i) => ({ userId: i.userId, name: i.name, state: "invited" as const }))
+      { userId: args.hostId, name: args.hostName, state: "joined", ready: false },
+      ...args.invitees.map((i) => ({ userId: i.userId, name: i.name, state: "invited" as const, ready: false }))
     ]
   };
   rooms.set(room.id, room);
   roomOf.set(args.hostId, room.id);
-  for (const invitee of args.invitees) {
-    notify(invitee.userId, {
-      type: "battle-invite",
-      roomId: room.id,
-      gameId: room.gameId,
-      gameName: room.gameName,
-      hostName: args.hostName
-    });
-  }
+  const invite = inviteOf(room);
+  for (const invitee of args.invitees) notify(invitee.userId, invite);
   return room;
+}
+
+// まだ承諾していない招待（接続し直したときに、画面へもう一度出すため）
+export function pendingInvitesOf(userId: string) {
+  const now = Date.now();
+  const list: ReturnType<typeof inviteOf>[] = [];
+  for (const room of rooms.values()) {
+    if (room.status !== "lobby" || now - room.createdAt > BATTLE.lobbyTtlMs) continue;
+    if (!room.members.some((m) => m.userId === userId && m.state === "invited")) continue;
+    list.push(inviteOf(room));
+  }
+  return list;
 }
 
 // 招待への返事（承諾・断る）
@@ -178,7 +226,7 @@ export function respondInvite(userId: string, roomId: string, accept: boolean): 
   return room;
 }
 
-// 主催者が始める（参加した人が2人以上のとき）
+// 主催者が始める（参加した人が2人以上のとき）。すぐには始めず、全員の準備OKを待つ
 export function startLobby(hostId: string, roomId: string): Room {
   const room = rooms.get(roomId);
   if (!room || room.status !== "lobby" || room.hostId !== hostId) throw new BattleError(404, "not_found", "部屋が見つかりません。");
@@ -186,12 +234,30 @@ export function startLobby(hostId: string, roomId: string): Room {
     throw new BattleError(400, "need_players", "もう1人以上が参加すると開始できます。");
   }
   const dropped = room.members.filter((m) => m.state === "invited");
-  startRoom(room);
+  beginPreparing(room);
   announce(room, dropped, "invite_closed");
   return room;
 }
 
-// 部屋から出る（主催者が出た場合、待機中なら部屋は閉じる。対戦中は、残りが2人未満になれば閉じる）
+// 準備OK（準備中の人だけ）。全員がそろったら、対戦が始まる
+export function readyUp(userId: string, roomId: string): Room {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== "preparing") {
+    throw new BattleError(409, "not_preparing", "準備OKを押せるのは、対戦の準備中だけです。");
+  }
+  const member = room.members.find((m) => m.userId === userId && m.state === "joined");
+  if (!member) throw new BattleError(403, "not_in_room", "この対戦には参加していません。");
+  if (member.ready) return room;
+  member.ready = true;
+  announce(room, joinedOf(room), "ready", { name: member.name });
+  if (joinedOf(room).every((m) => m.ready)) startRoom(room);
+  return room;
+}
+
+// 部屋から出る
+// ・待機中：主催者が出たら閉じる。招待された人が出ても、部屋は続く
+// ・準備中：誰かが抜けたら、準備を取り消して閉じる（マッチングは成立させない）
+// ・対戦中：残りが2人未満になれば閉じる
 export function leaveRoom(userId: string, roomId: string) {
   const room = rooms.get(roomId);
   if (!room || room.status === "closed") return;
@@ -208,6 +274,10 @@ export function leaveRoom(userId: string, roomId: string) {
     announce(room, joinedOf(room), "left", { name: member.name, leftSeat: seat });
     return;
   }
+  if (room.status === "preparing") {
+    closeRoom(room, room.hostId === userId ? "host_left" : "opponent_left");
+    return;
+  }
   // 対戦中
   const seat = seatOf(room, userId);
   room.members = room.members.filter((m) => m !== member);
@@ -222,6 +292,7 @@ export function leaveRoom(userId: string, roomId: string) {
 function closeRoom(room: Room, reason: string, at = Date.now()) {
   room.status = "closed";
   room.closedAt = at;
+  room.readyUntil = null;
   for (const m of room.members) roomOf.delete(m.userId);
   announce(room, room.members, "closed", { reason });
 }
@@ -238,7 +309,7 @@ export function relay(userId: string, roomId: string, payload: unknown): void {
   }
 }
 
-// 画面の部屋の状態（今の席・参加している人・招待の状態）
+// 画面の部屋の状態（今の席・参加している人・招待や準備OKの状態）
 export function roomView(userId: string, roomId: string) {
   const room = rooms.get(roomId);
   if (!room) return null;
@@ -254,7 +325,8 @@ export function roomView(userId: string, roomId: string) {
     isHost: room.hostId === userId,
     seat: seatOf(room, userId),
     players: playersOf(room),
-    members: room.members.map((m) => ({ name: m.name, state: m.state }))
+    readyUntil: room.readyUntil,
+    members: room.members.map((m) => ({ name: m.name, state: m.state, ready: m.ready }))
   };
 }
 
@@ -290,7 +362,7 @@ function leaveAll(userId: string) {
   }
 }
 
-// ---- 定期の掃除（古い待ち・放置された招待・終わった部屋） ----
+// ---- 定期の掃除（古い待ち・放置された招待・準備の時間切れ・終わった部屋） ----
 
 export function pruneBattles(now = Date.now()) {
   for (let i = queue.length - 1; i >= 0; i -= 1) {
@@ -302,6 +374,8 @@ export function pruneBattles(now = Date.now()) {
   }
   for (const room of [...rooms.values()]) {
     if (room.status === "lobby" && now - room.createdAt > BATTLE.lobbyTtlMs) closeRoom(room, "timeout", now);
+    // 準備OKが揃わないまま締め切りを過ぎたら、取り消す
+    if (room.status === "preparing" && room.readyUntil !== null && now > room.readyUntil) closeRoom(room, "ready_timeout", now);
     if (room.status === "closed" && room.closedAt !== null && now - room.closedAt > BATTLE.closedKeepMs) rooms.delete(room.id);
   }
 }

@@ -8,7 +8,8 @@ import { buildExtensionDocument, EXT_BRIDGE, EXTENSION_CSP } from "../server/stu
 const good = checkAwardRequest({ amount: 10, reason: "クリア", requestId: "clear-0001" });
 assert.equal(good.ok, true);
 assert.equal(checkAwardRequest({ amount: 0, requestId: "clear-0001" }).ok, false);
-assert.equal(checkAwardRequest({ amount: EXT_BRIDGE.awardMaxPerCall + 1, requestId: "clear-0001" }).ok, false);
+assert.equal(checkAwardRequest({ amount: 2_147_483_648, requestId: "clear-0001" }).ok, false, "DB に入らない大きさは断る");
+assert.equal(checkAwardRequest({ amount: 5000, requestId: "clear-0001" }).ok, true, "1回の上限は管理者が決めるので、ここでは固定の500で断らない");
 assert.equal(checkAwardRequest({ amount: 1.5, requestId: "clear-0001" }).ok, false);
 assert.equal(checkAwardRequest({ amount: "10", requestId: "clear-0001" }).ok, false);
 assert.equal(checkAwardRequest({ amount: 10, reason: "x".repeat(EXT_BRIDGE.reasonMax + 1), requestId: "clear-0001" }).ok, false);
@@ -18,7 +19,7 @@ assert.equal(checkAwardRequest({ amount: 10, requestId: "a".repeat(EXT_BRIDGE.re
 assert.equal(checkAwardRequest({ amount: 10 }).ok, false);
 assert.equal(checkAwardRequest(null).ok, false);
 // 最大・最小ちょうどは通る
-assert.equal(checkAwardRequest({ amount: EXT_BRIDGE.awardMaxPerCall, requestId: "clear-0001" }).ok, true);
+assert.equal(checkAwardRequest({ amount: EXT_BRIDGE.awardPerCallDefault, requestId: "clear-0001" }).ok, true);
 assert.equal(checkAwardRequest({ amount: EXT_BRIDGE.awardMin, requestId: "clear-0001", reason: "" }).ok, true);
 
 // ブリッジ：枠の中のコードより先に読み込まれ、構文が正しい（ユーザーのコードが壊さない）
@@ -40,7 +41,8 @@ assert.ok(!EXTENSION_CSP.includes("allow-same-origin"));
 
 // 仕様書：上の定数（上限・名前・code）と食い違わない
 const spec = extensionSpecMarkdown();
-assert.ok(spec.includes(`${EXT_BRIDGE.awardMaxPerCall}`), "1回の上限を書いている");
+assert.ok(spec.includes(`${EXT_BRIDGE.awardPerCallDefault}`), "1回の上限の初期値を書いている");
+assert.ok(spec.includes("per_call_limit"), "1回の上限の code を書いている");
 assert.ok(spec.includes("window.sorachat.awardPoints"));
 assert.ok(spec.includes("window.sorachat.getAccount"));
 assert.ok(spec.includes("window.sorachat.requestAccess"));

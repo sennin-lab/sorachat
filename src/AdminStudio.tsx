@@ -34,7 +34,7 @@ type WorkDetail = {
   grant: GrantInfo | null;
 };
 // 拡張機能からのポイント配布の上限（管理者が決める）
-type GrantInfo = { maxPoints: number; usedPoints: number; active: boolean; perUserMinuteMax: number };
+type GrantInfo = { maxPoints: number; usedPoints: number; active: boolean; perUserMinuteMax: number; perCallMax: number };
 type ReportRow = { id: string; name: string; kind: string; status: string; hiddenReason: string | null; creatorName: string; reportCount: number; latestAt: string };
 type PayoutRow = { id: string; creatorName: string; workName: string; amount: number; status: string; attempts: number; lastError: string | null; createdAt: string };
 
@@ -155,6 +155,7 @@ function WorksList({ openId, onOpen }: { openId: string | null; onOpen: (id: str
 function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: GrantInfo | null; onChanged: () => Promise<void> }) {
   const [max, setMax] = useState(String(grant?.maxPoints ?? 0));
   const [perMinute, setPerMinute] = useState(String(grant?.perUserMinuteMax ?? 0));
+  const [perCall, setPerCall] = useState(String(grant?.perCallMax ?? 500));
   const [active, setActive] = useState(grant?.active ?? false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -162,14 +163,20 @@ function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: Gra
   useEffect(() => {
     setMax(String(grant?.maxPoints ?? 0));
     setPerMinute(String(grant?.perUserMinuteMax ?? 0));
+    setPerCall(String(grant?.perCallMax ?? 500));
     setActive(grant?.active ?? false);
-  }, [grant?.maxPoints, grant?.perUserMinuteMax, grant?.active]);
+  }, [grant?.maxPoints, grant?.perUserMinuteMax, grant?.perCallMax, grant?.active]);
 
   const save = async () => {
     const n = Number(max);
     const m = Number(perMinute);
+    const c = Number(perCall);
     if (!Number.isInteger(n) || n < 0 || !Number.isInteger(m) || m < 0) {
       setMessage({ ok: false, text: "0 以上の整数で入力してください。" });
+      return;
+    }
+    if (!Number.isInteger(c) || c < 1) {
+      setMessage({ ok: false, text: "1回の上限は 1 以上の整数で入力してください。" });
       return;
     }
     setBusy(true);
@@ -177,7 +184,7 @@ function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: Gra
     try {
       await adminApi(`/api/admin/studio/works/${id}/grant`, {
         method: "PUT",
-        body: JSON.stringify({ maxPoints: n, active, perUserMinuteMax: m })
+        body: JSON.stringify({ maxPoints: n, active, perUserMinuteMax: m, perCallMax: c })
       });
       setMessage({ ok: true, text: "保存しました。" });
       await onChanged();
@@ -198,9 +205,16 @@ function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: Gra
       <p className="admin-meta">
         1人が1分間に受け取れるポイントの上限です。0 にすると、1分あたりの制限はありません。
       </p>
+      <p className="admin-meta">
+        1回の配布で配れる量の上限です。初期値は 500pt です。上限はありません（変えたいときは、ここで指定してください）。
+      </p>
       <div className="admin-grant-row">
         <label>
-          上限{" "}
+          1回の上限{" "}
+          <input type="number" inputMode="numeric" min={1} value={perCall} onChange={(e) => setPerCall(e.target.value)} disabled={busy} /> pt
+        </label>
+        <label>
+          全体の上限{" "}
           <input type="number" inputMode="numeric" min={0} value={max} onChange={(e) => setMax(e.target.value)} disabled={busy} /> pt
         </label>
         <label>

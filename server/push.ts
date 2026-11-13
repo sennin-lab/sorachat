@@ -109,6 +109,19 @@ export async function notifyRecipient(args: {
   }
 }
 
+// オンライン対戦の知らせ（招待・準備OK）を、閉じている端末へ送る。端末の購読がなければ何もしない
+export async function pushToUser(userId: string, payload: { title: string; body: string; url: string; tag: string }) {
+  if (!pushEnabled) return;
+  try {
+    const { data: subs, error } = await sb.from("sc_push_subscriptions").select("endpoint, p256dh, auth").eq("user_id", userId);
+    if (error) throw error;
+    const body = JSON.stringify(payload);
+    await Promise.all(((subs ?? []) as Sub[]).map((sub) => sendTo(sub, body)));
+  } catch (error) {
+    console.error("対戦の通知の送信に失敗しました:", error);
+  }
+}
+
 // 設定の「テスト通知」: 画面の状態に関係なく、自分の登録済みの端末すべてに送り、結果を返す
 push.post("/push/test", requireAuth, async (_req, res) => {
   if (!pushEnabled) {

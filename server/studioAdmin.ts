@@ -134,7 +134,9 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
 const grantSchema = z.object({
   maxPoints: z.number().int().min(0).max(10_000_000),
   active: z.boolean(),
-  perUserMinuteMax: z.number().int().min(0).max(10_000_000).optional()
+  perUserMinuteMax: z.number().int().min(0).max(10_000_000).optional(),
+  // 1回に配れる上限（pt）。固定の上限はなく、管理者が決める（1以上・DBの整数の範囲まで）
+  perCallMax: z.number().int().min(1).max(2_147_483_647).optional()
 });
 studioAdmin.put("/admin/studio/works/:id/grant", async (req, res) => {
   const id = idParam(req, res);

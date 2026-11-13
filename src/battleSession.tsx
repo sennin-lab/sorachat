@@ -1,27 +1,28 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { api, ApiError } from "./api";
-import { battleApi, type BattleMember } from "./battle";
-import { BattleLobbySheet, BattleMatchingSheet, BattleWaitingSheet } from "./BattleSheets";
+import { ApiError } from "./api";
+import { battleApi, READY_TIMEOUT_MS, type BattleCandidate, type BattleMember } from "./battle";
+import { BattleLobbySheet, BattleMatchingSheet, BattlePickerPage, BattleReadySheet, BattleWaitingSheet } from "./BattleSheets";
 import { BattleSubscribeSheet } from "./BattleSubscription";
-import { FriendSelectPage } from "./FriendSelectPage";
 import { onBattleEvent, sendBattle } from "./realtime";
-import type { Friend } from "./types";
 
-// 拡張機能の中のオンライン対戦を、ソラチャットの画面側で進める仕組み（状態・相手探し・招待・中継）。
+// 拡張機能の中のオンライン対戦を、ソラチャットの画面側で進める仕組み（状態・相手探し・招待・準備OK・中継）。
 // 拡張機能の枠（iframe）からの依頼（battle-*）を受けて答え、相手からの知らせは枠へ渡す。
-// サーバーとの通信・ソラチャットの画面の表示（相手探し・友だち選び・招待・開始）はすべてここで行う。
+// 流れ：相手を選ぶ →（招待なら承諾・開始）→ 全員の準備OK → 開始。準備OKがそろうまで、対戦は始まらない。
 
 const CHANNEL = "sorachat-ext";
 const MAX_PAYLOAD = 2048;
 
 export type BattleReply = { ok: boolean; data?: unknown; code?: string; error?: string };
 
-type Room = { roomId: string; status: "lobby" | "playing" };
-type Waiter = { kind: "match"; resolve: (r: BattleReply) => void } | { kind: "invite"; roomId: string | null; resolve: (r: BattleReply) => void };
+type Room = { roomId: string; status: "lobby" | "preparing" | "playing" };
+// 相手を待つ依頼（相手が見つかって始まるまで、または招待の終わりまで）。roomId は、部屋が決まるまで null
+type Waiter = { roomId: string | null; resolve: (r: BattleReply) => void };
+type Choice = { random: true } | { ids: string[] };
 type Ui =
   | { kind: "matching"; size: number }
-  | { kind: "friends"; friends: Friend[]; error: string; pick: (ids: string[] | null) => void }
+  | { kind: "picker"; mode: "find" | "invite"; candidates: BattleCandidate[]; error: string; pick: (choice: Choice | null) => void }
   | { kind: "lobby"; roomId: string; members: BattleMember[]; busy: boolean; error: string }
+  | { kind: "ready"; roomId: string; members: { name: string; ready: boolean }[]; readyUntil: number; ready: boolean; busy: boolean; error: string }
   | { kind: "waiting"; roomId: string; busy: boolean }
   | { kind: "subscribe"; reason: string; done: (ok: boolean) => void };
 
@@ -39,12 +40,14 @@ function errorReply(error: unknown): BattleReply {
 
 const closedText = (reason: string) =>
   reason === "opponent_left"
-    ? "相手が抜けたので、対戦が終わりました。"
+    ? "相手が抜けたので、対戦が取り消されました。"
     : reason === "host_left"
       ? "主催者が抜けたので、対戦が終わりました。"
       : reason === "timeout"
         ? "招待の期限が過ぎたので、対戦が終わりました。"
-        : "対戦が終わりました。";
+        : reason === "ready_timeout"
+          ? "準備OKが揃わなかったので、対戦を取り消しました。"
+          : "対戦が終わりました。";
 
 // 名前で1人の状態を変える（同じ名前が2人いても、最初の1人だけ変える）
 function setMemberState(list: BattleMember[], name: string, state: BattleMember["state"]): BattleMember[] {
@@ -57,6 +60,15 @@ function removeInvited(list: BattleMember[], name: string): BattleMember[] {
   const index = list.findIndex((m) => m.name === name && m.state === "invited");
   return index < 0 ? list : list.filter((_, i) => i !== index);
 }
+
+// 準備OKの一覧で、名前の人を準備OKにする（同じ名前が2人いても、最初の準備中の1人だけ）
+function setReady(list: { name: string; ready: boolean }[], name: string) {
+  const index = list.findIndex((m) => m.name === name && !m.ready);
+  return index < 0 ? list : list.map((m, i) => (i === index ? { ...m, ready: true } : m));
+}
+
+// 準備の一覧（名前と準備OKの状態）。サーバーの部屋の情報から作る
+const readyListOf = (members: BattleMember[]) => members.filter((m) => m.state === "joined").map((m) => ({ name: m.name, ready: Boolean(m.ready) }));
 
 export function useBattleSession({
   workId,
@@ -116,13 +128,38 @@ export function useBattleSession({
       const waiter = waiterRef.current;
       const name = typeof ev.name === "string" ? ev.name : "";
       switch (ev.event) {
+        case "prepare": {
+          // 準備OKを求める（マッチングが決まった・主催者が開始した）
+          const players = Array.isArray(ev.players) ? (ev.players as { name: string }[]) : [];
+          const readyUntil = typeof ev.readyUntil === "number" ? ev.readyUntil : Date.now() + READY_TIMEOUT_MS;
+          if (roomId) {
+            roomRef.current = { roomId, status: "preparing" };
+            if (waiter && waiter.roomId === null) waiter.roomId = roomId;
+          }
+          setUi({
+            kind: "ready",
+            roomId: roomId ?? "",
+            members: players.map((p) => ({ name: p.name, ready: false })),
+            readyUntil,
+            ready: false,
+            busy: false,
+            error: ""
+          });
+          postToFrame({ type: "prepare", roomId, players });
+          return;
+        }
+        case "ready": {
+          patchUi((u) => (u.kind === "ready" ? { ...u, members: setReady(u.members, name) } : u));
+          postToFrame({ type: "ready", name });
+          return;
+        }
         case "started": {
           // 主催者の「開始」の返事で、もう受け取り済みなら重ねて渡さない
           if (roomId && roomRef.current?.roomId === roomId && roomRef.current.status === "playing") return;
           const info = { roomId, size: ev.size, seat: ev.seat, players: ev.players };
           roomRef.current = roomId ? { roomId, status: "playing" } : null;
           setUi(null);
-          if (waiter && (waiter.kind === "match" || waiter.roomId === null || waiter.roomId === roomId)) {
+          if (waiter && (waiter.roomId === null || waiter.roomId === roomId)) {
             waiterRef.current = null;
             waiter.resolve({ ok: true, data: info });
             return;
@@ -131,7 +168,7 @@ export function useBattleSession({
           return;
         }
         case "queue_expired": {
-          if (waiter?.kind === "match") {
+          if (waiter && waiter.roomId === null) {
             waiterRef.current = null;
             setUi(null);
             waiter.resolve(fail("expired", "相手が見つからなかったので、探すのをやめました。もう一度お試しください。"));
@@ -160,12 +197,15 @@ export function useBattleSession({
         case "closed": {
           const reason = typeof ev.reason === "string" ? ev.reason : "";
           if (roomRef.current?.roomId === roomId) roomRef.current = null;
-          if (waiter?.kind === "invite" && (waiter.roomId === roomId || waiter.roomId === null)) {
+          // 準備中・招待中に取り消されたら、待っている依頼を終える（マッチングは成立しない）
+          if (waiter && (waiter.roomId === roomId || waiter.roomId === null)) {
             waiterRef.current = null;
             waiter.resolve(fail("closed", closedText(reason)));
           }
           const current = uiRef.current;
-          if (current && (current.kind === "lobby" || current.kind === "waiting") && current.roomId === roomId) setUi(null);
+          if (current && (current.kind === "lobby" || current.kind === "waiting" || current.kind === "ready") && current.roomId === roomId) {
+            setUi(null);
+          }
           postToFrame({ type: "closed", reason });
           return;
         }
@@ -228,7 +268,7 @@ export function useBattleSession({
     waiterRef.current = null;
     roomRef.current = null;
     setUi(null);
-    if (waiter?.kind === "match") {
+    if (waiter && waiter.roomId === null) {
       await battleApi.cancelQueue(workId).catch(() => undefined);
     }
     if (room) {
@@ -238,11 +278,27 @@ export function useBattleSession({
     return { ok: true };
   };
 
-  // 相手を探す（ランダム）
-  const findMatch = (size: number): Promise<BattleReply> => {
-    if (roomRef.current || waiterRef.current) return Promise.resolve(fail("busy", "すでに対戦の中か、相手を探しています。"));
+  // 相手を選ぶ画面を出し、選ばれるまで待つ（ランダム・友だちの招待・やめる）
+  const pickOpponent = async (mode: "find" | "invite", error: string): Promise<Choice | null> => {
+    const candidates = await battleApi.candidates(workId);
+    return new Promise<Choice | null>((resolve) => {
+      setUi({
+        kind: "picker",
+        mode,
+        candidates,
+        error,
+        pick: (choice) => {
+          setUi(null);
+          resolve(choice);
+        }
+      });
+    });
+  };
+
+  // ランダムに相手を探す（人数がそろったら、準備OKの画面へ。全員が準備OKを押すと始まる）
+  const randomMatch = (size: number): Promise<BattleReply> => {
     return new Promise<BattleReply>((resolve) => {
-      const waiter: Waiter = { kind: "match", resolve };
+      const waiter: Waiter = { roomId: null, resolve };
       waiterRef.current = waiter;
       setUi({ kind: "matching", size });
       runWithSubscription(() => battleApi.queue(workId, size))
@@ -252,15 +308,11 @@ export function useBattleSession({
             if (result.status === "waiting") void battleApi.cancelQueue(workId).catch(() => undefined);
             return;
           }
-          if (result.status === "matched") {
-            // 始まりの知らせ（WebSocket）を待つ。届かなかった場合は、部屋の番号だけで始める
-            window.setTimeout(() => {
-              if (waiterRef.current !== waiter) return;
-              waiterRef.current = null;
-              roomRef.current = { roomId: result.roomId, status: "playing" };
-              setUi(null);
-              resolve({ ok: true, data: { roomId: result.roomId, size, seat: null, players: [] } });
-            }, 1500);
+          // 相手が見つかった知らせ（WebSocket の prepare）が先に届いていなければ、部屋の番号だけで準備OKの画面を出す
+          if (result.status === "matched" && !roomRef.current) {
+            waiter.roomId = result.roomId;
+            roomRef.current = { roomId: result.roomId, status: "preparing" };
+            setUi({ kind: "ready", roomId: result.roomId, members: [], readyUntil: Date.now() + READY_TIMEOUT_MS, ready: false, busy: false, error: "" });
           }
         })
         .catch((error) => {
@@ -272,31 +324,32 @@ export function useBattleSession({
     });
   };
 
-  // 友だちを招待する（1〜3人）。招待された人が承諾し、主催者が「開始」を押すと始まる
-  const inviteFriends = async (): Promise<BattleReply> => {
-    if (roomRef.current || waiterRef.current) return fail("busy", "すでに対戦の中か、相手を探しています。");
+  // 友だちを招待する。承諾が2人以上そろったら、主催者が開始を押す（そのあと全員の準備OK）
+  const inviteIds = async (ids: string[]): Promise<BattleReply> => {
+    const { room } = await runWithSubscription(() => battleApi.invite(workId, ids));
+    return new Promise<BattleReply>((resolve) => {
+      waiterRef.current = { roomId: room.id, resolve };
+      roomRef.current = { roomId: room.id, status: "lobby" };
+      setUi({ kind: "lobby", roomId: room.id, members: room.members, busy: false, error: "" });
+    });
+  };
+
+  // 相手を選んで始める（マッチングでも友だちとの対戦でも、ここを通る）
+  const matchFlow = async (mode: "find" | "invite", size: number): Promise<BattleReply> => {
     try {
+      // 友だちを招待するには、サブスクに入っている必要がある（切れていれば、先に案内する）
       const sub = await battleApi.subscription();
       if (!sub.subscribed && !sub.autoRenew) {
-        const ok = await askSubscribe(`友だちとの対戦は、サブスクに入っている人が使えます（1週間 ${sub.price}pt）。`);
+        const ok = await askSubscribe(`対戦は、サブスクに入っている人が使えます（1週間 ${sub.price}pt）。`);
         if (!ok) return cancelled();
       }
       let notice = "";
       for (;;) {
-        const friends = await api<Friend[]>("/api/friends");
-        const ids = await new Promise<string[] | null>((pick) => setUi({ kind: "friends", friends, error: notice, pick }));
-        if (!ids) {
-          setUi(null);
-          return cancelled();
-        }
+        const choice = await pickOpponent(mode, notice);
+        if (!choice) return cancelled();
+        if ("random" in choice) return await randomMatch(size);
         try {
-          const { room } = await runWithSubscription(() => battleApi.invite(workId, ids));
-          const roomId = room.id;
-          return await new Promise<BattleReply>((resolve) => {
-            waiterRef.current = { kind: "invite", roomId, resolve };
-            roomRef.current = { roomId, status: "lobby" };
-            setUi({ kind: "lobby", roomId, members: room.members, busy: false, error: "" });
-          });
+          return await inviteIds(choice.ids);
         } catch (error) {
           // 招待できない友だちがいたら、理由を見せて選び直してもらう
           if (error instanceof ApiError && error.code === "invitee_unavailable") {
@@ -312,22 +365,52 @@ export function useBattleSession({
     }
   };
 
-  // 招待した側：開始する（承諾した人が2人以上）
+  // 相手を探す（依頼）：ランダム、または友だちを選んで招待
+  const findMatch = (size: number): Promise<BattleReply> => {
+    if (roomRef.current || waiterRef.current) return Promise.resolve(fail("busy", "すでに対戦の中か、相手を探しています。"));
+    return matchFlow("find", size);
+  };
+
+  // 友だちを招待する（依頼）
+  const inviteFriends = (): Promise<BattleReply> => {
+    if (roomRef.current || waiterRef.current) return Promise.resolve(fail("busy", "すでに対戦の中か、相手を探しています。"));
+    return matchFlow("invite", 2);
+  };
+
+  // 招待した側：開始する（承諾した人が2人以上）。すぐには始まらず、全員の準備OKを待つ
   const startLobby = async () => {
     const current = uiRef.current;
     if (current?.kind !== "lobby") return;
     patchUi((u) => ({ ...u, busy: true, error: "" }));
     try {
       const { room } = await battleApi.roomAction(current.roomId, "start");
-      const waiter = waiterRef.current;
-      if (waiter?.kind === "invite" && waiter.roomId === current.roomId) {
-        waiterRef.current = null;
-        roomRef.current = { roomId: current.roomId, status: "playing" };
-        setUi(null);
-        waiter.resolve({ ok: true, data: { roomId: current.roomId, size: room?.size, seat: room?.seat, players: room?.players ?? [] } });
+      if (room?.status === "preparing" && uiRef.current?.kind === "lobby") {
+        roomRef.current = { roomId: current.roomId, status: "preparing" };
+        setUi({
+          kind: "ready",
+          roomId: current.roomId,
+          members: readyListOf(room.members),
+          readyUntil: room.readyUntil ?? Date.now() + READY_TIMEOUT_MS,
+          ready: false,
+          busy: false,
+          error: ""
+        });
       }
     } catch (error) {
       patchUi((u) => ({ ...u, busy: false, error: error instanceof Error ? error.message : "開始できませんでした。" }));
+    }
+  };
+
+  // 準備OKを押す（全員がそろうと、対戦が始まる）
+  const pressReady = async () => {
+    const current = uiRef.current;
+    if (current?.kind !== "ready" || !current.roomId) return;
+    patchUi((u) => ({ ...u, busy: true, error: "" }));
+    try {
+      await battleApi.roomAction(current.roomId, "ready");
+      patchUi((u) => (u.kind === "ready" ? { ...u, busy: false, ready: true } : u));
+    } catch (error) {
+      patchUi((u) => ({ ...u, busy: false, error: error instanceof Error ? error.message : "準備OKを送れませんでした。" }));
     }
   };
 
@@ -378,19 +461,22 @@ export function useBattleSession({
   const layer = ui ? (
     <>
       {ui.kind === "matching" && <BattleMatchingSheet size={ui.size} onCancel={() => void leaveNow()} />}
-      {ui.kind === "friends" && (
-        <FriendSelectPage
-          title="対戦に招待する友だち"
-          friends={ui.friends}
-          confirmLabel="招待"
-          error={ui.error}
-          emptyText="招待できる友だちがいません。先に友だちを追加してください。"
-          onConfirm={(picked) => ui.pick(picked.map((f) => f.id))}
-          onClose={() => ui.pick(null)}
-        />
+      {ui.kind === "picker" && (
+        <BattlePickerPage mode={ui.mode} candidates={ui.candidates} error={ui.error} onPick={(choice) => ui.pick(choice)} onClose={() => ui.pick(null)} />
       )}
       {ui.kind === "lobby" && (
         <BattleLobbySheet members={ui.members} busy={ui.busy} error={ui.error} onStart={() => void startLobby()} onLeave={() => void leaveNow()} />
+      )}
+      {ui.kind === "ready" && (
+        <BattleReadySheet
+          members={ui.members}
+          readyUntil={ui.readyUntil}
+          ready={ui.ready}
+          busy={ui.busy}
+          error={ui.error}
+          onReady={() => void pressReady()}
+          onLeave={() => void leaveNow()}
+        />
       )}
       {ui.kind === "waiting" && <BattleWaitingSheet hostName="" busy={ui.busy} onLeave={() => void leaveNow()} />}
       {ui.kind === "subscribe" && <BattleSubscribeSheet reason={ui.reason} onSubscribed={() => ui.done(true)} onClose={() => ui.done(false)} />}

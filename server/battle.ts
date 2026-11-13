@@ -1,9 +1,10 @@
 // オンライン対戦（拡張機能の中の対戦）。サブスク（1週間 200pt）・ランダムの対戦・友だちとの対戦の入口。
 // 部屋の中身は battleRooms.ts（メモリ上）、サブスクの記録は sc_battle_subscriptions（DB）。
-// 対戦を始められるのは、「拡張機能を買っている」「情報の許可をしている」「サブスクに入っている」人だけ。
+// 対戦を始められるのは、「拡張機能を買っている」「サブスクに入っている」人だけ（表示名のほかは使わないので、許可は求めない）。
 import { Router } from "express";
 import { currentUserId, requireAuth } from "./auth.js";
-import { friendIdsOf } from "./friends.js";
+import { friendIdsOf, usersByIds, type FriendInfo } from "./friends.js";
+import { pushToUser } from "./push.js";
 import { isOnline, sendToUser } from "./hub.js";
 import { UUID, blockedBetween } from "./messages.js";
 import { adjustPoints, DEFINITE_FAILURE, isLinked, SenninError, withLock } from "./senninPoints.js";
@@ -16,6 +17,7 @@ import {
   isBusy,
   leaveRoom,
   pruneBattles,
+  readyUp,
   respondInvite,
   roomView,
   setBattleNotifier,
@@ -28,8 +30,27 @@ import { sb } from "./supabase.js";
 export const battle = Router();
 battle.use("/battle", requireAuth);
 
-// 部屋の知らせは、接続中の画面へ WebSocket で届ける
-setBattleNotifier((userId, payload) => sendToUser(userId, payload));
+// 部屋の知らせは、接続中の画面へ WebSocket で届ける。
+// 閉じている端末（アプリを開いていない）へは、招待と準備OKの知らせを Web Push で送る
+setBattleNotifier((userId, payload) => {
+  sendToUser(userId, payload);
+  if (isOnline(userId)) return;
+  if (payload.type === "battle-invite") {
+    void pushToUser(userId, {
+      title: "招待が来ています",
+      body: `${String(payload.hostName)}さんから「${String(payload.gameName)}」の対戦に招待されています。`,
+      url: "/",
+      tag: `battle-${String(payload.roomId)}`
+    });
+  } else if (payload.event === "prepare") {
+    void pushToUser(userId, {
+      title: "対戦の準備ができました",
+      body: "準備OKを押すと、対戦が始まります。",
+      url: "/",
+      tag: `battle-${String(payload.roomId)}`
+    });
+  }
+});
 // 古い待ち・放置された招待・終わった部屋の掃除（10秒ごと）
 setInterval(() => pruneBattles(), 10_000).unref();
 
@@ -126,12 +147,6 @@ async function requireSubscription(userId: string): Promise<void> {
 
 // ---- 拡張機能の確認 ----
 
-async function hasConsent(userId: string, workId: string): Promise<boolean> {
-  const { data, error } = await sb.from("sc_extension_consents").select("user_id").eq("user_id", userId).eq("work_id", workId).maybeSingle();
-  if (error) throw error;
-  return Boolean(data);
-}
-
 // 拡張機能の対戦を始められるか（買っている・許可している）。拡張機能の名前を返す
 async function requireExtension(userId: string, workId: string): Promise<{ name: string; item: ReturnType<typeof toStudioItem> }> {
   if (!UUID.test(workId)) throw new BattleError(404, "not_found", "拡張機能が見つかりません。");
@@ -142,9 +157,6 @@ async function requireExtension(userId: string, workId: string): Promise<{ name:
   const item = toStudioItem(work);
   if (work.creator_id !== userId && !(await canUseItem(userId, item))) {
     throw new BattleError(403, "not_owned", "この拡張機能はまだ購入していません。");
-  }
-  if (!(await hasConsent(userId, workId))) {
-    throw new BattleError(403, "not_consented", "アカウント情報の許可がありません。拡張機能を開き直すと、確認が出ます。");
   }
   return { name: work.name, item };
 }
@@ -210,7 +222,31 @@ battle.post("/battle/subscription/auto", async (req, res) => {
   res.json({ ok: true, ...(await subscriptionView(me)) });
 });
 
-// ランダムの対戦に入る（人数がそろったら、すぐ始まる。待つ間は WebSocket の「started」で知らせる）
+// この拡張機能で遊べる友だち（買っている・情報の許可・サブスクに入っている）。オンラインかどうか・対戦中かも返す。
+// 招待は、オフラインの人にも送れる（端末に通知が届く）
+battle.get("/battle/extensions/:id/candidates", async (req, res) => {
+  const me = currentUserId(res);
+  const id = String(req.params.id);
+  try {
+    const work = await requireExtension(me, id);
+    const friendList = await usersByIds([...(await friendIdsOf(me))]);
+    const now = new Date();
+    const result: (FriendInfo & { state: "online" | "offline" | "busy" })[] = [];
+    for (const friend of friendList) {
+      if (await blockedBetween(me, friend.id)) continue;
+      if (!(await canUseItem(friend.id, work.item))) continue;
+      const sub = await readSub(friend.id);
+      if (!sub || !isSubscribed(sub.expiresAt, now)) continue;
+      const state = isBusy(friend.id) ? "busy" : isOnline(friend.id) ? "online" : "offline";
+      result.push({ ...friend, state });
+    }
+    res.json({ ok: true, friends: result });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+// ランダムの対戦に入る（人数がそろったら「準備」に入り、全員が準備OKを押すと始まる）
 battle.post("/battle/extensions/:id/queue", async (req, res) => {
   const me = currentUserId(res);
   const id = String(req.params.id);
@@ -262,15 +298,11 @@ battle.post("/battle/extensions/:id/rooms", async (req, res) => {
         reasons.push(`${name}さんは、友だちではありません`);
         continue;
       }
-      if (!isOnline(uid)) {
-        reasons.push(`${name}さんは、オンラインではありません`);
-        continue;
-      }
       if (isBusy(uid)) {
         reasons.push(`${name}さんは、ほかの対戦の中です`);
         continue;
       }
-      if (!(await hasConsent(uid, id)) || !(await canUseItem(uid, work.item))) {
+      if (!(await canUseItem(uid, work.item))) {
         reasons.push(`${name}さんは、この拡張機能で遊べる状態ではありません`);
         continue;
       }
@@ -315,6 +347,8 @@ battle.post("/battle/rooms/:roomId/:action", async (req, res) => {
       respondInvite(me, roomId, true);
     } else if (action === "decline") {
       respondInvite(me, roomId, false);
+    } else if (action === "ready") {
+      readyUp(me, roomId);
     } else if (action === "start") {
       startLobby(me, roomId);
     } else if (action === "leave") {
