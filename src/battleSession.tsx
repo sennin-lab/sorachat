@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ApiError } from "./api";
-import { battleApi, READY_TIMEOUT_MS, type BattleCandidate, type BattleMember } from "./battle";
+import { battleApi, READY_TIMEOUT_MS, type BattleCandidate, type BattleMember, type BattlePerson, type BattleReadyMember } from "./battle";
 import { BattleLobbySheet, BattleMatchingSheet, BattlePickerPage, BattleReadySheet, BattleWaitingSheet } from "./BattleSheets";
 import { BattleSubscribeSheet } from "./BattleSubscription";
 import { onBattleEvent, sendBattle } from "./realtime";
@@ -20,9 +20,9 @@ type Waiter = { roomId: string | null; resolve: (r: BattleReply) => void };
 type Choice = { random: true } | { ids: string[] };
 type Ui =
   | { kind: "matching"; size: number }
-  | { kind: "picker"; mode: "find" | "invite"; candidates: BattleCandidate[]; error: string; pick: (choice: Choice | null) => void }
+  | { kind: "picker"; mode: "find" | "invite"; candidates: BattleCandidate[] | null; error: string; pick: (choice: Choice | null) => void }
   | { kind: "lobby"; roomId: string; members: BattleMember[]; busy: boolean; error: string }
-  | { kind: "ready"; roomId: string; members: { name: string; ready: boolean }[]; readyUntil: number; ready: boolean; busy: boolean; error: string }
+  | { kind: "ready"; roomId: string; members: BattleReadyMember[]; readyUntil: number; ready: boolean; starting: boolean; busy: boolean; error: string }
   | { kind: "waiting"; roomId: string; busy: boolean }
   | { kind: "subscribe"; reason: string; done: (ok: boolean) => void };
 
@@ -61,14 +61,12 @@ function removeInvited(list: BattleMember[], name: string): BattleMember[] {
   return index < 0 ? list : list.filter((_, i) => i !== index);
 }
 
-// 準備OKの一覧で、名前の人を準備OKにする（同じ名前が2人いても、最初の準備中の1人だけ）
-function setReady(list: { name: string; ready: boolean }[], name: string) {
+// 準備OKになった人を、席の番号で印を付ける（同じ名前の人がいても区別できる。席が分からなければ名前で）
+function markReady(list: BattleReadyMember[], seat: number | undefined, name: string): BattleReadyMember[] {
+  if (typeof seat === "number") return list.map((m) => (m.seat === seat ? { ...m, ready: true } : m));
   const index = list.findIndex((m) => m.name === name && !m.ready);
   return index < 0 ? list : list.map((m, i) => (i === index ? { ...m, ready: true } : m));
 }
-
-// 準備の一覧（名前と準備OKの状態）。サーバーの部屋の情報から作る
-const readyListOf = (members: BattleMember[]) => members.filter((m) => m.state === "joined").map((m) => ({ name: m.name, ready: Boolean(m.ready) }));
 
 export function useBattleSession({
   workId,
@@ -129,8 +127,11 @@ export function useBattleSession({
       const name = typeof ev.name === "string" ? ev.name : "";
       switch (ev.event) {
         case "prepare": {
-          // 準備OKを求める（マッチングが決まった・主催者が開始した）
-          const players = Array.isArray(ev.players) ? (ev.players as { name: string }[]) : [];
+          // 準備OKを求める（マッチングが決まった・主催者が開始した）。画面にはアイコン付きの名簿を出す
+          const players = Array.isArray(ev.players) ? (ev.players as { seat: number; name: string }[]) : [];
+          const people = Array.isArray(ev.people) ? (ev.people as BattlePerson[]) : null;
+          const list: BattlePerson[] =
+            people ?? players.map((p) => ({ seat: p.seat, userId: "", name: p.name, hasAvatar: false, avatarVersion: null }));
           const readyUntil = typeof ev.readyUntil === "number" ? ev.readyUntil : Date.now() + READY_TIMEOUT_MS;
           if (roomId) {
             roomRef.current = { roomId, status: "preparing" };
@@ -139,9 +140,10 @@ export function useBattleSession({
           setUi({
             kind: "ready",
             roomId: roomId ?? "",
-            members: players.map((p) => ({ name: p.name, ready: false })),
+            members: list.map((p) => ({ ...p, ready: false })),
             readyUntil,
             ready: false,
+            starting: false,
             busy: false,
             error: ""
           });
@@ -149,8 +151,14 @@ export function useBattleSession({
           return;
         }
         case "ready": {
-          patchUi((u) => (u.kind === "ready" ? { ...u, members: setReady(u.members, name) } : u));
+          const readySeat = typeof ev.readySeat === "number" ? ev.readySeat : undefined;
+          patchUi((u) => (u.kind === "ready" ? { ...u, members: markReady(u.members, readySeat, name) } : u));
           postToFrame({ type: "ready", name });
+          return;
+        }
+        case "starting": {
+          // 全員が準備OK：「開始中」を出す（2秒後に、知らせ「started」が届く）
+          patchUi((u) => (u.kind === "ready" ? { ...u, starting: true } : u));
           return;
         }
         case "started": {
@@ -279,21 +287,25 @@ export function useBattleSession({
   };
 
   // 相手を選ぶ画面を出し、選ばれるまで待つ（ランダム・友だちの招待・やめる）
-  const pickOpponent = async (mode: "find" | "invite", error: string): Promise<Choice | null> => {
-    const candidates = await battleApi.candidates(workId);
-    return new Promise<Choice | null>((resolve) => {
-      setUi({
-        kind: "picker",
-        mode,
-        candidates,
-        error,
-        pick: (choice) => {
-          setUi(null);
-          resolve(choice);
-        }
-      });
+  // 押したらすぐ選ぶ画面を出し（読み込み中のアニメーション）、友だちの一覧が届いたら入れる
+  const pickOpponent = (mode: "find" | "invite", error: string): Promise<Choice | null> =>
+    new Promise<Choice | null>((resolve, reject) => {
+      const pick = (choice: Choice | null) => {
+        setUi(null);
+        resolve(choice);
+      };
+      setUi({ kind: "picker", mode, candidates: null, error, pick });
+      battleApi
+        .candidates(workId)
+        .then((candidates) => {
+          patchUi((u) => (u.kind === "picker" && u.pick === pick ? { ...u, candidates } : u));
+        })
+        .catch((e) => {
+          const current = uiRef.current;
+          if (current?.kind === "picker" && current.pick === pick) setUi(null);
+          reject(e);
+        });
     });
-  };
 
   // ランダムに相手を探す（人数がそろったら、準備OKの画面へ。全員が準備OKを押すと始まる）
   const randomMatch = (size: number): Promise<BattleReply> => {
@@ -312,7 +324,7 @@ export function useBattleSession({
           if (result.status === "matched" && !roomRef.current) {
             waiter.roomId = result.roomId;
             roomRef.current = { roomId: result.roomId, status: "preparing" };
-            setUi({ kind: "ready", roomId: result.roomId, members: [], readyUntil: Date.now() + READY_TIMEOUT_MS, ready: false, busy: false, error: "" });
+            setUi({ kind: "ready", roomId: result.roomId, members: [], readyUntil: Date.now() + READY_TIMEOUT_MS, ready: false, starting: false, busy: false, error: "" });
           }
         })
         .catch((error) => {
@@ -384,18 +396,8 @@ export function useBattleSession({
     patchUi((u) => ({ ...u, busy: true, error: "" }));
     try {
       const { room } = await battleApi.roomAction(current.roomId, "start");
-      if (room?.status === "preparing" && uiRef.current?.kind === "lobby") {
-        roomRef.current = { roomId: current.roomId, status: "preparing" };
-        setUi({
-          kind: "ready",
-          roomId: current.roomId,
-          members: readyListOf(room.members),
-          readyUntil: room.readyUntil ?? Date.now() + READY_TIMEOUT_MS,
-          ready: false,
-          busy: false,
-          error: ""
-        });
-      }
+      // 準備OKの画面は、知らせ「prepare」（アイコン付きの名簿）で出す。ここでは押せる状態に戻すだけ
+      if (room?.status === "preparing") patchUi((u) => (u.kind === "lobby" ? { ...u, busy: false } : u));
     } catch (error) {
       patchUi((u) => ({ ...u, busy: false, error: error instanceof Error ? error.message : "開始できませんでした。" }));
     }
@@ -472,6 +474,7 @@ export function useBattleSession({
           members={ui.members}
           readyUntil={ui.readyUntil}
           ready={ui.ready}
+          starting={ui.starting}
           busy={ui.busy}
           error={ui.error}
           onReady={() => void pressReady()}

@@ -25,6 +25,8 @@ import {
 import { buildExtensionDocument, EXT_BRIDGE } from "../server/studioRules.ts";
 
 type Sent = { userId: string; payload: Record<string, unknown> };
+// 全員が準備OKになってから「開始中」の2秒が過ぎるまで待つ
+const waitStart = () => new Promise((resolve) => setTimeout(resolve, BATTLE.startDelayMs + 60));
 let sent: Sent[] = [];
 setBattleNotifier((userId, payload) => sent.push({ userId, payload }));
 const take = (userId: string) => sent.filter((s) => s.userId === userId).map((s) => s.payload);
@@ -93,11 +95,17 @@ reset();
   assert.equal(take("u-a").some((p) => p.event === "started"), false, "準備OKがそろうまで始まらない");
   assert.equal(roomView("u-a", roomId)!.status, "preparing");
   assert.deepEqual(prepareA!.players, [{ seat: 0, name: "あいこ" }, { seat: 1, name: "ぼたん" }]);
-  // 相手の ID は、知らせに入らない
-  assert.equal(JSON.stringify(prepareA).includes("u-b"), false);
+  // 拡張機能へ渡す名簿（players）には、相手の ID を入れない。画面用の people には、アイコンのためにIDを入れる
+  assert.equal(JSON.stringify(prepareA!.players).includes("u-b"), false);
+  assert.ok(Array.isArray(prepareA!.people) && (prepareA!.people as { userId: string }[]).some((p) => p.userId === "u-b"), "画面用の名簿にアイコンの持ち主が入る");
   readyUp("u-a", roomId);
   assert.equal(take("u-b").some((p) => p.event === "started"), false, "1人だけでは始まらない");
   readyUp("u-b", roomId);
+  // 全員そろったら「開始中」を知らせ、2秒後に始まる
+  assert.equal(roomView("u-a", roomId)!.status, "starting");
+  assert.ok(take("u-a").some((p) => p.event === "starting"), "開始中を知らせる");
+  assert.equal(take("u-a").some((p) => p.event === "started"), false, "開始中の間はまだ始まらない");
+  await waitStart();
   const startedA = take("u-a").find((p) => p.event === "started");
   const startedB = take("u-b").find((p) => p.event === "started");
   assert.ok(startedA && startedB, "全員が準備OKで、2人とも始まりを知らされる");
@@ -151,6 +159,8 @@ reset();
   readyUp("f1", room.id);
   assert.equal(take("h").some((p) => p.event === "started"), false, "主催者が準備OKを押すまで始まらない");
   readyUp("h", room.id);
+  assert.equal(roomView("h", room.id)!.status, "starting", "全員そろったら開始中");
+  await waitStart();
   assert.equal(roomView("h", room.id)!.status, "playing");
   const startedF1 = take("f1").find((p) => p.event === "started");
   assert.ok(startedF1, "承諾した人に開始が届く");
@@ -214,6 +224,7 @@ reset();
   const roomId = (matched as { roomId: string }).roomId;
   readyUp("p1", roomId);
   readyUp("p2", roomId);
+  await waitStart();
   userOffline("p1");
   userOnline("p1");
   relay("p2", roomId, { still: "here" });
@@ -248,6 +259,21 @@ reset();
   assert.equal(roomView("r3", roomId)!.status, "closed");
   assert.ok(take("r3").some((p) => p.event === "closed" && p.reason === "opponent_left"));
   assert.equal(isBusy("r3"), false);
+}
+
+// 開始中（2秒）に抜けたら、始まらずに取り消す
+reset();
+{
+  enqueueRandom({ userId: "s1", name: "s1", gameId: "g-s", gameName: "s", size: 2 });
+  const matched = enqueueRandom({ userId: "s2", name: "s2", gameId: "g-s", gameName: "s", size: 2 });
+  const roomId = (matched as { roomId: string }).roomId;
+  readyUp("s1", roomId);
+  readyUp("s2", roomId);
+  assert.equal(roomView("s1", roomId)!.status, "starting");
+  leaveRoom("s2", roomId);
+  await waitStart();
+  assert.equal(roomView("s1", roomId)!.status, "closed", "開始中に抜けたら始まらない");
+  assert.equal(take("s1").some((p) => p.event === "started"), false);
 }
 
 // 閉じていた間の招待は、接続し直したときに出せる（承諾すると、もう招待ではない）

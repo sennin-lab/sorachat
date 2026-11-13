@@ -20,7 +20,7 @@ export type BattleRoom = {
   gameId: string;
   gameName: string;
   mode: "random" | "friends";
-  status: "lobby" | "preparing" | "playing" | "closed";
+  status: "lobby" | "preparing" | "starting" | "playing" | "closed";
   size: number;
   isHost: boolean;
   seat: number | null;
@@ -28,6 +28,10 @@ export type BattleRoom = {
   readyUntil: number | null;
   members: BattleMember[];
 };
+
+// 準備の画面に出す参加者（アイコン・名前・席）。userId はアイコンの取得にだけ使う
+export type BattlePerson = { seat: number; userId: string; name: string; hasAvatar: boolean; avatarVersion: string | null };
+export type BattleReadyMember = BattlePerson & { ready: boolean };
 
 export type QueueResult = { status: "waiting" } | { status: "matched"; roomId: string };
 

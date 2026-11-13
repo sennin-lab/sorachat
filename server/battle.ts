@@ -4,6 +4,7 @@
 import { Router } from "express";
 import { currentUserId, requireAuth } from "./auth.js";
 import { friendIdsOf, usersByIds, type FriendInfo } from "./friends.js";
+import { avatarVersionOf } from "./avatarVersion.js";
 import { pushToUser } from "./push.js";
 import { isOnline, sendToUser } from "./hub.js";
 import { UUID, blockedBetween } from "./messages.js";
@@ -161,11 +162,20 @@ async function requireExtension(userId: string, workId: string): Promise<{ name:
   return { name: work.name, item };
 }
 
+// 名前と、アイコンの有無（準備OKの画面に、アイコンを出すため）
 async function usersById(ids: string[]) {
-  if (!ids.length) return new Map<string, { name: string }>();
-  const { data, error } = await sb.from("sc_users").select("id, display_name").in("id", ids);
+  if (!ids.length) return new Map<string, { name: string; profile: { hasAvatar: boolean; avatarVersion: string | null } }>();
+  const { data, error } = await sb.from("sc_users").select("id, display_name, avatar_path").in("id", ids);
   if (error) throw error;
-  return new Map((data ?? []).map((row) => [String(row.id), { name: String(row.display_name) }]));
+  return new Map(
+    (data ?? []).map((row) => [
+      String(row.id),
+      {
+        name: String(row.display_name),
+        profile: { hasAvatar: Boolean(row.avatar_path), avatarVersion: avatarVersionOf(row.avatar_path as string | null) }
+      }
+    ])
+  );
 }
 
 function fail(res: import("express").Response, error: unknown) {
@@ -258,8 +268,8 @@ battle.post("/battle/extensions/:id/queue", async (req, res) => {
   try {
     const work = await requireExtension(me, id);
     await requireSubscription(me);
-    const name = (await usersById([me])).get(me)?.name ?? "";
-    const result = enqueueRandom({ userId: me, name, gameId: id, gameName: work.name, size: size.size });
+    const self = (await usersById([me])).get(me);
+    const result = enqueueRandom({ userId: me, name: self?.name ?? "", profile: self?.profile, gameId: id, gameName: work.name, size: size.size });
     res.json({ ok: true, ...result });
   } catch (error) {
     fail(res, error);
@@ -286,7 +296,7 @@ battle.post("/battle/extensions/:id/rooms", async (req, res) => {
     const friends = await friendIdsOf(me);
     const names = await usersById([me, ...checked.inviteIds]);
     const reasons: string[] = [];
-    const invitees: { userId: string; name: string }[] = [];
+    const invitees: { userId: string; name: string; profile?: { hasAvatar: boolean; avatarVersion: string | null } }[] = [];
     for (const uid of checked.inviteIds) {
       const name = names.get(uid)?.name;
       if (!name) {
@@ -311,7 +321,7 @@ battle.post("/battle/extensions/:id/rooms", async (req, res) => {
         reasons.push(`${name}さんは、サブスクに入っていません`);
         continue;
       }
-      invitees.push({ userId: uid, name });
+      invitees.push({ userId: uid, name, profile: names.get(uid)?.profile });
     }
     if (reasons.length) {
       res.status(409).json({ ok: false, error: `招待できません：${reasons.join("、")}。`, code: "invitee_unavailable" });
@@ -322,7 +332,7 @@ battle.post("/battle/extensions/:id/rooms", async (req, res) => {
       return;
     }
     const hostName = names.get(me)?.name ?? "";
-    const room = createLobby({ hostId: me, hostName, gameId: id, gameName: work.name, invitees });
+    const room = createLobby({ hostId: me, hostName, hostProfile: names.get(me)?.profile, gameId: id, gameName: work.name, invitees });
     res.json({ ok: true, room: roomView(me, room.id) });
   } catch (error) {
     fail(res, error);

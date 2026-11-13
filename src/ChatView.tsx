@@ -15,6 +15,7 @@ import { SenninaiConfirm } from "./SenninaiConfirm";
 import { RoomSettingsSheet } from "./RoomSettingsSheet";
 import { SENNIN_BOT_ID } from "./robot";
 import { cachedMessages, loadMessagesDb, loadPeopleDb, saveMessages, savePeopleDb, type PersonInfo } from "./cache";
+import { hiddenMessageIds, rememberHiddenMessage } from "./hiddenMessages";
 import { rememberAvatars, syncAvatars } from "./avatarCache";
 import { clipLongWords } from "./clip";
 import { ForwardSheet } from "./ForwardSheet";
@@ -239,7 +240,9 @@ export function ChatView({
   const [replyTo, setReplyTo] = useState<Message | null>(null);
 
   const commit = (next: Message[]) => {
-    const sorted = [...next].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // 自分の画面から削除したメッセージは、どの経路で届いても出さない
+    const hidden = hiddenMessageIds();
+    const sorted = next.filter((m) => !hidden.has(m.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     messagesRef.current = sorted;
     setMessages(sorted);
     saveMessages(conversationId, sorted.filter((m) => !m.status));
@@ -750,6 +753,20 @@ export function ChatView({
     setMenuFor(null);
     const ok = await copyText(m.body ?? "");
     flash(ok ? "コピーしました" : "コピーできませんでした");
+  };
+
+  // 自分の画面からだけ消す（相手の画面には残る）。他人の投稿も自分の投稿も対象
+  const hideForMe = async (m: Message) => {
+    setMenuFor(null);
+    if (!window.confirm("この投稿を自分の画面から削除しますか？（相手の画面には残ります）")) return;
+    try {
+      await api(`/api/dm/messages/${m.id}/hide`, post());
+      rememberHiddenMessage(m.id);
+      commit(messagesRef.current.filter((x) => x.id !== m.id));
+      flash("自分の画面から削除しました");
+    } catch (err) {
+      setError(errorText(err));
+    }
   };
 
   const unsend = async (m: Message) => {
@@ -1271,6 +1288,7 @@ export function ChatView({
             setMenuFor(null);
             setForwarding(menu);
           }}
+          onHide={() => void hideForMe(menu)}
           onUnsend={() => void unsend(menu)}
         />
       )}

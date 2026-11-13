@@ -529,8 +529,21 @@ dm.get("/dm/:id/messages", async (req, res) => {
   const { data, error } = await query.order("created_at", { ascending: false }).limit(50);
   if (error) throw error;
   // 自分がブロックしている人の発言は表示しない
+  // 自分の画面から消したメッセージ（sc_message_hides）は出さない
+  const fetched = (data ?? []) as MessageRow[];
+  const hiddenByMe = new Set<string>();
+  if (fetched.length) {
+    const { data: hides, error: hideError } = await sb
+      .from("sc_message_hides")
+      .select("message_id")
+      .eq("user_id", me)
+      .in("message_id", fetched.map((r) => r.id));
+    if (hideError) throw hideError;
+    for (const row of hides ?? []) hiddenByMe.add(String(row.message_id));
+  }
+  // 自分がブロックしている人の発言は表示しない
   const hidden = await blockedByMe(me);
-  const rows = ((data ?? []) as MessageRow[]).reverse().filter((r) => !hidden.has(r.sender_id));
+  const rows = fetched.reverse().filter((r) => !hidden.has(r.sender_id) && !hiddenByMe.has(r.id));
   res.json(await withReactions(rows, me));
 });
 
@@ -698,6 +711,23 @@ dm.post("/dm/messages/:messageId", async (req, res) => {
   });
   await broadcastList(msg.conversation_id);
   res.json({ ok: true, body, editedAt });
+});
+
+// 自分の画面からだけ消す（相手の画面には残る）。他人の投稿も自分の投稿も、自分が見られるメッセージなら消せる
+dm.post("/dm/messages/:messageId/hide", async (req, res) => {
+  const messageId = String(req.params.messageId);
+  const me = currentUserId(res);
+  const msg = UUID.test(messageId) ? await messageRow(messageId) : null;
+  if (!msg || !(await membership(msg.conversation_id, me))) {
+    res.status(404).json({ error: "メッセージが見つかりません。" });
+    return;
+  }
+  const { error } = await sb.from("sc_message_hides").upsert(
+    { user_id: me, message_id: messageId, created_at: new Date().toISOString() },
+    { onConflict: "user_id,message_id", ignoreDuplicates: true }
+  );
+  if (error) throw error;
+  res.json({ ok: true });
 });
 
 dm.delete("/dm/messages/:messageId", async (req, res) => {

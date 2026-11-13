@@ -12,6 +12,7 @@ export function MessageMenu({
   onCopy,
   onEdit,
   onForward,
+  onHide,
   onUnsend
 }: {
   message: Message;
@@ -22,6 +23,7 @@ export function MessageMenu({
   onCopy: () => void;
   onEdit: () => void;
   onForward: () => void;
+  onHide: () => void;
   onUnsend: () => void;
 }) {
   const isText = message.kind === "text" && !message.deleted;
@@ -55,6 +57,11 @@ export function MessageMenu({
         {!message.deleted && message.kind !== "system" && message.kind !== "poll" && message.kind !== "game" && message.kind !== "call" && (
           <button onClick={onForward}>
             <Icon name="forward" size={20} /> 送信
+          </button>
+        )}
+        {!message.deleted && (
+          <button onClick={onHide}>
+            <Icon name="trash" size={20} /> 自分の画面から削除
           </button>
         )}
         {mine && !message.deleted && (

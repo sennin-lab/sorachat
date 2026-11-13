@@ -18,8 +18,11 @@ export class BattleError extends Error {
   }
 }
 
-export type RoomStatus = "lobby" | "preparing" | "playing" | "closed";
-export type Member = { userId: string; name: string; state: "invited" | "joined"; ready: boolean };
+export type RoomStatus = "lobby" | "preparing" | "starting" | "playing" | "closed";
+// 参加者の表示（アイコン）。画面に出すためだけに使い、拡張機能の枠へは渡さない
+export type Profile = { hasAvatar: boolean; avatarVersion: string | null };
+const NO_AVATAR: Profile = { hasAvatar: false, avatarVersion: null };
+export type Member = { userId: string; name: string; state: "invited" | "joined"; ready: boolean; profile: Profile };
 export type Room = {
   id: string;
   gameId: string;
@@ -32,9 +35,11 @@ export type Room = {
   closedAt: number | null;
   // 準備OKの締め切り（準備中だけ入る）
   readyUntil: number | null;
+  // 「開始中」の2秒の後に始めるための時計（開始中だけ入る）
+  startTimer: ReturnType<typeof setTimeout> | null;
   members: Member[];
 };
-type Queued = { userId: string; name: string; gameId: string; gameName: string; size: number; at: number };
+type Queued = { userId: string; name: string; profile: Profile; gameId: string; gameName: string; size: number; at: number };
 
 export type Notify = (userId: string, payload: Record<string, unknown>) => void;
 let notify: Notify = () => undefined;
@@ -76,6 +81,14 @@ function beginPreparing(room: Room) {
     roomOf.set(m.userId, room.id);
   }
   const players = playersOf(room);
+  // 準備の画面用：アイコンと名前（ユーザーIDを含む。拡張機能の枠へは渡さない）
+  const people = room.members.map((m) => ({
+    seat: seatOf(room, m.userId),
+    userId: m.userId,
+    name: m.name,
+    hasAvatar: m.profile.hasAvatar,
+    avatarVersion: m.profile.avatarVersion
+  }));
   for (const m of room.members) {
     notify(m.userId, {
       type: "battle",
@@ -86,13 +99,29 @@ function beginPreparing(room: Room) {
       size: room.size,
       seat: seatOf(room, m.userId),
       players,
+      people,
       readyUntil: room.readyUntil
     });
   }
 }
 
+// 全員が準備OK：「開始中」を知らせ、2秒後に始める（この間に誰かが抜けたら取り消す）
+function beginStarting(room: Room) {
+  room.status = "starting";
+  room.readyUntil = null;
+  announce(room, joinedOf(room), "starting", { startDelayMs: BATTLE.startDelayMs });
+  const timer = setTimeout(() => {
+    room.startTimer = null;
+    if (room.status === "starting") startRoom(room);
+  }, BATTLE.startDelayMs);
+  timer.unref?.();
+  room.startTimer = timer;
+}
+
 // 全員が準備OKを押したら、対戦を始める
 function startRoom(room: Room) {
+  if (room.startTimer) clearTimeout(room.startTimer);
+  room.startTimer = null;
   room.status = "playing";
   room.readyUntil = null;
   const players = playersOf(room);
@@ -112,9 +141,9 @@ function startRoom(room: Room) {
 
 // ---- ランダムの対戦 ----
 
-export function enqueueRandom(args: { userId: string; name: string; gameId: string; gameName: string; size: number }): { status: "waiting" } | { status: "matched"; roomId: string } {
+export function enqueueRandom(args: { userId: string; name: string; profile?: Profile; gameId: string; gameName: string; size: number }): { status: "waiting" } | { status: "matched"; roomId: string } {
   if (busy(args.userId)) throw new BattleError(409, "busy", "すでに対戦の中か、相手を探しています。");
-  queue.push({ ...args, at: Date.now() });
+  queue.push({ ...args, profile: args.profile ?? NO_AVATAR, at: Date.now() });
   const same = queue.filter((q) => q.gameId === args.gameId && q.size === args.size);
   if (same.length < args.size) return { status: "waiting" };
 
@@ -131,7 +160,8 @@ export function enqueueRandom(args: { userId: string; name: string; gameId: stri
     createdAt: Date.now(),
     closedAt: null,
     readyUntil: null,
-    members: group.map((q) => ({ userId: q.userId, name: q.name, state: "joined" as const, ready: false }))
+    startTimer: null,
+    members: group.map((q) => ({ userId: q.userId, name: q.name, state: "joined" as const, ready: false, profile: q.profile }))
   };
   rooms.set(room.id, room);
   beginPreparing(room);
@@ -167,9 +197,10 @@ function inviteOf(room: Room) {
 export function createLobby(args: {
   hostId: string;
   hostName: string;
+  hostProfile?: Profile;
   gameId: string;
   gameName: string;
-  invitees: { userId: string; name: string }[];
+  invitees: { userId: string; name: string; profile?: Profile }[];
 }): Room {
   if (busy(args.hostId)) throw new BattleError(409, "busy", "すでに対戦の中か、相手を探しています。");
   const size = args.invitees.length + 1;
@@ -184,9 +215,10 @@ export function createLobby(args: {
     createdAt: Date.now(),
     closedAt: null,
     readyUntil: null,
+    startTimer: null,
     members: [
-      { userId: args.hostId, name: args.hostName, state: "joined", ready: false },
-      ...args.invitees.map((i) => ({ userId: i.userId, name: i.name, state: "invited" as const, ready: false }))
+      { userId: args.hostId, name: args.hostName, state: "joined", ready: false, profile: args.hostProfile ?? NO_AVATAR },
+      ...args.invitees.map((i) => ({ userId: i.userId, name: i.name, state: "invited" as const, ready: false, profile: i.profile ?? NO_AVATAR }))
     ]
   };
   rooms.set(room.id, room);
@@ -249,8 +281,9 @@ export function readyUp(userId: string, roomId: string): Room {
   if (!member) throw new BattleError(403, "not_in_room", "この対戦には参加していません。");
   if (member.ready) return room;
   member.ready = true;
-  announce(room, joinedOf(room), "ready", { name: member.name });
-  if (joinedOf(room).every((m) => m.ready)) startRoom(room);
+  // readySeat：誰が準備OKになったか（画面の一覧を更新するため。同じ名前の人がいても区別できる）
+  announce(room, joinedOf(room), "ready", { name: member.name, readySeat: seatOf(room, userId) });
+  if (joinedOf(room).every((m) => m.ready)) beginStarting(room);
   return room;
 }
 
@@ -274,7 +307,7 @@ export function leaveRoom(userId: string, roomId: string) {
     announce(room, joinedOf(room), "left", { name: member.name, leftSeat: seat });
     return;
   }
-  if (room.status === "preparing") {
+  if (room.status === "preparing" || room.status === "starting") {
     closeRoom(room, room.hostId === userId ? "host_left" : "opponent_left");
     return;
   }
@@ -290,6 +323,8 @@ export function leaveRoom(userId: string, roomId: string) {
 }
 
 function closeRoom(room: Room, reason: string, at = Date.now()) {
+  if (room.startTimer) clearTimeout(room.startTimer);
+  room.startTimer = null;
   room.status = "closed";
   room.closedAt = at;
   room.readyUntil = null;
