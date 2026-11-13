@@ -349,12 +349,14 @@ export function useBattleSession({
   // 相手を選んで始める（マッチングでも友だちとの対戦でも、ここを通る）
   const matchFlow = async (mode: "find" | "invite", size: number): Promise<BattleReply> => {
     try {
-      // 友だちを招待するには、サブスクに入っている必要がある（切れていれば、先に案内する）
+      // 対戦は、サブスクに入っている必要がある（切れていれば、先に案内する）
       const sub = await battleApi.subscription();
       if (!sub.subscribed && !sub.autoRenew) {
         const ok = await askSubscribe(`対戦は、サブスクに入っている人が使えます（1週間 ${sub.price}pt）。`);
         if (!ok) return cancelled();
       }
+      // ランダムは、友だち選択を挟まず、そのまま待機モーダル（相手を探しています）を出す
+      if (mode === "find") return await randomMatch(size);
       let notice = "";
       for (;;) {
         const choice = await pickOpponent(mode, notice);

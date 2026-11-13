@@ -3317,3 +3317,38 @@ textarea.dev-input { resize: vertical; }
 }
 .friend-select-confirm:disabled { opacity: 0.4; cursor: default; }
 .friend-select-sheet .user-list-ul { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/* 対戦・友だち選択：中央のウィンドウ表示（下からのシートにしない） */
+.friend-select-sheet { max-width: 440px; text-align: left; }
+.battle-picker-sheet { max-width: 440px; text-align: left; }
+
+/* 作者の注意書き：非表示にできる */
+.ext-note { position: relative; padding-right: 36px; }
+.ext-note-hide {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ext-note-min {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px calc(6px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.ext-note-show { border: 0; background: transparent; color: var(--muted); font-size: 12px; text-decoration: underline; cursor: pointer; padding: 4px 0; }

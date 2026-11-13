@@ -25,6 +25,16 @@ type Access = {
 };
 
 // 許可していないときの文言。ポイントを配る拡張機能なら許可を求める、配らない拡張機能ならユーザー情報は使わない
+// 作者の注意書きを隠しているか（この端末に記録する）
+const NOTE_KEY = "sorachat-ext-note-hidden";
+const readNoteHidden = () => {
+  try {
+    return window.localStorage.getItem(NOTE_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
 const noConsentText = (needsConsent: boolean) =>
   needsConsent ? "ユーザー情報の共有を許可していません。拡張機能を開き直すと、確認が出ます。" : "この拡張機能では、ユーザー情報は使えません。";
 
@@ -121,6 +131,24 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
       if (next && next.needsConsent && !next.consented) setAsking(true);
     })();
   }, [refresh]);
+
+  const [noteHidden, setNoteHidden] = useState(readNoteHidden);
+  const hideNote = () => {
+    setNoteHidden(true);
+    try {
+      window.localStorage.setItem(NOTE_KEY, "1");
+    } catch {
+      // 保存できなくても、この画面の中では隠れたままになる
+    }
+  };
+  const showNote = () => {
+    setNoteHidden(false);
+    try {
+      window.localStorage.removeItem(NOTE_KEY);
+    } catch {
+      // 保存できなければ、次に開いたときにもう一度出る
+    }
+  };
 
   const finishAsking = () => setAsking(false);
 
@@ -294,17 +322,33 @@ export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId:
         ) : (
           <div className="ext-wait">{asking ? "アカウント情報の許可を確認してください" : "読み込み中…"}</div>
         )}
-        <p className="ext-note">
-          この拡張機能は作者が作ったものです。ソラチャットのアカウント情報は、あなたが許可した範囲でだけ渡されます。
-          {consented && (
-            <>
-              {" "}
+        {noteHidden ? (
+          <div className="ext-note-min">
+            <button type="button" className="ext-note-show" onClick={showNote}>
+              注意書きを表示
+            </button>
+            {consented && (
               <button type="button" className="ext-revoke" onClick={revoke}>
                 許可を取り消して閉じる
               </button>
-            </>
-          )}
-        </p>
+            )}
+          </div>
+        ) : (
+          <p className="ext-note">
+            <button type="button" className="ext-note-hide" onClick={hideNote} aria-label="注意書きを非表示にする">
+              ×
+            </button>
+            この拡張機能は作者が作ったものです。ソラチャットのアカウント情報は、あなたが許可した範囲でだけ渡されます。
+            {consented && (
+              <>
+                {" "}
+                <button type="button" className="ext-revoke" onClick={revoke}>
+                  許可を取り消して閉じる
+                </button>
+              </>
+            )}
+          </p>
+        )}
       </div>
       {pay && (
         <PaySheet

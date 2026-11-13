@@ -63,9 +63,9 @@ export function BattlePickerPage({
   const title = mode === "find" ? "対戦相手を選ぶ" : "対戦に招待する友だち";
 
   return (
-    <div className="sheet-backdrop battle-backdrop battle-picker-backdrop" onClick={onClose}>
+    <div className="sheet-backdrop confirm-backdrop battle-backdrop battle-picker-backdrop" onClick={onClose}>
       <div
-        className="sheet battle-picker-sheet"
+        className="sheet confirm-sheet battle-picker-sheet"
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -77,18 +77,6 @@ export function BattlePickerPage({
             <Icon name="close" size={18} />
           </button>
         </header>
-
-        {mode === "find" && (
-          <button type="button" className="battle-random" onClick={() => onPick({ random: true })}>
-            <span className="battle-random-icon" aria-hidden="true">
-              ?
-            </span>
-            <span className="row-text">
-              <strong>ランダムに探す</strong>
-              <small>同じ拡張機能で遊ぶ人と、自動で組みます</small>
-            </span>
-          </button>
-        )}
 
         <div className="battle-picker-body">
           {candidates === null ? (

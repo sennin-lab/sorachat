@@ -45,8 +45,8 @@ export function FriendSelectPage({
   const shown = friends.filter((f) => !q || f.displayName.toLowerCase().includes(q) || f.username.includes(q));
 
   return (
-    <div className="sheet-backdrop friend-select-backdrop" onClick={onClose}>
-    <div className="sheet friend-select-sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+    <div className="sheet-backdrop confirm-backdrop friend-select-backdrop" onClick={onClose}>
+    <div className="sheet confirm-sheet friend-select-sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
       <header className="friend-select-head">
         <button className="friend-select-close" onClick={onClose} aria-label="閉じる">
           <Icon name="close" size={18} />
