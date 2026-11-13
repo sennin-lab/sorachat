@@ -228,12 +228,19 @@ export function BattleReadySheet({
             <p className="battle-countdown">残り {left} 秒</p>
           </>
         )}
-        <ul className="battle-people">
+        <ul className="battle-people" aria-label="参加者の準備状態">
           {members.map((m) => (
             <li key={`${m.seat}-${m.name}`} className={`battle-person ${m.ready ? "is-ready" : "is-waiting"}`}>
-              <Avatar userId={m.userId} hasAvatar={m.hasAvatar} name={m.name} size={40} />
+              <div className="battle-person-avatar">
+                <Avatar userId={m.userId} hasAvatar={m.hasAvatar} name={m.name} size={58} />
+                {m.ready && (
+                  <span className="battle-person-check" aria-hidden="true">
+                    <Icon name="check" size={12} />
+                  </span>
+                )}
+              </div>
               <span className="battle-person-name">{m.name}</span>
-              <span className="battle-member-state">{m.ready ? "準備OK" : "準備中"}</span>
+              <span className="battle-person-pill">{m.ready ? "準備OK" : "準備中"}</span>
             </li>
           ))}
         </ul>

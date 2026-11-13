@@ -45,14 +45,15 @@ export function FriendSelectPage({
   const shown = friends.filter((f) => !q || f.displayName.toLowerCase().includes(q) || f.username.includes(q));
 
   return (
-    <div className="page" role="dialog" aria-label={title}>
-      <header className="page-bar">
-        <button onClick={onClose} aria-label="閉じる">
-          <Icon name="back" size={26} />
+    <div className="sheet-backdrop friend-select-backdrop" onClick={onClose}>
+    <div className="sheet friend-select-sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+      <header className="friend-select-head">
+        <button className="friend-select-close" onClick={onClose} aria-label="閉じる">
+          <Icon name="close" size={18} />
         </button>
         <strong>{title}</strong>
         <button
-          className="bar-action"
+          className="friend-select-confirm"
           disabled={busy || picked.length === 0}
           onClick={() => onConfirm(picked, name.trim())}
         >
@@ -112,6 +113,7 @@ export function FriendSelectPage({
       </ul>
 
       {error && <p className="notice center error shake">{error}</p>}
+    </div>
     </div>
   );
 }
