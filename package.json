@@ -15,6 +15,8 @@
     "test:pay": "tsx test/pay-helpers.test.ts && tsx test/pay-transfer.test.ts",
     "test:studio": "tsx test/studio-extension.test.ts && tsx test/extension-points.test.ts",
     "test:extension-points": "tsx test/extension-points.test.ts",
+    "test:battle": "tsx test/battle.test.ts",
+    "test:storage": "tsx test/extension-storage.test.ts",
     "test:live": "tsx test/game-live.test.ts && tsx test/games-realtime.test.ts && tsx test/referral-ip-dm.test.ts"
   },
   "dependencies": {

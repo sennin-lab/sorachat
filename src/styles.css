@@ -3084,3 +3084,44 @@ textarea.dev-input { resize: vertical; }
   .game-reflex-pad.wait { background: color-mix(in srgb, var(--muted) 30%, #1c1c1e); }
   .game-podium li.rank-1 { background: color-mix(in srgb, #f5c542 22%, transparent); }
 }
+
+/* ---- オンライン対戦（拡張機能の対戦・招待・サブスク） ---- */
+.battle-backdrop { z-index: 60; }
+.battle-sheet { max-width: 360px; }
+.battle-spinner {
+  width: 34px; height: 34px; margin: 4px auto 10px; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--accent);
+  animation: battle-spin 0.9s linear infinite;
+}
+@keyframes battle-spin { to { transform: rotate(360deg); } }
+.battle-members { list-style: none; margin: 12px 0 0; padding: 0; text-align: left; border-top: 1px solid var(--line); }
+.battle-member { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.battle-member-state { color: var(--muted); font-size: 12px; }
+.battle-member.is-joined .battle-member-state { color: var(--accent); font-weight: 700; }
+
+.battle-sub { padding: 12px 14px 24px; }
+.battle-sub-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+  padding: 18px 16px; color: var(--text);
+}
+.battle-sub-kicker { margin: 0; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+.battle-sub-title { margin: 2px 0 6px; font-size: 20px; }
+.battle-sub-text { margin: 0 0 8px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.battle-sub-rows { margin: 12px 0 0; border-top: 1px solid var(--line); }
+.battle-sub-rows > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.battle-sub-rows dt { color: var(--muted); }
+.battle-sub-rows dd { margin: 0; font-weight: 600; }
+.battle-sub-rows dd.is-on { color: var(--accent); }
+.battle-sub-buy { width: 100%; margin-top: 14px; }
+.battle-sub-buy:disabled { opacity: 0.5; }
+.battle-sub-auto {
+  display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--line); font-size: 14px;
+}
+.battle-sub-auto input { margin-top: 3px; }
+.battle-sub-auto small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.battle-sub-done { color: var(--accent); }
+.battle-sub-note { margin: 12px 4px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.battle-sub-backdrop { z-index: 60; }
+.battle-sub-price { margin: 4px 0 0; font-size: 30px; font-weight: 800; color: var(--accent); }
+.battle-sub-price span { font-size: 13px; font-weight: 600; color: var(--muted); }

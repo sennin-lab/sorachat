@@ -5,7 +5,7 @@ import { z } from "zod";
 import { banOfUser, SESSION_COOKIE, sha256 } from "./auth.js";
 import { config } from "./config.js";
 import { getMaintenanceSettings } from "./maintenance.js";
-import { addSocket, removeSocket, sendToUser, setViewing } from "./hub.js";
+import { addSocket, isOnline, removeSocket, sendToUser, setViewing } from "./hub.js";
 import { findCall } from "./callRegistry.js";
 import { BlockedError, UUID, blockersOf, insertMessage, memberIds, membership, replyTargetOk, toMessage } from "./messages.js";
 import { senninaiAfterMessage, senninaiPrecheck } from "./senninai.js";
@@ -13,6 +13,8 @@ import { sb } from "./supabase.js";
 import { isIpBanned, upgradeIp } from "./ipBans.js";
 import { gameAction, gameActionInput } from "./games.js";
 import { GameError } from "./gameLogic.js";
+import { BattleError, relay, userOffline, userOnline } from "./battleRooms.js";
+import { BATTLE, checkPayload } from "./battleRules.js";
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
@@ -47,6 +49,10 @@ const gameSocketSchema = z.object({
 // 1つの接続から、ゲームの操作を連打しすぎないように（1秒あたりの上限）
 const GAME_ACTIONS_PER_SECOND = 20;
 const gameActionCount = new WeakMap<WebSocket, { second: number; count: number }>();
+
+// オンライン対戦の中のデータ（相手へ中継するだけ。中身はサーバーでは読まない）
+const battleSendSchema = z.object({ type: z.literal("battle-send"), roomId: z.string().regex(UUID), payload: z.unknown() });
+const battleSendCount = new WeakMap<WebSocket, { second: number; count: number }>();
 
 const typingSchema = z.object({ type: z.literal("typing"), conversationId: z.string().regex(UUID) });
 const TYPING_MIN_GAP_MS = 1500;
@@ -128,6 +134,7 @@ export function rttOf(ws: WebSocket): number {
 
 function connect(userId: string, ws: WebSocket) {
   addSocket(userId, ws);
+  userOnline(userId);
   // 2秒ごとに ping を送り、返事（pong）で往復時間を測る。遠い人ほど、反応の補正を大きくするため
   const rttTimer = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping", t: Date.now(), rtt: rttOf(ws) }));
@@ -149,6 +156,8 @@ function connect(userId: string, ws: WebSocket) {
     clearInterval(timer);
     clearInterval(rttTimer);
     removeSocket(userId, ws);
+    // ほかに接続が残っていなければ、少しの間だけ戻りを待つ（対戦の中の人が一時的に切れても続けられるように）
+    if (!isOnline(userId)) userOffline(userId);
   });
   ws.on("error", () => ws.terminate());
 }
@@ -211,6 +220,33 @@ async function handle(userId: string, ws: WebSocket, raw: RawData) {
     if (!record || !record.participants.has(userId)) return;
     for (const uid of record.participants) {
       if (uid !== userId) sendToUser(uid, { type: "call", callId: signal.data.callId, event: signal.data.event, payload: signal.data.payload });
+    }
+    return;
+  }
+  if (data?.type === "battle-send") {
+    const parsed = battleSendSchema.safeParse(data);
+    if (!parsed.success) return;
+    const second = Math.floor(Date.now() / 1000);
+    const counter = battleSendCount.get(ws);
+    if (!counter || counter.second !== second) battleSendCount.set(ws, { second, count: 1 });
+    else if (++counter.count > BATTLE.messagesPerSecond) {
+      reply(ws, { type: "battle", roomId: parsed.data.roomId, event: "error", error: "送りすぎです。少し待ってください。" });
+      return;
+    }
+    const checked = checkPayload(parsed.data.payload);
+    if (!checked.ok) {
+      reply(ws, { type: "battle", roomId: parsed.data.roomId, event: "error", error: checked.error });
+      return;
+    }
+    try {
+      relay(userId, parsed.data.roomId, parsed.data.payload);
+    } catch (error) {
+      reply(ws, {
+        type: "battle",
+        roomId: parsed.data.roomId,
+        event: "error",
+        error: error instanceof BattleError ? error.message : "送れませんでした。"
+      });
     }
     return;
   }

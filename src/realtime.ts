@@ -111,6 +111,25 @@ export type SignalEvent =
 
 const signalListeners = new Set<(signal: SignalEvent) => void>();
 
+// ---- オンライン対戦の知らせ（招待・部屋の出来事・相手からのデータ）。同じ WebSocket で受け取る ----
+export type BattleSocketEvent =
+  | { type: "battle-invite"; roomId: string; gameId: string; gameName: string; hostName: string }
+  | { type: "battle"; roomId: string | null; gameId: string; event: string; [key: string]: unknown };
+
+const battleListeners = new Set<(event: BattleSocketEvent) => void>();
+
+export function onBattleEvent(listener: (event: BattleSocketEvent) => void) {
+  battleListeners.add(listener);
+  return () => {
+    battleListeners.delete(listener);
+  };
+}
+
+// 対戦の中のデータを、同じ部屋の相手へ送る。接続中でなければ false
+export function sendBattle(roomId: string, payload: unknown): boolean {
+  return sendSignal({ type: "battle-send", roomId, payload });
+}
+
 export function onSignal(listener: (signal: SignalEvent) => void) {
   signalListeners.add(listener);
   return () => {
@@ -224,6 +243,10 @@ function openSocket() {
     }
     if (data.type === "list") {
       emit({ kind: "change" });
+      return;
+    }
+    if (data.type === "battle-invite" || data.type === "battle") {
+      battleListeners.forEach((listener) => listener(data as BattleSocketEvent));
       return;
     }
     if (data.type === "ring" || data.type === "call") {

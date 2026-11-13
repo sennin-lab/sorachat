@@ -58,6 +58,8 @@ iPad・スマホ向けのチャットアプリです。LINE に近い見た目�
    - `supabase/schema_v35.sql`（拡張機能の配布：1人が1分間に受け取れるポイントの上限）
    - `supabase/schema_v36.sql`（友だち招待キャンペーン・登録時と最後のログインの IP・IP BAN。何度実行しても安全）
    - `supabase/schema_v37.sql`（ミニゲームに「連打バトル」「反射神経バトル」を追加。何度実行しても安全）
+   - `supabase/schema_v38.sql`（拡張機能の「オンライン対戦」のサブスク。1週間 200pt。何度実行しても安全）
+   - `supabase/schema_v39.sql`（拡張機能のデータ保存。仙人アカウントにひもづけ・無料。何度実行しても安全）
 2. Supabase の Realtime が有効になっていることを確認します（既定で有効です）。
 3. `.env.example` を `.env` にコピーして値を入れます。
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET`（Settings → API にあります）は必須です。

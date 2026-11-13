@@ -6,6 +6,7 @@ import { Icon } from "./Icon";
 import { Page } from "./Page";
 import { StoreAuthor } from "./StoreAuthor";
 import { StoreDetail } from "./StoreDetail";
+import { BattleSubscriptionPanel } from "./BattleSubscription";
 import { Stars, WorkIcon, errorText, kindLabelOf, ratingLabel, yen } from "./storeUi";
 import type { Me, StoreItemView, StoreView } from "./types";
 
@@ -36,7 +37,9 @@ const CATEGORIES: { id: string; label: string; match: (item: StoreItemView) => b
   { id: "stamp", label: "スタンプ", match: (i) => i.kind === "stamp_pack" },
   { id: "quiz", label: "クイズ", match: (i) => i.studioKind === "quiz" },
   { id: "style", label: "応答スタイル", match: (i) => i.studioKind === "ai_style" },
-  { id: "ext", label: "拡張機能", match: (i) => i.kind === "extension" && i.studioKind !== "quiz" && i.studioKind !== "ai_style" }
+  { id: "ext", label: "拡張機能", match: (i) => i.kind === "extension" && i.studioKind !== "quiz" && i.studioKind !== "ai_style" },
+  // 商品ではなく、オンライン対戦のサブスクの管理（状態・延長・自動更新）
+  { id: "sub", label: "サブスク", match: () => false }
 ];
 
 // 「デフォルトを含む」を選んだときだけ、運営の基本の商品（source が store）を一覧に出す。それ以外の並び替えでは出さない
@@ -321,7 +324,9 @@ export function StorePage({
                 ))}
               </nav>
 
-              {!view ? (
+              {category === "sub" ? (
+                <BattleSubscriptionPanel />
+              ) : !view ? (
                 <p className="cws-empty">読み込み中…</p>
               ) : shown.length === 0 ? (
                 <p className="cws-empty">{query ? "一致する商品がありません。" : "このカテゴリの商品はまだありません。"}</p>

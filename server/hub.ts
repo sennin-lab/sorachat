@@ -43,6 +43,14 @@ export function disconnectUser(userId: string) {
   for (const ws of set) ws.close(4003, "banned");
 }
 
+// 接続中の画面があるか（招待を送ってよいかの確認に使う）
+export function isOnline(userId: string): boolean {
+  const set = sockets.get(userId);
+  if (!set) return false;
+  for (const ws of set) if (ws.readyState === OPEN) return true;
+  return false;
+}
+
 export function sendToUser(userId: string, payload: unknown) {
   const set = sockets.get(userId);
   if (!set) return;

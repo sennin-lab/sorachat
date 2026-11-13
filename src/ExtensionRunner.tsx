@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { delete_, post } from "./api";
+import { delete_, post, put } from "./api";
 import { Icon } from "./Icon";
+import { useBattleSession, type BattleReply } from "./battleSession";
 
 // 拡張機能（作者が HTML・CSS・JavaScript で作ったミニアプリ）を動かす画面。
 // ソラチャットの画面の中では動かさず、隔離した枠（iframe の sandbox）の中だけで動かす。
@@ -52,7 +53,8 @@ type PayRequest = {
 };
 
 // 買った拡張機能を、全画面で開く
-export function ExtensionRunner({ workId, name, onClose }: { workId: string; name: string; onClose: () => void }) {
+// joinRoomId：招待を承諾して参加した対戦の部屋（開始を待つ状態で始まる）
+export function ExtensionRunner({ workId, name, onClose, joinRoomId }: { workId: string; name: string; onClose: () => void; joinRoomId?: string }) {
   const base = `/api/studio/extensions/${encodeURIComponent(workId)}`;
   const [access, setAccess] = useState<Access | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -63,6 +65,15 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
   const accessRef = useRef<Access | null>(null);
   const [pay, setPay] = useState<PayRequest | null>(null);
   const payRef = useRef<PayRequest | null>(null);
+  // オンライン対戦：枠からの依頼（battle-*）と、相手からの知らせを、ここで受けて進める
+  const battle = useBattleSession({ workId, joinRoomId, consented: Boolean(access?.consented), frameRef });
+  const battleRequest = useRef(battle.request);
+  battleRequest.current = battle.request;
+  // 閉じるときは、対戦・相手探しを終わらせてから閉じる
+  const closeAll = () => {
+    battle.dispose();
+    onClose();
+  };
 
   // 支払いの答えを、拡張機能に一度だけ返す
   const settlePay = useCallback((reply: Reply) => {
@@ -121,7 +132,7 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
   // 断ったら、許可がないまま拡張機能は動かせないので閉じる
   const decline = () => {
     finishAsking();
-    if (!accessRef.current?.consented) onClose();
+    if (!accessRef.current?.consented) closeAll();
   };
 
   const revoke = async () => {
@@ -130,12 +141,36 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
       setLoadError(result.body.error ?? "取り消せませんでした。もう一度お試しください。");
       return;
     }
-    onClose();
+    closeAll();
   };
 
   // 枠の中からの依頼を受けて、サーバーへ取り次ぐ。送り元が枠そのものかを確かめてから処理する
   const handle = useCallback(
     async (type: string, data: Record<string, unknown>): Promise<Reply> => {
+      // データ保存（無料・仙人アカウントにひもづけ）。サーバーで所有・許可・連携を確かめる
+      if (type.startsWith("storage-")) {
+        const key = typeof data.key === "string" ? encodeURIComponent(data.key) : "";
+        if (type !== "storage-keys" && !key) return { ok: false, code: "invalid", error: "キーを指定してください。" };
+        const path = type === "storage-keys" ? `${base}/storage` : `${base}/storage/${key}`;
+        const result =
+          type === "storage-get"
+            ? await call(path)
+            : type === "storage-set"
+              ? await call(path, put({ value: data.value }))
+              : type === "storage-remove"
+                ? await call(path, delete_())
+                : type === "storage-keys"
+                  ? await call(path)
+                  : null;
+        if (!result) return { ok: false, code: "unknown_request", error: "対応していない依頼です。" };
+        if (!result.ok) return { ok: false, code: result.body.code ?? "error", error: result.body.error ?? "保存できませんでした。" };
+        return { ok: true, data: result.body };
+      }
+      // オンライン対戦の依頼は、対戦の仕組み（useBattleSession）が答える
+      if (type.startsWith("battle-")) {
+        const battleReply: BattleReply | null = await battleRequest.current(type, data);
+        if (battleReply) return battleReply;
+      }
       if (type === "account") {
         const latest = await refresh();
         if (!latest) return { ok: false, code: "error", error: "アカウント情報を取得できませんでした。" };
@@ -215,14 +250,14 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
       }
       if (asking) {
         setAsking(false);
-        if (!accessRef.current?.consented) onClose();
+        if (!accessRef.current?.consented) closeAll();
       } else {
-        onClose();
+        closeAll();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [asking, onClose, closePay]);
+  }, [asking, closeAll, closePay]);
 
   const consented = Boolean(access?.consented);
 
@@ -230,7 +265,7 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
     <>
       <div className="page ext-run" role="dialog" aria-label={name}>
         <header className="page-head">
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="閉じる">
+          <button type="button" className="icon-btn" onClick={closeAll} aria-label="閉じる">
             <Icon name="back" size={22} />
           </button>
           <h1>{name}</h1>
@@ -244,6 +279,7 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
             sandbox={SANDBOX}
             referrerPolicy="no-referrer"
             src={`${base}/frame`}
+            onLoad={battle.frameLoaded}
           />
         ) : loadError ? (
           <p className="notice error center">{loadError}</p>
@@ -272,6 +308,7 @@ export function ExtensionRunner({ workId, name, onClose }: { workId: string; nam
           onClose={closePay}
         />
       )}
+      {battle.layer}
       {asking && (
         <div className="sheet-backdrop ext-consent-backdrop">
           <div className="sheet ext-consent" role="dialog" aria-modal="true" aria-label="アカウント情報の許可">

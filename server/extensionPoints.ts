@@ -13,6 +13,8 @@ import { adjustPoints, DEFINITE_FAILURE, isLinked, SenninError } from "./senninP
 import { recordSale } from "./studioPayout.js";
 import { config } from "./config.js";
 import { EXT_BRIDGE, EXT_TOTAL_MAX } from "./studioRules.js";
+import { BATTLE } from "./battleRules.js";
+import { STORAGE } from "./extensionStorageRules.js";
 
 // 利用者が1分間に配布を頼める回数（連打・暴走の防止）
 const AWARD_PER_MINUTE = 60;
@@ -579,6 +581,253 @@ buy.onclick = async function () {
 };
 </script>
 \`\`\`
+
+## データの保存（window.sorachat.storage・無料）
+
+拡張機能の中のデータ（進み具合・設定・記録など）を、仙人アカウントにひもづけて保存できます。保存先は「仙人アカウント × この拡張機能」なので、ソラチャットのアカウントを作り直しても、同じ仙人アカウントなら同じデータを読めます。料金はかかりません。
+
+- 使うには、この拡張機能を買っていて、情報の許可をしていて、仙人アカウントと連携している必要があります。連携していなければ、code が "not_linked" のエラーになります。
+- キーは英数字と _ . : - だけで、${STORAGE.keyMax} 文字までです。
+- 値は JSON にできるものだけで、1つ ${STORAGE.valueMaxBytes / 1024}KB までです。1人・1つの拡張機能で ${STORAGE.keysMax} 件までです。
+- 1分に ${STORAGE.writesPerMinute} 回まで書けます（超えると code が "rate_limited" になります）。
+
+### window.sorachat.storage.get(key)
+値を返します（保存されていなければ null）。
+
+### window.sorachat.storage.set(key, value)
+値を保存します（同じキーがあれば上書き）。
+
+### window.sorachat.storage.remove(key)
+キーを消します。
+
+### window.sorachat.storage.keys()
+保存されているキーの一覧を返します。
+
+### 例
+    <script>
+      window.sorachat.storage.get("score").then(function (score) {
+        document.body.textContent = "ベスト：" + (score === null ? "まだありません" : score);
+      }).catch(function (e) { document.body.textContent = e.message; });
+    </script>
+
+## オンライン対戦（window.sorachat.battle）
+
+2人以上で遊ぶ対戦を、ソラチャットが相手探し・部屋・中継を受け持ちます。枠の中のコードに渡るのは、相手の席の番号（seat）と表示名だけです。相手のIDなどは渡りません。
+
+- 対戦は、サブスク（1週間 ${BATTLE.subscriptionPoints}pt）に入っている人だけが使えます。自動更新をオンにしていると、期限が切れて対戦を始めるときに1回分が引かれます。入っていない人には、ソラチャットの画面がサブスクの案内を出します。
+- 対戦を始める人（と相手）は、この拡張機能を買っていて、情報の許可をしている必要があります。
+- 対戦の結果の判定・ポイントの扱いは、作者が書きます（ソラチャットは勝敗を判定しません）。対戦中のデータは、同じ部屋の人へ中継されるだけです。
+
+### window.sorachat.battle.subscription()
+サブスクの今の状態を返します。{ subscribed, expiresAt, autoRenew, linked, price, days }
+
+### window.sorachat.battle.findMatch(size)
+ランダムに相手を探します。size は 2〜4（省略時は 2）。人数がそろうと、部屋ができてから答えます。
+答えの形：{ roomId, size, seat, players: [{ seat, name }] }
+利用者が探すのをやめた場合は、code が "cancelled" のエラーになります。
+
+### window.sorachat.battle.inviteFriends()
+利用者の友だちを選ぶ画面を出します（1〜3人）。招待された人が承諾し、利用者が「開始」を押すと対戦が始まります。
+答えの形は findMatch と同じです。
+
+### window.sorachat.battle.send(payload)
+同じ部屋の相手へ、データを送ります。JSON にできる値で、${BATTLE.messageMaxBytes} 文字までです。
+送りすぎると、1秒に ${BATTLE.messagesPerSecond} 回までになります。
+
+### window.sorachat.battle.leave()
+部屋から出ます。
+
+### window.sorachat.battle.onEvent(function (event) { ... })
+相手の動きや、部屋の知らせを受け取ります。最初に一度だけ登録してください（対戦の前に登録しておくと、相手の最初の一手も受け取れます）。
+event.type は次のどれかです。
+- "message"：相手からのデータ（from は相手の席の番号、payload は送られた値）
+- "joined"：招待した人が承諾した（name）
+- "declined"：招待した人が断った（name）
+- "started"：対戦が始まった（players）。招待を受けた人は、ここで始まりを知ります
+- "waiting"：招待を承諾して、主催者が始めるのを待っている（roomId）
+- "unselected"：招待した部屋が始まり、この人は承諾していなかったので加わらなかった
+- "left"：相手が抜けた（leftSeat）。残りが2人未満になると、次は "closed" になります
+- "closed"：部屋が閉じた（reason は "opponent_left" / "host_left" / "timeout"）
+- "error"：送信などの失敗（error）
+
+### 作り方の例（ランダムの2人対戦）
+    <button id="go">対戦する</button>
+    <script>
+      var me = null;
+      // 先に登録する（相手の一手を取りこぼさないため）
+      window.sorachat.battle.onEvent(function (ev) {
+        if (ev.type === "message") console.log("相手の手", ev.payload);
+        if (ev.type === "closed") alert("対戦が終わりました");
+      });
+      document.getElementById("go").onclick = async function () {
+        try {
+          me = await window.sorachat.battle.findMatch(2);
+          await window.sorachat.battle.send({ hello: me.seat });
+        } catch (e) {
+          alert(e.message);
+        }
+      };
+    </script>
+
+### 対戦のエラーの code
+- not_subscribed：サブスクに入っていません（ソラチャットの画面で案内を出します）
+- busy：すでに対戦の中か、相手を探しています
+- cancelled：利用者が取り消しました
+- not_consented：アカウント情報の許可がありません
+- not_owned：この拡張機能を買っていません
+- invitee_unavailable：招待した友だちが、今は対戦を始められません（オンラインでない・サブスク切れなど）
+
+## 作り方：オンラインゲーム（手順と完全な例）
+
+ソラチャットは、相手探し・招待・部屋・中継を受け持ちます。ゲームのルール・手の判定・勝敗は、作者のコードが書きます。サーバーは、対戦中のデータを中身を読まずに相手へ渡すだけです。
+
+### 手順
+1. 最初に window.sorachat.battle.onEvent を登録する（相手の一手を取りこぼさないため）。
+2. 対戦を始める。ランダムなら findMatch(人数)、友だちなら inviteFriends() を呼ぶ。どちらも、部屋ができたら答えを返す（seat と players が入る）。
+3. 自分の手などを send で送る。相手からの手は onEvent で "message" として届く。
+4. 両方の手がそろったら、枠の中で勝敗を判定して画面に出す。
+5. 終わったら leave で部屋を出る。"closed" が届いたら、画面を終わりの表示に切り替える。
+
+### 注意
+- 相手が切断したときは "left" や "closed" が届きます。待ち続けないよう、必ず処理してください。
+- 判定を作者のコードだけで行うため、送られてきた値が正しいとは限りません。大事な判定は、受け取る側で値の形を確かめてください。
+- ポイントを配る・支払うなどは、勝った人だけが一度だけ行うように作ってください（同じ requestId で押し直す）。
+- 対戦中は、同じ部屋の相手以外へデータは届きません。
+
+### 完全な例（じゃんけんの2人対戦）
+    <div id="status">対戦相手を探してください</div>
+    <button id="random">ランダムで対戦</button>
+    <button id="friend">友だちと対戦</button>
+    <div id="hands" hidden>
+      <button data-hand="rock">グー</button>
+      <button data-hand="scissors">チョキ</button>
+      <button data-hand="paper">パー</button>
+    </div>
+    <script>
+      var sb = window.sorachat;
+      var inRoom = false;
+      var myHand = null;
+      var theirHand = null;
+      var beats = { rock: "scissors", scissors: "paper", paper: "rock" };
+      var names = { rock: "グー", scissors: "チョキ", paper: "パー" };
+
+      function show(text) { document.getElementById("status").textContent = text; }
+
+      // 最初に登録する（相手の手を取りこぼさないように）
+      sb.battle.onEvent(function (ev) {
+        if (ev.type === "message" && ev.payload && ev.payload.kind === "hand") {
+          theirHand = ev.payload.hand;
+          judge();
+        } else if (ev.type === "started") {
+          startRound("対戦が始まりました");
+        } else if (ev.type === "left") {
+          show("相手が抜けました");
+        } else if (ev.type === "closed") {
+          inRoom = false;
+          document.getElementById("hands").hidden = true;
+          show("対戦が終わりました（" + ev.reason + "）");
+        }
+      });
+
+      function startRound(text) {
+        inRoom = true;
+        myHand = null;
+        theirHand = null;
+        document.getElementById("hands").hidden = false;
+        show(text + "。手を選んでください");
+      }
+
+      function judge() {
+        if (!myHand || !theirHand) return;
+        var result = myHand === theirHand ? "あいこ" : beats[myHand] === theirHand ? "あなたの勝ち" : "あなたの負け";
+        show(result + "（あなた：" + names[myHand] + " / 相手：" + names[theirHand] + "）");
+        myHand = null;
+        theirHand = null;
+      }
+
+      function startMatch(run) {
+        show("探しています…");
+        run().then(function (room) {
+          // room.seat と room.players が入る。ここでは開始の表示だけにする
+          startRound("対戦が始まりました（あなたは " + (room.seat + 1) + " 番）");
+        }).catch(function (e) {
+          show(e.message);
+        });
+      }
+
+      document.getElementById("random").onclick = function () {
+        startMatch(function () { return sb.battle.findMatch(2); });
+      };
+      document.getElementById("friend").onclick = function () {
+        startMatch(function () { return sb.battle.inviteFriends(); });
+      };
+
+      document.querySelectorAll("[data-hand]").forEach(function (button) {
+        button.onclick = function () {
+          if (!inRoom || myHand) return;
+          myHand = button.getAttribute("data-hand");
+          sb.battle.send({ kind: "hand", hand: myHand }).catch(function (e) { show(e.message); });
+          show("手を送りました。相手を待っています");
+          judge();
+        };
+      });
+    </script>
+
+### 友だち対戦の流れ
+- inviteFriends() を呼ぶと、ソラチャットの画面が友だちを選ぶ画面を出します（1〜3人）。
+- 招待された人には、ソラチャットの全画面に招待が出ます。承諾した人には、枠の中で "waiting" が届きます。
+- 招待した人が「開始」を押すと、承諾した全員に "started" が届き、inviteFriends() も答えを返します。承諾しなかった人は "unselected" を受け取ります。
+- 上の例の "started" の扱いは、招待を受けた側でも同じです。
+
+## 作り方：データ保存（手順と完全な例）
+
+拡張機能の中のデータを、仙人アカウントにひもづけて保存できます（無料）。保存先は「仙人アカウント × この拡張機能」です。使うには、この拡張機能を買っていて、情報の許可をしていて、仙人アカウントと連携している必要があります。
+
+### 手順
+1. 起動したときに、get で前の値を読む（なければ null）。
+2. 変わったら set で保存する。消すときは remove、一覧は keys。
+3. エラーは、Promise の catch で受けて画面に出す。e.code で理由を判断できる（not_linked・not_consented・rate_limited・full・invalid など）。
+
+### 注意
+- 同じキーを同時に書くと、後から書いた値が残ります。1つの値にまとめて保存し、書く順番は作者のコードで整えてください。
+- 1分に書ける回数に上限があります。ボタンを押すたびに保存するのではなく、区切りのよいタイミングでまとめて保存してください。
+- 連携していない人には、保存できないことを画面で伝えてください（code が not_linked のとき）。
+
+### 完全な例（勝ち数を保存する）
+    <p id="wins">読み込み中…</p>
+    <button id="win">勝った（+1）</button>
+    <p id="error" hidden></p>
+    <script>
+      var sb = window.sorachat;
+      var wins = 0;
+
+      function show() {
+        document.getElementById("wins").textContent = "勝ち数：" + wins;
+      }
+      function fail(e) {
+        var box = document.getElementById("error");
+        box.hidden = false;
+        box.textContent = e.code === "not_linked"
+          ? "保存するには、仙人アカウントとの連携が必要です。"
+          : e.message;
+      }
+
+      // 起動したときに、前の値を読む（保存されていなければ null）
+      sb.storage.get("wins").then(function (value) {
+        wins = typeof value === "number" ? value : 0;
+        show();
+      }).catch(fail);
+
+      document.getElementById("win").onclick = function () {
+        wins += 1;
+        show();
+        sb.storage.set("wins", wins).catch(fail);
+      };
+    </script>
+
+### 値のまとめ方
+- 1つのキーに、オブジェクトでまとめて保存できます（例：{ best: 120, plays: 8 }）。
+- 値は JSON にできるものだけです。関数・循環する値は保存できません。
 
 ## 配布のルール（必ず守られます）
 1. 配れるのは、この拡張機能を開いて、アカウント情報の許可をした本人だけです。他の人には配れません。

@@ -225,7 +225,7 @@ export const EXTENSION_CSP = [
 // 下の値は、ブリッジの仕組み・上限・開発者ドキュメント（senninstudio の仕様）の全部で同じものを使う。
 export const EXT_BRIDGE = {
   channel: "sorachat-ext",
-  version: 1,
+  version: 3,
   awardMin: 1, // 1回に配れる最小
   awardMaxPerCall: 500, // 1回に配れる最大（1回の呼び出し）
   reasonMax: 40, // 理由の最大文字数
@@ -237,7 +237,9 @@ export const EXT_BRIDGE = {
   chargeMaxDefault: 1000, // 作者が通常の拡張機能の1回に払わせられる最大（pt）
   chargeMaxCertified: 5000, // 認定開発者の拡張機能の1回の最大（pt）。管理者が認定を決める
   chargeTitleMax: 40, // 確認画面に出す品名の最大文字数
-  chargeTimeoutMs: 180_000
+  chargeTimeoutMs: 180_000,
+  // オンライン対戦：相手が集まるまで待つ時間・招待の返事を待つ時間（長めに待つ）
+  battleTimeoutMs: 600_000
 } as const;
 
 // 枠の中で動くブリッジ。ユーザーのコードより先に読み込む。
@@ -245,11 +247,13 @@ function extensionBridgeScript(): string {
   const config = JSON.stringify({
     channel: EXT_BRIDGE.channel,
     timeoutMs: EXT_BRIDGE.timeoutMs,
-    chargeTimeoutMs: EXT_BRIDGE.chargeTimeoutMs
+    chargeTimeoutMs: EXT_BRIDGE.chargeTimeoutMs,
+    battleTimeoutMs: EXT_BRIDGE.battleTimeoutMs
   });
   return `(function () {
   var CONFIG = ${config};
   var pending = Object.create(null);
+  var battleListeners = [];
   var seq = 0;
   function newId() { seq += 1; return seq + "-" + Math.random().toString(36).slice(2, 10); }
   function call(type, data, timeoutMs) {
@@ -268,6 +272,13 @@ function extensionBridgeScript(): string {
   window.addEventListener("message", function (event) {
     if (event.source !== window.parent) return;
     var msg = event.data;
+    // 対戦の知らせ（相手の動き・誰かが抜けた・終わった）は、登録された関数へ渡す
+    if (msg && msg.channel === CONFIG.channel && msg.event === "battle") {
+      battleListeners.forEach(function (fn) {
+        try { fn(msg.payload); } catch (e) {}
+      });
+      return;
+    }
     if (!msg || msg.channel !== CONFIG.channel || !pending[msg.id]) return;
     var p = pending[msg.id];
     delete pending[msg.id];
@@ -298,6 +309,25 @@ function extensionBridgeScript(): string {
         title: title || "",
         requestId: requestId || (Date.now().toString(36) + "-" + newId())
       }, CONFIG.chargeTimeoutMs);
+    },
+    storage: {
+      get: function (key) {
+        return call("storage-get", { key: key }).then(function (d) { return d.value === undefined ? null : d.value; });
+      },
+      set: function (key, value) { return call("storage-set", { key: key, value: value }); },
+      remove: function (key) { return call("storage-remove", { key: key }); },
+      keys: function () {
+        return call("storage-keys").then(function (d) { return d.keys || []; });
+      }
+    },
+    battle: {
+      subscription: function () { return call("battle-status"); },
+      findMatch: function (size) { return call("battle-find", { size: size || 2 }, CONFIG.battleTimeoutMs); },
+      inviteFriends: function () { return call("battle-invite", {}, CONFIG.battleTimeoutMs); },
+      cancel: function () { return call("battle-cancel"); },
+      send: function (payload) { return call("battle-send", { payload: payload }); },
+      leave: function () { return call("battle-leave"); },
+      onEvent: function (fn) { if (typeof fn === "function") battleListeners.push(fn); }
     }
   };
 })();`;
