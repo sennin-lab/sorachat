@@ -3171,3 +3171,6 @@ textarea.dev-input { resize: vertical; }
 .battle-picker-note { margin: 8px 16px 0; line-height: 1.6; }
 .battle-countdown { margin: 10px 0 0; color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
 .battle-member.is-ready .battle-member-state { color: var(--accent); font-weight: 700; }
+
+/* 対戦の相手を選ぶ画面は、拡張機能の画面（.ext-run・z-index 60）より前に出す */
+.page.battle-picker { z-index: 70; }
