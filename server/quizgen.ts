@@ -4,6 +4,7 @@ import { QUIZ_ROUNDS, type QuizQuestion } from "./gameLogic.js";
 import { askAi } from "./senninai.js";
 
 const GENERATE_TIMEOUT_MS = 25_000;
+export const GENRE_MAX = 30;
 
 // 毎回の題材をばらすための候補（組み合わせて使う）
 const THEMES = [
@@ -81,8 +82,10 @@ function scramble(questions: QuizQuestion[], random: () => number): QuizQuestion
   });
 }
 
-export async function generateQuizQuestions(random: () => number = Math.random): Promise<QuizQuestion[] | null> {
-  const theme = pick(THEMES, random);
+// genre を渡すと、そのジャンルで作る（空や未指定なら、候補からランダムに選ぶ）
+export async function generateQuizQuestions(random: () => number = Math.random, genre = ""): Promise<QuizQuestion[] | null> {
+  const customTheme = genre.replace(/[\r\n]/g, " ").trim().slice(0, GENRE_MAX);
+  const theme = customTheme || pick(THEMES, random);
   const angle = pick(ANGLES, random);
   const seed = Math.floor(random() * 1_000_000).toString(36);
   const prompt = [

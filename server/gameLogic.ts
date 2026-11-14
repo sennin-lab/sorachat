@@ -127,7 +127,11 @@ type ReflexPlay = {
 export type Play = TttPlay | QuizPlay | JankenPlay | GuessPlay | TapPlay | ReflexPlay;
 
 // DB に保存する形（答えや秘密の数字も含むので、そのままでは画面に出さない）
-export type Stored = { players: string[]; cancelled: boolean; play: Play | null };
+// クイズの出し方（募集のときに、作る人が選ぶ）。pack は買った問題集、ai は senninai が作る（ジャンルは任意）
+export type QuizSource = { type: "pack"; workId: string } | { type: "ai"; genre: string };
+
+// quizSource は古いゲーム（選ぶ前に作られたもの）では無いことがある
+export type Stored = { players: string[]; cancelled: boolean; play: Play | null; quizSource?: QuizSource | null };
 
 // 画面に送る形（各人に見せてよい情報だけ）
 export type GameView = {

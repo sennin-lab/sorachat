@@ -26,6 +26,7 @@ import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
 import { NewChatSheet } from "./NewChatSheet";
 import { ProfileSheet } from "./ProfileSheet";
+import { ExitMotion } from "./ExitMotion";
 import { SettingsSheet } from "./SettingsSheet";
 import { UserProfileSheet } from "./UserProfileSheet";
 import { Avatar } from "./Avatar";
@@ -524,16 +525,18 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
         )}
       </main>
 
-      {showProfile && (
-        <ProfileSheet
-          me={me}
-          theme={theme}
-          onThemeChange={setTheme}
-          onClose={() => setShowProfile(false)}
-          onChange={onMeChange}
-          onLogout={onLogout}
-        />
-      )}
+      <ExitMotion value={showProfile ? true : null}>
+        {() => (
+          <ProfileSheet
+            me={me}
+            theme={theme}
+            onThemeChange={setTheme}
+            onClose={() => setShowProfile(false)}
+            onChange={onMeChange}
+            onLogout={onLogout}
+          />
+        )}
+      </ExitMotion>
       {showSettings && (
         <SettingsSheet
           me={me}
@@ -563,33 +566,45 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
           onOpenDm={(username) => openDmWith(username)}
         />
       )}
-      {viewUser && (
-        <UserProfileSheet
-          userId={viewUser}
-          onClose={closeProfile}
-          onMessage={(username) => void openDmWith(username)}
-          onFriendsChanged={bumpFriends}
-        />
-      )}
-      {onStudioPage && <StudioPage flash={storeFlash} onBack={closePage} />}
-      {onStorePage && <StorePage me={me} flash={storeFlash} onBack={closePage} onMeChange={onMeChange} />}
-      {onPayPage && (
-        <Suspense fallback={null}>
-          <SenninPayPage me={me} flash={storeFlash} onBack={closePage} />
-        </Suspense>
-      )}
-      {onGamesPage && (
-        <Suspense fallback={null}>
-          <SenningamesPage flash={storeFlash} onBack={closePage} />
-        </Suspense>
-      )}
-      {onBankPage && (
-        <Suspense fallback={null}>
-          <BankPage me={me} flash={storeFlash} onBack={closePage} />
-        </Suspense>
-      )}
-      {onTubePage && <TubePage onBack={closePage} />}
-      {onExtensionsPage && <ExtensionsPage me={me} onBack={closePage} onMeChange={onMeChange} />}
+      <ExitMotion value={viewUser}>
+        {(userId) => (
+          <UserProfileSheet
+            userId={userId}
+            onClose={closeProfile}
+            onMessage={(username) => void openDmWith(username)}
+            onFriendsChanged={bumpFriends}
+          />
+        )}
+      </ExitMotion>
+      <ExitMotion value={onStudioPage ? true : null}>{() => <StudioPage flash={storeFlash} onBack={closePage} />}</ExitMotion>
+      <ExitMotion value={onStorePage ? true : null}>
+        {() => <StorePage me={me} flash={storeFlash} onBack={closePage} onMeChange={onMeChange} />}
+      </ExitMotion>
+      <ExitMotion value={onPayPage ? true : null}>
+        {() => (
+          <Suspense fallback={null}>
+            <SenninPayPage me={me} flash={storeFlash} onBack={closePage} />
+          </Suspense>
+        )}
+      </ExitMotion>
+      <ExitMotion value={onGamesPage ? true : null}>
+        {() => (
+          <Suspense fallback={null}>
+            <SenningamesPage flash={storeFlash} onBack={closePage} />
+          </Suspense>
+        )}
+      </ExitMotion>
+      <ExitMotion value={onBankPage ? true : null}>
+        {() => (
+          <Suspense fallback={null}>
+            <BankPage me={me} flash={storeFlash} onBack={closePage} />
+          </Suspense>
+        )}
+      </ExitMotion>
+      <ExitMotion value={onTubePage ? true : null}>{() => <TubePage onBack={closePage} />}</ExitMotion>
+      <ExitMotion value={onExtensionsPage ? true : null}>
+        {() => <ExtensionsPage me={me} onBack={closePage} onMeChange={onMeChange} />}
+      </ExitMotion>
       {showReferral && <ReferralSheet onClose={() => setShowReferral(false)} />}
       {showOpenChats && (
         <OpenChatSheet

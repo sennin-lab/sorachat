@@ -36,7 +36,7 @@ assert.ok(doc.includes(EXT_BRIDGE.channel), "チャンネル名が文書に入�
 
 // 隔離は変わらない：CSP の sandbox・通信禁止はそのまま
 assert.ok(EXTENSION_CSP.startsWith("sandbox allow-scripts;"));
-assert.ok(EXTENSION_CSP.includes("connect-src 'none'"));
+assert.ok(EXTENSION_CSP.includes("connect-src https: wss:"), "HTTPS/WSS 通信は許可（開発の自由度のため）");
 assert.ok(!EXTENSION_CSP.includes("allow-same-origin"));
 
 // 仕様書：上の定数（上限・名前・code）と食い違わない

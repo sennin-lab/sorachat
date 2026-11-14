@@ -6,7 +6,7 @@ import type { GameKind, StoreView } from "./types";
 
 const GAMES: { kind: GameKind; title: string; text: string }[] = [
   { kind: "tictactoe", title: "三目並べ", text: "2人対戦。先に3つ並べた人の勝ち" },
-  { kind: "quiz", title: "早押しクイズ", text: "2〜8人。senninaiが毎回作る問題を早押しで答える（5問）" },
+  { kind: "quiz", title: "早押しクイズ", text: "2〜8人。買ったクイズか、senninaiが作る問題を早押しで答える（5問）" },
   { kind: "janken", title: "じゃんけん大会", text: "2〜10人。負けた人が抜けていき、最後の1人が優勝" },
   { kind: "guess", title: "数当て", text: "2〜10人。1〜100の秘密の数字を、ヒントを頼りに当てる" },
   { kind: "tap", title: "連打バトル", text: "2〜10人。10秒間に一番多くタップした人の勝ち" },

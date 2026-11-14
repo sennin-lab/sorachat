@@ -216,7 +216,13 @@ async function main() {
   assert.match(r1.rejected!, /先に \/senninai add/);
   assert.equal(tables.sc_messages.length, beforeCount, "断ったメッセージは保存されない");
 
-  // 4) グループ：/senninai add → 参加して、案内が出る
+  // 4) グループ：拡張機能「senninai をグループに入れる」を買っていなければ断る
+  const r0 = await send(GROUP, ME, "/senninai add");
+  assert.match(r0.rejected!, /購入してください/);
+  assert.ok(!tables.sc_members.some((m) => m.conversation_id === GROUP && m.user_id === BOT_ID), "買う前は参加しない");
+  tables.sc_store_items = [{ user_id: ME, item_id: "ext-bot-group" }];
+
+  // 5) 買ったあとは /senninai add → 参加して、案内が出る
   const r2 = await send(GROUP, ME, "/senninai add");
   assert.equal(r2.rejected, null);
   assert.ok(tables.sc_members.some((m) => m.conversation_id === GROUP && m.user_id === BOT_ID), "グループに参加した");

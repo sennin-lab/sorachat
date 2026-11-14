@@ -221,6 +221,10 @@ export type PollView = {
 };
 
 export type GameKind = "tictactoe" | "quiz" | "janken" | "guess" | "tap" | "reflex";
+
+// クイズの出し方（募集のときに選ぶ）
+export type QuizSourceChoice = { type: "pack"; workId: string } | { type: "ai"; genre: string };
+export type QuizPackSummary = { id: string; name: string; count: number };
 export type GameHand = "rock" | "scissors" | "paper";
 
 // ミニゲームの画面用の形（サーバーの gameLogic.ts の GameView と同じ）

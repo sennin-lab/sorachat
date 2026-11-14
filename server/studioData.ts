@@ -4,6 +4,8 @@ import { sb } from "./supabase.js";
 import { canUseItem } from "./storeAccess.js";
 import type { StoreItem } from "./storeCatalog.js";
 import { aiStyleInstruction, type AiStylePayload, type QuizPayload, type StudioKind } from "./studioRules.js";
+// 循環 import を避けるため、問題数の値はここにも置く（gameLogic.ts の QUIZ_ROUNDS と同じ）
+const QUIZ_ROUNDS_FOR_PACKS = 5;
 
 export const WORK_PREFIX = "work:";
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -40,6 +42,50 @@ export async function loadWork(id: string): Promise<WorkRow | null> {
     .maybeSingle();
   if (error) throw error;
   return (data as WorkRow | null) ?? null;
+}
+
+// 買ったクイズ（問題が規定数以上あるもの）。ミニゲームの出題を選ぶ画面に出す
+export async function ownedQuizPacks(userId: string): Promise<{ id: string; name: string; count: number }[]> {
+  const { data, error } = await sb.from("sc_store_items").select("item_id").eq("user_id", userId).like("item_id", `${WORK_PREFIX}%`);
+  if (error) throw error;
+  const ids = (data ?? []).map((row) => workIdOf(row.item_id as string)).filter((id): id is string => Boolean(id));
+  if (!ids.length) return [];
+  const { data: works, error: worksError } = await sb
+    .from("sc_studio_works")
+    .select("id, name, kind, status, payload")
+    .in("id", ids)
+    .eq("kind", "quiz")
+    .neq("status", "removed");
+  if (worksError) throw worksError;
+  return (works ?? [])
+    .map((w) => ({
+      id: w.id as string,
+      name: w.name as string,
+      count: ((w.payload as QuizPayload | null)?.questions ?? []).length
+    }))
+    .filter((pack) => pack.count >= QUIZ_ROUNDS_FOR_PACKS);
+}
+
+// 買った問題集から、指定の問題数だけ出す（選択肢の順番はばらす）。買っていない・足りないときは null
+export async function studioQuizFromWork(userId: string, workId: string, rounds: number): Promise<{ q: string; options: string[]; answer: number }[] | null> {
+  const { data: owned, error } = await sb
+    .from("sc_store_items")
+    .select("item_id")
+    .eq("user_id", userId)
+    .eq("item_id", `${WORK_PREFIX}${workId}`)
+    .maybeSingle();
+  if (error) throw error;
+  if (!owned) return null;
+  const { data: work, error: workError } = await sb.from("sc_studio_works").select("kind, status, payload").eq("id", workId).maybeSingle();
+  if (workError) throw workError;
+  if (!work || work.kind !== "quiz" || work.status === "removed") return null;
+  const questions = (work.payload as QuizPayload | null)?.questions ?? [];
+  if (questions.length < rounds) return null;
+  const shuffled = [...questions].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, rounds).map((item) => {
+    const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+    return { q: item.q, options: order.map((i) => item.options[i]), answer: order.indexOf(item.answer) };
+  });
 }
 
 export const storeKindOf = (kind: StudioKind): StoreItem["kind"] =>

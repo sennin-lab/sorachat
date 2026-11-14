@@ -41,7 +41,8 @@ import { GameSheet } from "./GameSheet";
 import { RichText } from "./LinkText";
 import { CodeMessage } from "./CodeMessage";
 import { ThreadSkeleton } from "./Loading";
-import type { Conversation, FriendshipState, GameKind, Member, Message } from "./types";
+import type { Conversation, FriendshipState, GameKind, Member, Message, QuizSourceChoice } from "./types";
+import { QuizSourceSheet } from "./QuizSourceSheet";
 
 type ContactInfo = NonNullable<Message["contact"]>;
 
@@ -211,6 +212,8 @@ export function ChatView({
   const [pollViewingId, setPollViewingId] = useState<string | null>(null);
   const [fileViewing, setFileViewing] = useState<Message | null>(null);
   const [gameOpen, setGameOpen] = useState(false);
+  // クイズを選んだあと、出し方（買った問題集かsenninai）を選ぶ画面
+  const [quizSetupOpen, setQuizSetupOpen] = useState(false);
   // 「送信取り消しました」を表示するか（設定で切り替える）
   const [showUnsent, setShowUnsent] = useState(getShowUnsent);
   useEffect(() => {
@@ -691,11 +694,12 @@ export function ChatView({
   };
 
   // ミニゲームを作る（グループのトークだけ）。募集がトークに出る
-  const createGame = async (kind: GameKind) => {
+  const createGame = async (kind: GameKind, quizSource?: QuizSourceChoice) => {
     setGameOpen(false);
+    setQuizSetupOpen(false);
     setError("");
     try {
-      const message = await api<Message>(`/api/dm/${conversationId}/game`, post({ kind }));
+      const message = await api<Message>(`/api/dm/${conversationId}/game`, post({ kind, quizSource }));
       upsert([message]);
       onActivity();
     } catch (err) {
@@ -1374,7 +1378,26 @@ export function ChatView({
           onDownload={() => downloadFile(fileViewing.fileUrl!, fileViewing.fileName)}
         />
       )}
-      {gameOpen && <GameSheet onPick={(kind) => void createGame(kind)} onClose={() => setGameOpen(false)} />}
+      {gameOpen && (
+        <GameSheet
+          onPick={(kind) => {
+            // クイズは、先に出し方を選んでから募集を出す
+            if (kind === "quiz") {
+              setGameOpen(false);
+              setQuizSetupOpen(true);
+              return;
+            }
+            void createGame(kind);
+          }}
+          onClose={() => setGameOpen(false)}
+        />
+      )}
+      {quizSetupOpen && (
+        <QuizSourceSheet
+          onConfirm={(source) => void createGame("quiz", source)}
+          onClose={() => setQuizSetupOpen(false)}
+        />
+      )}
       {contactOpen && (
         <ContactSheet
           meId={meId}

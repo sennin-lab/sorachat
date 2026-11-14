@@ -161,8 +161,9 @@ export function ProfileSheet({
           <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={uploadAvatar} />
         </label>
         <strong className="profile-name">{displayName}</strong>
+        <span className="profile-handle">@{me.username}</span>
         <p className={`profile-status ${bio ? "" : "muted"}`}>{bio || "ステータスメッセージを入力"}</p>
-        {me.sennin && <p className="muted small">仙人アカウント連携中</p>}
+        {me.sennin && <span className="profile-badge">仙人アカウント連携中</span>}
       </div>
 
       {showCovers && (
@@ -182,15 +183,18 @@ export function ProfileSheet({
         </div>
       )}
 
-      <div className="profile-actions">
-        <button className="pill" onClick={() => setEditing(true)}>
-          プロフィールを編集
+      <div className="profile-tiles">
+        <button className="profile-tile" onClick={() => setEditing(true)}>
+          <Icon name="edit" size={20} />
+          <span>編集</span>
         </button>
-        <button className="pill" onClick={() => setShowQr((v) => !v)}>
-          <Icon name="qr" size={18} /> QRコード
+        <button className={`profile-tile ${showQr ? "on" : ""}`} onClick={() => setShowQr((v) => !v)}>
+          <Icon name="qr" size={20} />
+          <span>QRコード</span>
         </button>
-        <button className="pill" onClick={() => setShowSettings(true)}>
-          <Icon name="settings" size={18} /> 設定
+        <button className="profile-tile" onClick={() => setShowSettings(true)}>
+          <Icon name="settings" size={20} />
+          <span>設定</span>
         </button>
       </div>
 

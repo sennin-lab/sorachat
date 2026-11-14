@@ -40,7 +40,9 @@ import { stampRefOk } from "./stamps.js";
 import { featureAllowed, stampLocked } from "./storeAccess.js";
 import { normalizeStampRef } from "./stampRef.js";
 import { createGame, gameAction, gameViewsFor } from "./games.js";
-import { GAME_KINDS, GameError } from "./gameLogic.js";
+import { ownedQuizPacks } from "./studioData.js";
+import { GENRE_MAX } from "./quizgen.js";
+import { GAME_KINDS, GameError, type QuizSource } from "./gameLogic.js";
 import { sb } from "./supabase.js";
 import { sendToUser } from "./hub.js";
 
@@ -247,6 +249,13 @@ dm.post("/dm/group", async (req, res) => {
     if (u.id !== me) await postNotice(String(id), u.id, `${u.display_name}が参加しました`);
   }
   res.status(201).json({ id });
+});
+
+// 買ったクイズの一覧（ミニゲームのクイズで、どの問題集を使うか選ぶため）
+dm.get("/dm/quiz-packs", async (_req, res) => {
+  const me = currentUserId(res);
+  res.set("Cache-Control", "no-store");
+  res.json(await ownedQuizPacks(me));
 });
 
 dm.get("/dm/:id", async (req, res) => {
@@ -808,7 +817,12 @@ dm.post("/dm/:id/poll", async (req, res) => {
 
 const voteSchema = z.object({ optionIndex: z.number().int().min(0).max(9) });
 
-const gameCreateSchema = z.object({ kind: z.enum(GAME_KINDS) });
+const quizSourceSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("pack"), workId: z.string().uuid() }),
+  z.object({ type: z.literal("ai"), genre: z.string().max(GENRE_MAX).default("") })
+]);
+const gameCreateSchema = z.object({ kind: z.enum(GAME_KINDS), quizSource: quizSourceSchema.optional() });
+
 
 // ミニゲームを作る（グループのトークだけ。1対1では使えない）
 dm.post("/dm/:id/game", async (req, res) => {
@@ -834,7 +848,26 @@ dm.post("/dm/:id/game", async (req, res) => {
     res.status(403).json({ error: "このミニゲームは仙人ストアの拡張機能です。ストアで購入すると遊べます。" });
     return;
   }
-  const row = await createGame(id, me, parsed.data.kind);
+  // クイズは、出し方（買った問題集か、senninaiが作るか）を必ず選ぶ
+  let quizSource: QuizSource | null = null;
+  if (parsed.data.kind === "quiz") {
+    const choice = parsed.data.quizSource;
+    if (!choice) {
+      res.status(400).json({ error: "クイズの問題の出し方を選んでください。" });
+      return;
+    }
+    if (choice.type === "pack") {
+      const owned = await ownedQuizPacks(me);
+      if (!owned.some((pack) => pack.id === choice.workId)) {
+        res.status(403).json({ error: "その問題集は購入していません。" });
+        return;
+      }
+      quizSource = { type: "pack", workId: choice.workId };
+    } else {
+      quizSource = { type: "ai", genre: choice.genre.trim() };
+    }
+  }
+  const row = await createGame(id, me, parsed.data.kind, quizSource);
   res.status(201).json((await withReactions([row], me))[0]);
 });
 

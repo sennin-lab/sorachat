@@ -138,6 +138,7 @@ export function UserProfileSheet({
               <Avatar userId={profile.id} hasAvatar={profile.hasAvatar} name={profile.displayName} size={104} />
             </div>
             <strong className="profile-name">{profile.displayName}</strong>
+            <span className="profile-handle">@{profile.username}</span>
             <p className={`profile-status ${profile.bio ? "" : "muted"}`}>{profile.bio || "ステータスメッセージはありません"}</p>
           </div>
 

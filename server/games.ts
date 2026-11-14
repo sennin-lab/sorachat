@@ -12,8 +12,8 @@ import { sendToUser } from "./hub.js";
 import { insertMessage, memberIds, type MessageRow } from "./messages.js";
 import { deadlineOf, GAME_CONFIG, GameError, reduce, viewOf, type GameAction, type GameKind, type GameStatus, type GameView, type Reduced, type Stored } from "./gameLogic.js";
 import { generateQuizQuestions } from "./quizgen.js";
-import { studioQuizFor } from "./studioData.js";
-import { QUIZ_ROUNDS } from "./gameLogic.js";
+import { studioQuizFor, studioQuizFromWork } from "./studioData.js";
+import { QUIZ_ROUNDS, type QuizSource } from "./gameLogic.js";
 import { sb } from "./supabase.js";
 
 type GameRow = {
@@ -289,9 +289,9 @@ export async function resumeGameTimers(): Promise<void> {
 }
 
 // ゲームを作る（グループのトークに「ミニゲーム」のメッセージとして出す）
-export async function createGame(conversationId: string, creator: string, kind: GameKind): Promise<MessageRow> {
+export async function createGame(conversationId: string, creator: string, kind: GameKind, quizSource: QuizSource | null = null): Promise<MessageRow> {
   const row = await insertMessage(conversationId, creator, { kind: "game" }, "ミニゲーム");
-  const state: Stored = { players: [creator], cancelled: false, play: null };
+  const state: Stored = { players: [creator], cancelled: false, play: null, quizSource: kind === "quiz" ? quizSource : null };
   const { error } = await sb.from("sc_games").insert({
     message_id: row.id,
     conversation_id: conversationId,
@@ -330,11 +330,27 @@ export async function gameAction(messageId: string, me: string, input: GameActio
       !g.state.play &&
       !g.state.cancelled &&
       g.state.players.length >= GAME_CONFIG.quiz.min;
-    const quizQuestions = startingQuiz ? (await studioQuizFor(me, QUIZ_ROUNDS).catch(() => null)) ?? (await generateQuizQuestions()) : null;
+    const quizQuestions = startingQuiz ? await quizQuestionsFor(me, g.state.quizSource ?? null) : null;
     const next = reduce(g.kind, g.creator, g.state, me, { ...input, rttMs }, Math.random, quizQuestions ?? undefined, Date.now());
     applyResult(g, next);
     await broadcastLive(g);
   });
+}
+
+// 募集で選ばれた出し方から問題を作る。選ばれていない古いゲームは、従来どおり
+// （買った問題集からランダム → senninai → 固定の問題）。選んだ出し方が使えないときは、理由つきで断る
+async function quizQuestionsFor(creator: string, source: QuizSource | null) {
+  if (!source) {
+    return (await studioQuizFor(creator, QUIZ_ROUNDS).catch(() => null)) ?? (await generateQuizQuestions());
+  }
+  if (source.type === "pack") {
+    const questions = await studioQuizFromWork(creator, source.workId, QUIZ_ROUNDS);
+    if (!questions) throw new GameError("選んだ問題集は使えません（購入していないか、問題数が足りません）。");
+    return questions;
+  }
+  const questions = await generateQuizQuestions(Math.random, source.genre);
+  if (!questions) throw new GameError("問題を作れませんでした。少し待ってから、もう一度「開始」を押してください。");
+  return questions;
 }
 
 // 一覧（メッセージの読み込み）に付けるゲームの中身。viewer ごとに見せる範囲が変わる。
