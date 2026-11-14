@@ -576,6 +576,7 @@ function TapBattle({ game, nameOf, canPlay, onAction }: Sub) {
       <div className="game-tap-head">
         {seconds !== null && <Timer seconds={seconds} label="残り" />}
         <span className="game-meta">あなた {mine}回</span>
+        <span className="game-meta">Lv.{tap.level} {tap.title}・上限 {tap.maxRun}回</span>
       </div>
       <div
         className={`game-tap-pad${running ? "" : " off"}`}

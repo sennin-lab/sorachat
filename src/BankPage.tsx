@@ -18,7 +18,7 @@ type HistoryItem = { id: string; kind: HistoryKind; amount: number; creatorName:
 type BankState = {
   linked: boolean;
   asOf: string;
-  rates: { dailyPercent: number; annualPercent: number; dividendPercent: number };
+  rates: { dailyPercent: number; annualPercent: number; dividendPercent: number; dividendMaxPercent: number };
   limits: { minInvest: number; maxAmount: number };
   deposit: { principal: number; interest: number; perSecond: number; total: number; showName: boolean };
   investedTotal: number;
@@ -259,7 +259,7 @@ export function BankPage({ flash, onBack }: { me: Me; flash?: FlashMsg; onBack: 
     openSheet({
       kind: "invest",
       title: `${creator.name}に投資`,
-      hint: `投資した額は預金から移ります。${creator.name}さんの売上の ${fmt(rates.dividendPercent, 0)}% が、投資額の割合で配当になります。`,
+      hint: `投資した額は預金から移ります。${creator.name}さんの売上の ${fmt(rates.dividendPercent, 0)}〜${fmt(rates.dividendMaxPercent, 0)}% が、投資額の割合で配当になります（投資の総額が多いほど率が上がります。作者の受け取りは売上の半分以上残ります）。`,
       creatorId: creator.id,
       min: limits.minInvest,
       max: Math.min(limits.maxAmount, Math.floor(balanceNow))
@@ -407,7 +407,7 @@ export function BankPage({ flash, onBack }: { me: Me; flash?: FlashMsg; onBack: 
 
               <h2 className="bank-heading">投資できる開発者</h2>
               <p className="bank-muted bank-heading-note">
-                開発者の売上の {fmt(rates.dividendPercent, 0)}% が、投資家へ配当として配られます。作者の受け取りからその分が引かれ、「senninstudio」の売上で確認できます。
+                開発者の売上の {fmt(rates.dividendPercent, 0)}〜{fmt(rates.dividendMaxPercent, 0)}% が、投資家へ配当として配られます。投資の総額が多いほど率が上がり、作者の受け取りは必ず売上の半分以上残ります。作者の受け取りからその分が引かれ、「senninstudio」の売上で確認できます。
               </p>
               {state.creators.length === 0 ? (
                 <p className="bank-empty">いまは投資できる開発者がいません。</p>

@@ -8,6 +8,7 @@ import { sb } from "./supabase.js";
 import { retryPayout } from "./studioPayout.js";
 import { imagesByWork, WORK_PREFIX } from "./studioData.js";
 import { ExtensionError, readExtensionGrant, setCertifiedCreator, setExtensionGrant } from "./extensionPoints.js";
+import { checkExtension } from "./studioRules.js";
 
 export const studioAdmin = Router();
 studioAdmin.use("/admin/studio", requireAdmin);
@@ -86,7 +87,7 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
   if (!id) return;
   const { data: work, error } = await sb
     .from("sc_studio_works")
-    .select("id, creator_id, kind, name, description, price, status, hidden_reason, payload, created_at")
+    .select("id, creator_id, kind, name, description, price, status, hidden_reason, payload, created_at, updated_at")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
@@ -111,6 +112,7 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
     hiddenReason: work.hidden_reason,
     payload: work.payload,
     createdAt: work.created_at,
+    updatedAt: work.updated_at,
     images: (images.get(id) ?? []).map((i) => ({ id: i.id, role: i.role })),
     creator: {
       id: work.creator_id,
@@ -127,6 +129,87 @@ studioAdmin.get("/admin/studio/works/:id", async (req, res) => {
     // 拡張機能のときだけ、ポイント配布の上限（管理者が決める）を返す
     grant: work.kind === "extension" ? await readExtensionGrant(id) : null
   });
+});
+
+// ---- 拡張機能のコードを書き直す（管理者）----
+// 作者のコードを管理者が差し替える。理由は必須で、差し替えの前後の内容を履歴（sc_studio_code_edits）に残す。
+// 読んだときの updated_at を送ってもらい、作者が先に編集していた場合は上書きせず 409 にする。
+const codeSchema = z.object({
+  html: z.string().max(150_000),
+  css: z.string().max(150_000),
+  js: z.string().max(150_000),
+  reason: z.string().trim().min(2, "理由を2文字以上で書いてください。").max(200),
+  updatedAt: z.string().min(1)
+});
+
+studioAdmin.put("/admin/studio/works/:id/code", async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  const parsed = codeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "入力の形式が正しくありません。" });
+    return;
+  }
+  const { html, css, js, reason, updatedAt } = parsed.data;
+
+  const { data: work, error } = await sb
+    .from("sc_studio_works")
+    .select("id, kind, status, payload, updated_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!work || work.kind !== "extension") {
+    res.status(404).json({ error: "拡張機能が見つかりません。" });
+    return;
+  }
+  if (work.status === "deleted") {
+    res.status(400).json({ error: "削除した作品は書き直せません。" });
+    return;
+  }
+  const checked = checkExtension({ html, css, js });
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.error });
+    return;
+  }
+
+  // 読んだ時点の版（updated_at）のままの行だけを書き換える（作者との同時編集で、片方の変更を消さないため）
+  const now = new Date().toISOString();
+  const { data: updated, error: updateError } = await sb
+    .from("sc_studio_works")
+    .update({ payload: checked.payload, edited_at: now, updated_at: now })
+    .eq("id", id)
+    .eq("updated_at", updatedAt)
+    .select("id");
+  if (updateError) throw updateError;
+  if (!updated || updated.length === 0) {
+    res.status(409).json({ error: "作者が先に編集しています。画面を読み直してから、もう一度お試しください。" });
+    return;
+  }
+
+  const { error: logError } = await sb.from("sc_studio_code_edits").insert({
+    work_id: id,
+    reason,
+    before_payload: work.payload,
+    after_payload: checked.payload
+  });
+  if (logError) console.error("[studio] 拡張機能の書き直しの履歴を残せませんでした:", logError);
+  res.json({ ok: true, updatedAt: now });
+});
+
+// 書き直しの履歴（新しい順。コードの中身は返さない。理由と日時だけ）
+studioAdmin.get("/admin/studio/works/:id/code-edits", async (req, res) => {
+  const id = idParam(req, res);
+  if (!id) return;
+  const { data, error } = await sb
+    .from("sc_studio_code_edits")
+    .select("reason, created_at")
+    .eq("work_id", id)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  res.json(
+    (data ?? []).map((row) => ({ reason: String(row.reason), createdAt: String(row.created_at) }))
+  );
 });
 
 // 拡張機能からのポイント配布の上限を決める。0 にするか active を false にすると、配布は止まる

@@ -435,7 +435,8 @@ async function buildState(me: string) {
     rates: {
       dailyPercent: rates.dailyRate * 100,
       annualPercent: rates.dailyRate * 365 * 100,
-      dividendPercent: rates.dividendRate * 100
+      dividendPercent: rates.dividendRate * 100,
+      dividendMaxPercent: rates.dividendMaxRate * 100
     },
     limits: { minInvest: BANK_LIMITS.minInvest, maxAmount: BANK_LIMITS.maxAmount },
     deposit: {

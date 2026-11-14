@@ -17,15 +17,19 @@ export async function recordSale(args: { creatorId: string; workId: string; purc
   // 配当の計算・支払いの記録・投資家への配当を、1つの DB の関数（supabase/schema_v42.sql）で行う。
   // 同じ購入（または同じ拡張機能の支払い）は、関数の中で二重に記録しない。
   const id = randomUUID();
-  const { data, error } = await sb.rpc("sc_bank_record_sale", {
+  const rates = bankRates();
+  const { data, error } = await sb.rpc("sc_bank_record_sale_v3", {
     p_payout: id,
     p_creator: args.creatorId,
     p_work: args.workId,
     p_purchase: args.purchaseId ?? null,
     p_charge: args.chargeId ?? null,
     p_gross: args.amount,
-    p_dividend_rate: bankRates().dividendRate,
-    p_daily_rate: bankRates().dailyRate
+    p_dividend_rate: rates.dividendRate,
+    p_dividend_max_rate: rates.dividendMaxRate,
+    p_dividend_scale: rates.dividendScale,
+    p_dividend_exponent: rates.dividendExponent,
+    p_daily_rate: rates.dailyRate
   });
   if (error) throw error;
   const created = Boolean((data as { created?: boolean } | null)?.created);

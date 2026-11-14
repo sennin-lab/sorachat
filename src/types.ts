@@ -279,6 +279,9 @@ export type GameView = {
     phase: "count" | "run" | "done";
     counts: Record<string, number>;
     deadlineIn: number | null;
+    level: number;
+    title: string;
+    maxRun: number;
   };
   // 反射神経バトル：GO の前は deadlineIn が null（待ち時間を見せない）
   reflex: null | {

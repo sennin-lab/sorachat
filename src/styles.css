@@ -2940,6 +2940,7 @@ textarea.dev-input { resize: vertical; }
 /* 管理者：拡張機能の配布の上限 */
 .admin-grant { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; padding: 12px; border-radius: 12px; background: var(--raised); }
 .admin-grant .admin-meta { margin: 0; }
+.admin-code { width: 100%; min-height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; white-space: pre; overflow: auto; }
 .admin-grant-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 14px; }
 .admin-grant-row input[type="number"] { width: 120px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
 .admin-grant-check { display: inline-flex; align-items: center; gap: 6px; }

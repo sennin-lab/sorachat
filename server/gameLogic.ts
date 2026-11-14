@@ -21,6 +21,13 @@ export const GAME_CONFIG: Record<GameKind, { min: number; max: number }> = {
 // 連打バトル：1秒あたりに数えてよい最大の回数（端末の連打の上限より少し多め）と、最初の余裕
 export const TAP_MAX_PER_SECOND = 14;
 export const TAP_GRACE = 15;
+// 連打の極め（練度）：累計の連打回数で上がる。下の段階の回数に届くとレベルが1つ上がる（レベル0〜7）
+export const TAP_MASTERY_STEPS = [0, 300, 1_000, 2_500, 6_000, 12_000, 25_000, 50_000] as const;
+export const TAP_TITLES = ["はじめての連打", "連打見習い", "連打好き", "連打の達人", "連打マスター", "伝説の指", "極めし者", "連打の果て"] as const;
+// レベル1つで上がる秒あたりの回数、と最初の余裕。秒あたりの上限は人の指の限界より少し上で止める
+export const TAP_RATE_PER_LEVEL = 0.5;
+export const TAP_GRACE_PER_LEVEL = 3;
+export const TAP_PER_SECOND_CEIL = 18;
 // 反射神経バトル：何ラウンドやるか
 export const REFLEX_ROUNDS = 3;
 
@@ -105,12 +112,36 @@ type GuessPlay = {
   guesses: { by: string; value: number; result: "higher" | "lower" | "correct" }[];
   winner: string | null;
 };
+// 連打の極め（レベル）から決まる、その人の上限（秒あたりの回数と最初の余裕）
+export type TapCap = { level: number; perSecond: number; grace: number };
+export function tapLevelOf(lifetimeTaps: number): number {
+  let level = 0;
+  for (let i = 0; i < TAP_MASTERY_STEPS.length; i++) {
+    if (lifetimeTaps >= TAP_MASTERY_STEPS[i]) level = i;
+  }
+  return level;
+}
+export function tapCapOf(lifetimeTaps: number): TapCap {
+  const level = tapLevelOf(lifetimeTaps);
+  return {
+    level,
+    perSecond: Math.min(TAP_PER_SECOND_CEIL, TAP_MAX_PER_SECOND + level * TAP_RATE_PER_LEVEL),
+    grace: TAP_GRACE + level * TAP_GRACE_PER_LEVEL
+  };
+}
+// 連打バトルの時間いっぱいで出せる最大回数（画面に出す目安）
+export function tapMaxRun(cap: TapCap): number {
+  return Math.floor((cap.perSecond * TIMING.tapRun) / 1000) + cap.grace;
+}
+
 type TapPlay = {
   kind: "tap";
   phase: "count" | "run" | "done";
   runStart: number | null;
   counts: Record<string, number>;
   deadline: number | null;
+  // 開始したときの、各人の上限（練度で変わる）
+  caps?: Record<string, TapCap>;
 };
 type ReflexResult = { round: number; winner: string | null; times: Record<string, number | null>; falseStart: string[] };
 type ReflexPlay = {
@@ -186,6 +217,10 @@ export type GameView = {
     counts: Record<string, number>;
     // 「スタート」まで・終わるまでの残り（ミリ秒）
     deadlineIn: number | null;
+    // 自分の練度（レベル・称号）と、このラウンドで出せる最大回数
+    level: number;
+    title: string;
+    maxRun: number;
   };
   reflex: null | {
     round: number;
@@ -232,12 +267,14 @@ const shuffle = <T>(list: T[], random: () => number): T[] => {
 };
 
 // quizQuestions は senninai が作った問題（足りないときは固定の問題を使う）
-function startPlay(kind: GameKind, players: string[], random: () => number, now: number, quizQuestions?: QuizQuestion[]): Play {
+function startPlay(kind: GameKind, players: string[], random: () => number, now: number, quizQuestions?: QuizQuestion[], masteries: Record<string, number> = {}): Play {
   if (kind === "tictactoe") return { kind, board: Array(9).fill(""), turn: "X", winner: null, line: null };
   if (kind === "tap") {
     const counts: Record<string, number> = {};
     for (const uid of players) counts[uid] = 0;
-    return { kind, phase: "count", runStart: null, counts, deadline: now + TIMING.tapCountdown };
+    const caps: Record<string, TapCap> = {};
+    for (const uid of players) caps[uid] = tapCapOf(masteries[uid] ?? 0);
+    return { kind, phase: "count", runStart: null, counts, deadline: now + TIMING.tapCountdown, caps };
   }
   if (kind === "reflex") {
     const scores: Record<string, number> = {};
@@ -519,7 +556,8 @@ function tapAction(play: TapPlay, me: string, input: GameAction, now: number) {
   if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 30) throw new GameError("回数が正しくありません。");
   // 送られた回数は、経過した時間で上限を決めて抑える（不正な連打の防止）
   const elapsed = Math.max(0, now - (play.runStart ?? now));
-  const cap = Math.floor((TAP_MAX_PER_SECOND * elapsed) / 1000) + TAP_GRACE;
+  const c = play.caps?.[me] ?? tapCapOf(0);
+  const cap = Math.floor((c.perSecond * elapsed) / 1000) + c.grace;
   play.counts[me] = Math.min(cap, (play.counts[me] ?? 0) + n);
 }
 
@@ -585,7 +623,8 @@ export function reduce(
   input: GameAction,
   random: () => number = Math.random,
   quizQuestions?: QuizQuestion[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  masteries: Record<string, number> = {}
 ): Reduced {
   const stored: Stored = JSON.parse(JSON.stringify(current));
   if (stored.cancelled || isFinished(stored.play)) throw new GameError("このゲームは終わっています。");
@@ -604,7 +643,7 @@ export function reduce(
       stored.players.push(me);
       // 三目並べは2人そろったら、その場で始まる
       if (kind === "tictactoe" && stored.players.length === GAME_CONFIG[kind].max) {
-        stored.play = startPlay(kind, stored.players, random, now, quizQuestions);
+        stored.play = startPlay(kind, stored.players, random, now, quizQuestions, masteries);
       }
       break;
     }
@@ -614,7 +653,7 @@ export function reduce(
       if (stored.players.length < GAME_CONFIG[kind].min) {
         throw new GameError(`${GAME_CONFIG[kind].min}人そろってから始めてください。`);
       }
-      stored.play = startPlay(kind, stored.players, random, now, quizQuestions);
+      stored.play = startPlay(kind, stored.players, random, now, quizQuestions, masteries);
       break;
     }
     case "cancel": {
@@ -690,10 +729,14 @@ export function viewOf(kind: GameKind, creator: string, stored: Stored, status: 
       deadlineIn: remainingOf(play, now)
     };
   } else if (play.kind === "tap") {
+    const cap = play.caps?.[viewer] ?? tapCapOf(0);
     view.tap = {
       phase: play.phase,
       counts: { ...play.counts },
-      deadlineIn: remainingOf(play, now)
+      deadlineIn: remainingOf(play, now),
+      level: cap.level,
+      title: TAP_TITLES[cap.level],
+      maxRun: tapMaxRun(cap)
     };
   } else if (play.kind === "reflex") {
     view.reflex = {

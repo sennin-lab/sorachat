@@ -274,9 +274,19 @@ async function tickGame(messageId: string): Promise<void> {
       if (error instanceof GameError) return;
       throw error;
     }
+    const wasFinished = g.status === "finished";
     applyResult(g, next);
+    if (!wasFinished) await recordFinishedTap(g, next);
     await broadcastLive(g);
   });
+}
+
+// 連打バトルが終わったときだけ、回数を練度（累計）に加える（時間切れで終わった場合もここで数える）
+async function recordFinishedTap(g: Live, next: Reduced): Promise<void> {
+  if (g.kind !== "tap" || next.status !== "finished" || next.stored.play?.kind !== "tap") return;
+  await recordTapResults(g.messageId, next.stored.play.counts).catch((error) =>
+    console.error("[games] 連打の記録に失敗:", error)
+  );
 }
 
 // サーバーを再起動したあとも、進行中のゲームの締め切りを引き継ぐ（DB に保存された状態から）
@@ -331,10 +341,33 @@ export async function gameAction(messageId: string, me: string, input: GameActio
       !g.state.cancelled &&
       g.state.players.length >= GAME_CONFIG.quiz.min;
     const quizQuestions = startingQuiz ? await quizQuestionsFor(me, g.state.quizSource ?? null) : null;
-    const next = reduce(g.kind, g.creator, g.state, me, { ...input, rttMs }, Math.random, quizQuestions ?? undefined, Date.now());
+    // 連打バトルは開始するときに、参加者それぞれの練度（累計の回数）を読む
+    const startingTap = g.kind === "tap" && input.action === "start" && me === g.creator && !g.state.play;
+    const masteries = startingTap ? await lifetimeTapsOf(g.state.players) : {};
+    const wasFinished = g.status === "finished";
+    const next = reduce(g.kind, g.creator, g.state, me, { ...input, rttMs }, Math.random, quizQuestions ?? undefined, Date.now(), masteries);
     applyResult(g, next);
+    if (!wasFinished) await recordFinishedTap(g, next);
     await broadcastLive(g);
   });
+}
+
+// 参加者それぞれの累計の連打回数（練度を決める）
+async function lifetimeTapsOf(players: string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (!players.length) return out;
+  const { data, error } = await sb.from("sc_tap_mastery").select("user_id, lifetime_taps").in("user_id", players);
+  if (error) throw error;
+  for (const row of data ?? []) out[String(row.user_id)] = Number(row.lifetime_taps ?? 0);
+  return out;
+}
+
+// 終わった連打バトルの回数を、練度（累計）に加える。同じゲームは1回しか数えない（DB 側で確かめる）
+async function recordTapResults(messageId: string, counts: Record<string, number>): Promise<void> {
+  const rows = Object.entries(counts).map(([user_id, taps]) => ({ user_id, taps: Math.max(0, Math.floor(taps)) }));
+  if (!rows.length) return;
+  const { error } = await sb.rpc("sc_tap_record", { p_message: messageId, p_rows: rows });
+  if (error) throw error;
 }
 
 // 募集で選ばれた出し方から問題を作る。選ばれていない古いゲームは、従来どおり

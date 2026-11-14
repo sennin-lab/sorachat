@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, post } from "./api";
+import { ApiError, api, post, put } from "./api";
 
 // 管理者パネルの「作品」タブ（senninstudio の審査・通報・作者の停止・支払いの再送）
 // 作者ができない操作（公開停止・復帰・削除・作者の停止・支払いの再送）はここで行う
@@ -28,6 +28,7 @@ type WorkDetail = {
   hiddenReason: string | null;
   payload: Record<string, unknown> | null;
   createdAt: string;
+  updatedAt: string;
   images: { id: string; role: string }[];
   creator: { id: string; name: string; suspended: boolean; suspendedReason: string | null; certified: boolean };
   reports: { reporterName: string; reason: string; createdAt: string }[];
@@ -241,6 +242,91 @@ function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: Gra
   );
 }
 
+type CodeEditRow = { reason: string; createdAt: string };
+
+// 拡張機能のコードを書き直す（管理者）。理由は必須。保存すると、公開中の拡張機能にもすぐ反映される
+function ExtensionCodeEditor({ work, onSaved }: { work: WorkDetail; onSaved: () => Promise<void> }) {
+  const initial = work.payload ?? {};
+  const [html, setHtml] = useState(String(initial.html ?? ""));
+  const [css, setCss] = useState(String(initial.css ?? ""));
+  const [js, setJs] = useState(String(initial.js ?? ""));
+  const [why, setWhy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [history, setHistory] = useState<CodeEditRow[]>([]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistory(await adminApi<CodeEditRow[]>(`/api/admin/studio/works/${work.id}/code-edits`));
+    } catch {
+      // 履歴が読めなくても、書き直しはできる
+    }
+  }, [work.id]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+
+  const save = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await adminApi(`/api/admin/studio/works/${work.id}/code`, put({ html, css, js, reason: why.trim(), updatedAt: work.updatedAt }));
+      setMessage({ ok: true, text: "コードを書き直して保存しました。" });
+      setWhy("");
+      await onSaved();
+      await loadHistory();
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canSave = !busy && why.trim().length >= 2 && (html.trim() !== "" || js.trim() !== "");
+
+  return (
+    <section className="admin-grant">
+      <h4 className="admin-subtitle">コードを書き直す</h4>
+      <p className="admin-meta">保存すると、公開中の拡張機能にもすぐ反映されます。作者の了承を取ってから書き直してください。</p>
+      <label className="admin-field">
+        <span>HTML</span>
+        <textarea className="admin-code" value={html} onChange={(e) => setHtml(e.target.value)} spellCheck={false} />
+      </label>
+      <label className="admin-field">
+        <span>CSS</span>
+        <textarea className="admin-code" value={css} onChange={(e) => setCss(e.target.value)} spellCheck={false} />
+      </label>
+      <label className="admin-field">
+        <span>JavaScript</span>
+        <textarea className="admin-code" value={js} onChange={(e) => setJs(e.target.value)} spellCheck={false} />
+      </label>
+      <label className="admin-field">
+        <span>書き直した理由（必須・履歴に残ります）</span>
+        <input value={why} maxLength={200} onChange={(e) => setWhy(e.target.value)} />
+      </label>
+      <div className="admin-actions">
+        <button type="button" className="btn-primary" disabled={!canSave} onClick={() => void save()}>
+          保存して反映
+        </button>
+      </div>
+      {message && <p className={message.ok ? "admin-meta" : "notice error center"}>{message.text}</p>}
+      <h5 className="admin-subtitle">書き直しの履歴</h5>
+      {history.length === 0 ? (
+        <p className="admin-empty">履歴はありません。</p>
+      ) : (
+        <ul className="admin-plain">
+          {history.map((h, i) => (
+            <li key={i}>
+              {when(h.createdAt)}：{h.reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function WorkDetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const [work, setWork] = useState<WorkDetail | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -315,6 +401,7 @@ function WorkDetailView({ id, onBack }: { id: string; onBack: () => void }) {
       <p className="admin-desc">{work.description || "（説明なし）"}</p>
 
       {work.kind === "extension" && <ExtensionGrantEditor id={work.id} grant={work.grant} onChanged={load} />}
+      {work.kind === "extension" && <ExtensionCodeEditor work={work} onSaved={load} />}
 
       <div className="admin-thumbs">
         {work.images.map((img) => (
