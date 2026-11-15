@@ -13,7 +13,6 @@
 <style>
 :root {
   --bg: #ffffff;
-  --surface: #ffffff;
   --surface-hover: #f5f6f8;
   --text: #202124;
   --muted: #858b98;
@@ -114,11 +113,13 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
   gap: 10px;
   padding: 12px 7px;
   border-top: 1px solid var(--border);
+  min-width: 0;
 }
 
 .avatar {
   width: 34px;
   height: 34px;
+  flex-shrink: 0;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -126,10 +127,13 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
   color: #526bea;
   font-size: 13px;
   font-weight: 600;
+  overflow: hidden;
 }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-.user-name { font-size: 12px; font-weight: 600; }
-.user-status { color: var(--muted); font-size: 10px; margin-top: 3px; }
+.user-text { min-width: 0; }
+.user-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-status { color: var(--muted); font-size: 10px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Sidebar overlay */
 
@@ -248,7 +252,29 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 .dropdown-item i { width: 17px; text-align: center; color: #858b99; font-size: 13px; transition: color .2s, transform .25s; }
 .dropdown-item:hover i { color: var(--accent); transform: scale(1.12); }
 
+.dropdown-item.row { cursor: default; }
+.dropdown-item.row:hover { transform: none; background: transparent; color: #444b58; }
+
 .dropdown-divider { height: 1px; background: var(--border); margin: 6px 4px; }
+
+/* Toggle switch */
+
+.switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; margin-left: auto; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; background: #d5d9e2; border-radius: 20px; transition: background .25s; }
+.slider::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform .25s;
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(16px); }
 
 /* Chat */
 
@@ -321,12 +347,11 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 .message.bot .message-body strong { font-size: 11px; display: block; margin-bottom: 7px; }
 .message.error .message-body { color: #b42318; }
 
-@keyframes messageIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes bubbleIn { from { transform: scale(.94); } to { transform: scale(1); } }
-
-.typing { color: var(--muted); }
 .typing::after { content: "…"; animation: dots 1.2s steps(4, end) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+@keyframes messageIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes bubbleIn { from { transform: scale(.94); } to { transform: scale(1); } }
 
 /* Input section */
 
@@ -380,8 +405,6 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 .input-bottom { display: flex; align-items: center; justify-content: flex-end; margin-top: 2px; transition: margin .3s; }
 .input-box.has-content .input-bottom { margin-top: 7px; }
 
-/* Send button */
-
 .send-btn {
   width: 33px;
   height: 33px;
@@ -402,46 +425,47 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 
 .input-caption { text-align: center; color: #a5aab4; font-size: 10px; padding: 11px 0 0; }
 
-/* Link notice (SoraChat連携) */
+/* Gate（SoraChat連携前のロック画面） */
 
-.link-badge {
-  font-size: 10px;
-  color: #1f7a4d;
-  background: #e8f7ef;
-  padding: 5px 9px;
-  border-radius: 20px;
-  font-weight: 600;
-  display: none;
-}
-.link-badge.on { display: inline-block; }
-
-/* Toggle switch */
-
-.switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; margin-left: auto; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider {
-  position: absolute;
+.gate {
+  position: fixed;
   inset: 0;
-  background: #d5d9e2;
-  border-radius: 20px;
-  transition: background .25s;
+  background: rgba(255,255,255,.97);
+  display: none;
+  place-items: center;
+  padding: 24px;
+  z-index: 50;
 }
-.slider::before {
-  content: "";
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  left: 2px;
-  top: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform .25s;
-}
-.switch input:checked + .slider { background: var(--accent); }
-.switch input:checked + .slider::before { transform: translateX(16px); }
+.gate.on { display: grid; animation: appAppear .3s ease both; }
 
-.dropdown-item.row { cursor: default; }
-.dropdown-item.row:hover { transform: none; background: transparent; color: #444b58; }
+.gate-card { text-align: center; max-width: 340px; }
+.gate-card .gate-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 18px;
+  border-radius: 16px;
+  background: var(--accent-light);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+}
+.gate-card h2 { font-size: 20px; font-weight: 600; letter-spacing: -.4px; margin: 0 0 10px; color: #30333b; }
+.gate-card p { font-size: 12px; line-height: 1.8; color: #646a76; margin: 0 0 22px; }
+
+.gate-btn {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  padding: 12px 22px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background .2s, transform .2s;
+}
+.gate-btn:hover { background: #4059d7; transform: translateY(-1px); }
+.gate-btn:disabled { background: #b9c3f5; transform: none; cursor: default; }
+.gate-error { color: #b42318; font-size: 11px; margin-top: 14px; min-height: 16px; }
 
 /* Scrollbar */
 
@@ -457,7 +481,6 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
     inset: 0 auto 0 0;
     width: 260px;
     transform: translateX(-105%);
-    box-shadow: none;
   }
   .sidebar.mobile-open { transform: translateX(0); box-shadow: 10px 0 35px rgba(0,0,0,.1); }
   .mobile-menu { display: grid; }
@@ -509,10 +532,10 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 
     <div class="sidebar-bottom">
       <div class="user-profile">
-        <div class="avatar">B</div>
-        <div>
-          <div class="user-name">Bots</div>
-          <div class="user-status" id="linkStatus">SoraChat 未連携</div>
+        <div class="avatar" id="accountAvatar">?</div>
+        <div class="user-text">
+          <div class="user-name" id="accountName">読み込み中…</div>
+          <div class="user-status" id="accountUsername"></div>
         </div>
       </div>
     </div>
@@ -529,7 +552,6 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
         </button>
         <div class="page-name">AI Chat</div>
         <div class="model-tag">Bots AI</div>
-        <div class="link-badge" id="linkBadge">SoraChat 連携中</div>
       </div>
 
       <div class="top-actions">
@@ -595,6 +617,17 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
   </main>
 </div>
 
+<!-- 連携前のロック画面 -->
+<div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+  <div class="gate-card">
+    <div class="gate-icon"><i class="fa-solid fa-link"></i></div>
+    <h2 id="gateTitle">SoraChat と連携してください</h2>
+    <p>Bots は SoraChat のアカウントと連携すると使えます。連携はいつでも設定から解除できます。</p>
+    <button class="gate-btn" id="gateBtn" onclick="linkNow()">SoraChat と連携する</button>
+    <div class="gate-error" id="gateError"></div>
+  </div>
+</div>
+
 <script>
 const settingsButton = document.getElementById('settingsButton');
 const settingsDropdown = document.getElementById('settingsDropdown');
@@ -607,8 +640,9 @@ const chatArea = document.getElementById('chatArea');
 const inputBox = document.getElementById('inputBox');
 const sendBtn = document.getElementById('sendBtn');
 const linkToggle = document.getElementById('linkToggle');
-const linkBadge = document.getElementById('linkBadge');
-const linkStatus = document.getElementById('linkStatus');
+const gate = document.getElementById('gate');
+const gateBtn = document.getElementById('gateBtn');
+const gateError = document.getElementById('gateError');
 
 let botHistory = [];
 let busy = false;
@@ -643,38 +677,94 @@ function selectMenu(name) {
   alert(name + ' を選択しました。');
 }
 
-/* SoraChat link */
+/* Account（SoraChat のアイコンと名前） */
+
+async function loadAccount() {
+  try {
+    const res = await fetch('/api/bots/me', { credentials: 'same-origin' });
+    if (res.status === 401) {
+      showLogin();
+      return;
+    }
+    if (!res.ok) return;
+    const me = await res.json();
+    const avatar = document.getElementById('accountAvatar');
+    avatar.textContent = '';
+    if (me.avatarUrl) {
+      const img = document.createElement('img');
+      img.src = me.avatarUrl;
+      img.alt = '';
+      avatar.appendChild(img);
+    } else {
+      avatar.textContent = (me.displayName || me.username || '?').charAt(0);
+    }
+    document.getElementById('accountName').textContent = me.displayName || me.username;
+    document.getElementById('accountUsername').textContent = '@' + me.username;
+  } catch (_) {
+    /* 読めなくても画面は使える */
+  }
+}
+
+function showLogin() {
+  gateBtn.disabled = false;
+  gateError.textContent = 'SoraChat にログインしてから開いてください。';
+  gateBtn.textContent = 'SoraChat を開く';
+  gateBtn.onclick = () => { window.location.href = '/'; };
+  gate.classList.add('on');
+}
+
+/* Link（連携の状態はサーバーに保存） */
 
 function applyLinkState(allowed) {
   linkToggle.checked = allowed;
-  linkBadge.classList.toggle('on', allowed);
-  linkStatus.textContent = allowed ? 'SoraChat 連携中' : 'SoraChat 未連携';
+  gate.classList.toggle('on', !allowed);
+  if (allowed) {
+    gateError.textContent = '';
+    gateBtn.disabled = false;
+  }
 }
 
 async function loadLinkState() {
   try {
     const res = await fetch('/api/bots/link', { credentials: 'same-origin' });
+    if (res.status === 401) return showLogin();
     if (!res.ok) return;
     const data = await res.json();
     applyLinkState(data.allowed === true);
   } catch (_) {
-    /* 読めなくても会話はできる */
+    gateError.textContent = '連携の状態を確認できませんでした。再読み込みしてください。';
+  }
+}
+
+async function saveLink(allowed) {
+  const res = await fetch('/api/bots/link', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ allowed })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new Error('SoraChat にログインしてから開いてください。');
+  if (!res.ok) throw new Error(data.error || '連携を保存できませんでした。');
+  return data.allowed === true;
+}
+
+async function linkNow() {
+  gateBtn.disabled = true;
+  gateError.textContent = '';
+  try {
+    applyLinkState(await saveLink(true));
+  } catch (e) {
+    gateBtn.disabled = false;
+    gateError.textContent = e.message;
   }
 }
 
 async function setSoraChatLink(allowed) {
   try {
-    const res = await fetch('/api/bots/link', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ allowed })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '連携の設定を保存できませんでした。');
-    applyLinkState(data.allowed === true);
+    applyLinkState(await saveLink(allowed));
   } catch (e) {
-    applyLinkState(!allowed);
+    linkToggle.checked = !allowed;
     alert(e.message);
   }
 }
@@ -740,7 +830,6 @@ function addMessage(text, type) {
 
     body.append(name, content);
     message.append(icon, body);
-    if (type === 'error') message.classList.add('error');
   }
 
   messages.appendChild(message);
@@ -773,10 +862,8 @@ async function sendMessage() {
   promptInput.style.height = 'auto';
   inputBox.classList.remove('has-content');
 
-  const pending = addMessage('考えています', 'bot');
-  const pendingBody = pending.querySelector('.message-body > div');
-  pendingBody.classList.add('typing');
-  pendingBody.textContent = '';
+  const pending = addMessage('', 'bot');
+  pending.querySelector('.message-body > div').classList.add('typing');
 
   setBusy(true);
   try {
@@ -787,15 +874,21 @@ async function sendMessage() {
       body: JSON.stringify({ message: text, history: botHistory.slice(-10) })
     });
     const data = await res.json().catch(() => ({}));
+
+    if (res.status === 403 && data.needsLink) {
+      pending.remove();
+      applyLinkState(false);
+      return;
+    }
     if (!res.ok) throw new Error(data.error || '応答できませんでした。');
 
     botHistory.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply });
     pending.remove();
     addMessage(data.reply, 'bot');
-    if (typeof data.linked === 'boolean') applyLinkState(data.linked);
   } catch (e) {
     pending.remove();
-    addMessage(e.message || '応答できませんでした。', 'error');
+    const errorMessage = addMessage(e.message || '応答できませんでした。', 'bot');
+    errorMessage.classList.add('error');
   } finally {
     setBusy(false);
     promptInput.focus();
@@ -821,6 +914,7 @@ function newChat() {
   chatArea.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+loadAccount();
 loadLinkState();
 </script>
 
