@@ -35,6 +35,7 @@ import tubeRouter from "./tube/router.js";
 import { ipBanGate, reloadIpBans } from "./ipBans.js";
 import { referral } from "./referral.js";
 import { bank } from "./bank.js";
+import { bots } from "./bots.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,6 +61,9 @@ app.get("/api/status", async (_req, res) => {
 // メンテナンスモードは管理者パネルから即時切り替え可能。
 // /api/admin と /admin はメンテナンス中も利用できる。
 app.use(maintenanceGate);
+
+// Bots（/bots と /api/bots/*）。SoraChat の画面からはリンクしない
+app.use(bots);
 
 // 仙人Tube Plus（/tube の中で動く。SoraChat と同じ場所から開く）
 app.use("/tube", tubeRouter);
