@@ -454,6 +454,62 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 .tablewrap th { background: #f6f7fb; font-weight: 600; white-space: nowrap; }
 .tablewrap tr:last-child td { border-bottom: none; }
 
+.tool-btn {
+  width: 33px;
+  height: 33px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #656b78;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  transition: background .2s, color .2s;
+}
+.tool-btn:hover { background: var(--surface-hover); color: var(--accent); }
+
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(25,30,45,.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 80;
+  animation: appAppear .2s ease both;
+}
+.sheet {
+  width: min(420px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.sheet-head strong { font-size: 14px; }
+.sheet-close { border: none; background: transparent; color: #858b99; width: 30px; height: 30px; border-radius: 8px; }
+.sheet-close:hover { background: #f3f4f7; }
+.sheet-label { display: block; font-size: 11px; color: #6b7280; margin: 10px 0 6px; }
+.sheet-select, .sheet-text {
+  width: 100%;
+  border: 1px solid #e0e4ec;
+  border-radius: 10px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+}
+.sheet-text { resize: vertical; line-height: 1.7; }
+.sheet-select:focus, .sheet-text:focus { outline: none; border-color: #c5cdfb; }
+.sheet-note { font-size: 10px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+.sheet-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.sheet-row button { border: none; font-size: 12px; padding: 8px 14px; border-radius: 10px; }
+.sheet-cancel { background: #f1f2f6; color: #4a505c; }
+.sheet-send { background: var(--accent); color: #fff; font-weight: 600; }
+.sheet-send:disabled { background: #b9c3f5; }
+
 /* Draft（返信案：本人が送るまで送信されない） */
 
 .draft {
@@ -620,7 +676,7 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 .input-box textarea::placeholder { color: #a5aab4; }
 .input-box textarea:disabled { opacity: .6; }
 
-.input-bottom { display: flex; align-items: center; justify-content: flex-end; margin-top: 2px; transition: margin .3s; }
+.input-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; transition: margin .3s; }
 .input-box.has-content .input-bottom { margin-top: 7px; }
 
 .send-btn {
@@ -830,6 +886,7 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
                     onkeydown="handleKey(event)"
                     oninput="resizeInput(this)"></textarea>
           <div class="input-bottom">
+            <button class="tool-btn" onclick="openSendSheet('')" title="トークに送る" aria-label="トークに送る"><i class="fa-regular fa-paper-plane"></i></button>
             <button class="send-btn" id="sendBtn" onclick="sendMessage()" aria-label="送信">
               <i class="fa-solid fa-arrow-up"></i>
             </button>
@@ -847,6 +904,25 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 <!-- メッセージのメニュー（ダブルクリック・長押し・右クリック） -->
 <div class="ctx-menu" id="ctxMenu" role="menu"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- トークに送る（送信は本人が「送信」を押したときだけ） -->
+<div class="sheet-overlay" id="sendSheet" hidden onclick="if (event.target === this) closeSendSheet()">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-head">
+      <strong id="sheetTitle">トークに送る</strong>
+      <button class="sheet-close" onclick="closeSendSheet()" aria-label="閉じる"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <label class="sheet-label" for="sendTo">送信先</label>
+    <select id="sendTo" class="sheet-select"></select>
+    <label class="sheet-label" for="sendText">メッセージ</label>
+    <textarea id="sendText" class="sheet-text" rows="4" maxlength="1000"></textarea>
+    <div class="sheet-note">送信すると、選んだトークの相手に届きます。</div>
+    <div class="sheet-row">
+      <button class="sheet-cancel" onclick="closeSendSheet()">キャンセル</button>
+      <button class="sheet-send" id="sheetSend" onclick="submitSend()">送信</button>
+    </div>
+  </div>
+</div>
 
 <!-- 連携前のロック画面 -->
 <div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
@@ -1552,6 +1628,7 @@ function finishBot(bot, data) {
   bot.actions.textContent = '';
   bot.actions.append(
     msgButton('fa-regular fa-copy', 'コピー', () => copyText(bot.el._text)),
+    msgButton('fa-regular fa-paper-plane', 'トークに送る', () => openSendSheet(bot.el._text)),
     msgButton('fa-solid fa-rotate', '再生成', () => regenerate(bot.el), 'regen-btn')
   );
 }
@@ -1597,6 +1674,7 @@ function openMenu(el, x, y) {
   };
 
   addItem('コピー', 'fa-regular fa-copy', () => copyText(bodyTextOf(el)));
+  addItem('トークに送る', 'fa-regular fa-paper-plane', () => openSendSheet(bodyTextOf(el)));
   if (isUser) addItem('編集', 'fa-regular fa-pen-to-square', () => startEdit(el));
   if (!isUser && isLast) addItem('再生成', 'fa-solid fa-rotate', () => regenerate(el));
 
@@ -1802,6 +1880,61 @@ function handleEvent(event, bot) {
   }
 }
 
+/* ---------- トークに送る ---------- */
+
+async function openSendSheet(prefill) {
+  closeMenu();
+  closeSettings();
+  const select = $('sendTo');
+  const sendButton = $('sheetSend');
+  $('sendText').value = prefill || '';
+  select.textContent = '';
+  select.add(new Option('読み込み中…', ''));
+  sendButton.disabled = true;
+  $('sendSheet').hidden = false;
+  try {
+    const threads = await api('/api/bots/threads');
+    select.textContent = '';
+    if (!threads.length) {
+      select.add(new Option('送れるトークがありません', ''));
+      return;
+    }
+    threads.forEach((t) => select.add(new Option(t.isGroup ? `${t.name}（グループ）` : t.name, t.id)));
+    sendButton.disabled = false;
+    setTimeout(() => $('sendText').focus(), 50);
+  } catch (error) {
+    closeSendSheet();
+    handleApiError(error);
+  }
+}
+
+function closeSendSheet() {
+  $('sendSheet').hidden = true;
+}
+
+async function submitSend() {
+  const conversationId = $('sendTo').value;
+  const text = $('sendText').value.trim();
+  if (!conversationId) return toast('送信先を選んでください');
+  if (!text) return toast('メッセージを入力してください');
+
+  const button = $('sheetSend');
+  button.disabled = true;
+  try {
+    await api('/api/bots/send', { method: 'POST', body: JSON.stringify({ conversationId, text }) });
+    closeSendSheet();
+    toast('送信しました');
+  } catch (error) {
+    if (error.needsLink) {
+      closeSendSheet();
+      return applyLinkState(false);
+    }
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 /* ---------- 新しいチャット ---------- */
 
 function newChat() {
@@ -1831,6 +1964,7 @@ document.addEventListener('keydown', (event) => {
     closeSettings();
     closeSidebar();
     closeMenu();
+    closeSendSheet();
   }
 });
 

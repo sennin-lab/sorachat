@@ -740,6 +740,15 @@ bots.post("/api/bots/send", requireAuth, async (req: Request, res: Response) => 
   res.status(201).json({ ok: true });
 });
 
+// 送信先の候補（自分が参加しているトーク）
+bots.get("/api/bots/threads", requireAuth, async (_req: Request, res: Response) => {
+  const userId = currentUserId(res);
+  if (!(await requireLinked(userId, res))) return;
+  const threads = await listThreads(userId);
+  res.set("Cache-Control", "no-store");
+  res.json(threads.map((t) => ({ id: t.id, name: t.name, isGroup: t.isGroup })));
+});
+
 // ---- 会話（連携済みのユーザーだけ） ----
 
 const chatBody = z.object({
