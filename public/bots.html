@@ -448,6 +448,12 @@ button:focus-visible { outline: 3px solid rgba(82,107,234,.3); outline-offset: 3
 .message.bot:not(.is-last) .regen-btn { display: none; }
 .msg-actions:empty { display: none; }
 
+.tablewrap { overflow-x: auto; margin: 0 0 .9em; border: 1px solid var(--border); border-radius: 10px; }
+.tablewrap table { border-collapse: collapse; width: 100%; font-size: 12px; line-height: 1.6; }
+.tablewrap th, .tablewrap td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.tablewrap th { background: #f6f7fb; font-weight: 600; white-space: nowrap; }
+.tablewrap tr:last-child td { border-bottom: none; }
+
 /* Draft（返信案：本人が送るまで送信されない） */
 
 .draft {
@@ -1316,6 +1322,7 @@ function renderMarkdown(container, text) {
 }
 
 function renderBlocks(container, text) {
+  const lines = text.split('\n');
   let para = [];
   let list = null;
   const flushPara = () => {
@@ -1336,15 +1343,29 @@ function renderBlocks(container, text) {
     container.appendChild(ul);
     list = null;
   };
-  text.split('\n').forEach((raw) => {
-    const line = raw.trimEnd();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    // 表：「| … |」の行が続き、2行目が区切り行（|---|---|）のとき
+    if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1].trimEnd())) {
+      flushPara();
+      flushList();
+      const rows = [];
+      let j = i;
+      while (j < lines.length && isTableRow(lines[j].trimEnd())) {
+        rows.push(lines[j].trimEnd());
+        j++;
+      }
+      renderTable(container, rows);
+      i = j - 1;
+      continue;
+    }
     const bullet = line.match(/^\s*[-*・]\s+(.*)$/);
     const heading = line.match(/^#{1,6}\s+(.*)$/);
     if (bullet) {
       flushPara();
       if (!list) list = [];
       list.push(bullet[1]);
-      return;
+      continue;
     }
     flushList();
     if (heading) {
@@ -1353,16 +1374,61 @@ function renderBlocks(container, text) {
       h.className = 'h';
       appendInline(h, heading[1]);
       container.appendChild(h);
-      return;
+      continue;
     }
     if (!line.trim()) {
       flushPara();
-      return;
+      continue;
     }
     para.push(line);
-  });
+  }
   flushPara();
   flushList();
+}
+
+function isTableRow(line) {
+  return /^\s*\|.*\|\s*$/.test(line);
+}
+
+function isTableSeparator(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function splitCells(row) {
+  return row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+}
+
+function renderTable(container, rows) {
+  const header = splitCells(rows[0]);
+  const body = rows.slice(2).map(splitCells);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'tablewrap';
+  const table = document.createElement('table');
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  header.forEach((cell) => {
+    const th = document.createElement('th');
+    appendInline(th, cell);
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+
+  const tbody = document.createElement('tbody');
+  body.forEach((cells) => {
+    const tr = document.createElement('tr');
+    header.forEach((_, index) => {
+      const td = document.createElement('td');
+      appendInline(td, cells[index] || '');
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  table.append(thead, tbody);
+  wrap.appendChild(table);
+  container.appendChild(wrap);
 }
 
 function appendInline(el, text) {
