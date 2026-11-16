@@ -320,22 +320,28 @@ async function exchangeSenninCode(code: string, verifier: string) {
     "content-type": "application/x-www-form-urlencoded",
     accept: "application/json"
   };
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: config.sennin.redirectUri,
+    code_verifier: verifier
+  });
+  // クライアント認証は一方式だけ使う（secret があれば Basic、なければ本文の client_id）
   if (config.sennin.clientSecret) {
     headers.authorization = `Basic ${Buffer.from(`${config.sennin.clientId}:${config.sennin.clientSecret}`).toString("base64")}`;
+  } else {
+    body.set("client_id", config.sennin.clientId);
   }
-  const tokenResponse = await fetch(config.sennin.tokenUrl, {
-    method: "POST",
-    headers,
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: config.sennin.redirectUri,
-      client_id: config.sennin.clientId,
-      code_verifier: verifier
-    })
-  });
+  const tokenResponse = await fetch(config.sennin.tokenUrl, { method: "POST", headers, body });
   const tokenData: any = await tokenResponse.json().catch(() => ({}));
   if (!tokenResponse.ok || typeof tokenData.access_token !== "string") {
+    console.error("[sennin] トークン取得に失敗", {
+      status: tokenResponse.status,
+      error: tokenData.error,
+      description: tokenData.error_description,
+      redirectUri: config.sennin.redirectUri,
+      loginBonus: process.env.SENNIN_LOGIN_BONUS ?? null
+    });
     throw new Error("トークンを取得できませんでした。");
   }
   return tokenData as { access_token: string; refresh_token?: unknown };
