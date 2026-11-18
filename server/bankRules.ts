@@ -29,15 +29,32 @@ export function readNonNegativeInt(raw: string | undefined, fallback: number): n
   return Math.max(Math.floor(n), 0);
 }
 
+// 管理者パネルから変えた設定（DB に保存し、起動時に読み込む）。null のものは環境変数の値を使う
+export type BankOverrides = {
+  paused: boolean;
+  dailyRate: number | null;
+  dividendRate: number | null;
+  dividendMaxRate: number | null;
+};
+let overrides: BankOverrides = { paused: false, dailyRate: null, dividendRate: null, dividendMaxRate: null };
+
+export function getBankOverrides(): BankOverrides {
+  return { ...overrides };
+}
+
+export function setBankOverrides(next: BankOverrides) {
+  overrides = { ...next };
+}
+
 // 利率を読む。呼ぶたびに環境変数を読むので、再起動なしでも次の呼び出しから反映される
 export function bankRates(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
   return {
     // 預金の利息（日利。0.0002 = 0.02%/日 ≒ 年 7.3%、単利）
-    dailyRate: readRate(env.BANK_DAILY_RATE, 0.0002, 0.01),
+    dailyRate: overrides.dailyRate ?? readRate(env.BANK_DAILY_RATE, 0.0002, 0.01),
     // 配当率の下限：作者の売上から、投資がほとんど無いときに配る割合（0.1 = 10%）
-    dividendRate: readRate(env.BANK_DIVIDEND_RATE, 0.1, 0.5),
+    dividendRate: overrides.dividendRate ?? readRate(env.BANK_DIVIDEND_RATE, 0.1, 0.5),
     // 配当率の上限：作者への投資の総額が「満額の投資額」に届いたときの割合（0.3 = 30%）。下限より小さくはしない
-    dividendMaxRate: readRate(env.BANK_DIVIDEND_MAX_RATE, 0.3, 0.5),
+    dividendMaxRate: overrides.dividendMaxRate ?? readRate(env.BANK_DIVIDEND_MAX_RATE, 0.3, 0.5),
     // 満額とみなす投資の総額（pt）。これに届くまで、投資が増えるほど配当率が上がる
     dividendScale: readNonNegativeInt(env.BANK_DIVIDEND_SCALE, 10_000),
     // 投資家ごとの取り分の指数（1 = 投資額の割合どおり。1 より大きいと、多く入れた人ほど割合が上がる）

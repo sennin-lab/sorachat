@@ -17,6 +17,8 @@ type HistoryItem = { id: string; kind: HistoryKind; amount: number; creatorName:
 
 type BankState = {
   linked: boolean;
+  // 管理者が一時停止しているか（預け入れ・引き出し・投資は止まる）
+  paused?: boolean;
   asOf: string;
   rates: { dailyPercent: number; annualPercent: number; dividendPercent: number; dividendMaxPercent: number };
   limits: { minInvest: number; maxAmount: number };
@@ -334,6 +336,7 @@ export function BankPage({ flash, onBack }: { me: Me; flash?: FlashMsg; onBack: 
               <span>おろす</span>
             </button>
           </div>
+          {state.paused && <p className="bank-link-note">SenninBankは現在一時停止中です。再開までお待ちください。</p>}
           {!state.linked && (
             <p className="bank-link-note">
               ポイントを預けるには、仙人アカウントとの連携が必要です。<a href="/api/auth/sennin/link?from=bank">連携する</a>

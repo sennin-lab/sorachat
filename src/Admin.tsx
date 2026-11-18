@@ -5,6 +5,8 @@ import { formatRemaining } from "./Banned";
 import { TEAM_ID } from "./team";
 import { StudioPanel } from "./AdminStudio";
 import { AdminPayPanel } from "./AdminPay";
+import { AdminLotteryPanel } from "./AdminLottery";
+import { AdminBankPanel } from "./AdminBank";
 import { ManualIpModal } from "./ManualIpModal";
 
 import type { BanInfo } from "./types";
@@ -177,7 +179,7 @@ function AdminLogin({ onDone }: { onDone: () => void }) {
 type Go = (to: string) => void;
 
 function Dashboard({ go }: { go: Go }) {
-  const [tab, setTab] = useState<"users" | "chats" | "news" | "studio" | "pay" | "maintenance" | "ip">("users");
+  const [tab, setTab] = useState<"users" | "chats" | "news" | "studio" | "pay" | "lottery" | "bank" | "maintenance" | "ip">("users");
   return (
     <>
       <div className="admin-segment" role="tablist">
@@ -196,6 +198,12 @@ function Dashboard({ go }: { go: Go }) {
         <button role="tab" aria-selected={tab === "pay"} className={tab === "pay" ? "on" : ""} onClick={() => setTab("pay")}>
           ストア・Pay
         </button>
+        <button role="tab" aria-selected={tab === "lottery"} className={tab === "lottery" ? "on" : ""} onClick={() => setTab("lottery")}>
+          宝くじ
+        </button>
+        <button role="tab" aria-selected={tab === "bank"} className={tab === "bank" ? "on" : ""} onClick={() => setTab("bank")}>
+          銀行
+        </button>
         <button role="tab" aria-selected={tab === "maintenance"} className={tab === "maintenance" ? "on" : ""} onClick={() => setTab("maintenance")}>
           メンテナンス
         </button>
@@ -213,6 +221,10 @@ function Dashboard({ go }: { go: Go }) {
         <StudioPanel />
       ) : tab === "pay" ? (
         <AdminPayPanel />
+      ) : tab === "lottery" ? (
+        <AdminLotteryPanel />
+      ) : tab === "bank" ? (
+        <AdminBankPanel />
       ) : tab === "ip" ? (
         <IpBanPanel />
       ) : (

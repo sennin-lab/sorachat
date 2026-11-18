@@ -36,6 +36,8 @@ import { ipBanGate, reloadIpBans } from "./ipBans.js";
 import { referral } from "./referral.js";
 import { bank } from "./bank.js";
 import { bots } from "./bots.js";
+import { lottery, lotteryAdmin } from "./lottery.js";
+import { bankAdmin, initializeBankSettings } from "./bankAdmin.js";
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -81,6 +83,9 @@ app.use("/api", calls);
 app.use("/api", store);
 app.use("/api", senninPay);
 app.use("/api", bank);
+app.use("/api", bankAdmin);
+app.use("/api", lottery);
+app.use("/api", lotteryAdmin);
 app.use("/api", senningames);
 app.use("/api", studio);
 app.use("/api", studioReviews);
@@ -121,6 +126,7 @@ attachRealtime(server);
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`SoraChat listening on ${config.port}`);
   initializeMaintenanceSettings().catch((error) => console.error("メンテナンス設定の初期化に失敗しました", error));
+  initializeBankSettings().catch((error) => console.error("SenninBank の設定の初期化に失敗しました", error));
   reloadIpBans().catch((error) => console.error("IP BAN の一覧を読めませんでした", error));
   // 再起動前に始まったミニゲームの制限時間を引き継ぐ
   resumeGameTimers().catch((error) => console.error("ミニゲームの制限時間を引き継げませんでした", error));

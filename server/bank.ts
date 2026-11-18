@@ -9,9 +9,16 @@ import { z } from "zod";
 import { currentUserId, requireAuth } from "./auth.js";
 import { sb } from "./supabase.js";
 import { adjustPoints, DEFINITE_FAILURE, isLinked, SenninError, withLock } from "./senninPoints.js";
-import { BANK_LIMITS, bankRates, dividendPool, dividendShare, interestSince } from "./bankRules.js";
+import { BANK_LIMITS, bankRates, dividendPool, dividendShare, getBankOverrides, interestSince } from "./bankRules.js";
 
 export const bank = Router();
+
+// 管理者が一時停止しているときは、預け入れ・引き出し・投資・配当の受け取りの操作を止める（残高の表示は続く）
+function assertOpen() {
+  if (getBankOverrides().paused) {
+    throw new BankError(503, "SenninBankは一時停止中です。再開までお待ちください。");
+  }
+}
 bank.use("/bank", requireAuth);
 
 // 連打の防止（1人あたり、時間枠の中で max 回まで）
@@ -221,6 +228,7 @@ bank.post("/bank/deposit", async (req, res) => {
     return;
   }
   try {
+    assertOpen();
     res.json(await withLock(`bank:${me}`, () => deposit(me, parsed.data.requestId, parsed.data.amount)));
   } catch (error) {
     sendError(res, error);
@@ -240,6 +248,7 @@ bank.post("/bank/withdraw", async (req, res) => {
     return;
   }
   try {
+    assertOpen();
     res.json(await withLock(`bank:${me}`, () => withdraw(me, parsed.data.requestId, parsed.data.amount)));
   } catch (error) {
     sendError(res, error);
@@ -265,6 +274,7 @@ bank.post("/bank/invest", async (req, res) => {
     return;
   }
   try {
+    assertOpen();
     const result = await withLock(`bank:${me}`, async () => {
       if (!(await isInvestable(creatorId))) throw new BankError(404, "この開発者には投資できません。");
       const { data, error } = await sb.rpc("sc_bank_invest", {
@@ -296,6 +306,7 @@ bank.post("/bank/divest", async (req, res) => {
   }
   const { creatorId, amount } = parsed.data;
   try {
+    assertOpen();
     const result = await withLock(`bank:${me}`, async () => {
       const { data, error } = await sb.rpc("sc_bank_divest", {
         p_user: me,
@@ -431,6 +442,7 @@ async function buildState(me: string) {
 
   return {
     linked,
+    paused: getBankOverrides().paused,
     asOf: new Date(nowMs).toISOString(),
     rates: {
       dailyPercent: rates.dailyRate * 100,

@@ -21,6 +21,8 @@ const SenninPayPage = lazy(() => import("./SenninPayPage").then((m) => ({ defaul
 const SenningamesPage = lazy(() => import("./SenningamesPage").then((m) => ({ default: m.SenningamesPage })));
 // SenninBank（銀行）も、開くときだけ読み込む
 const BankPage = lazy(() => import("./BankPage").then((m) => ({ default: m.BankPage })));
+// 宝くじ（/lottery）も、開くときだけ読み込む
+const LotteryPage = lazy(() => import("./LotteryPage").then((m) => ({ default: m.LotteryPage })));
 import { AddFriendSheet } from "./AddFriendSheet";
 import { FriendsTab } from "./FriendsTab";
 import { Icon } from "./Icon";
@@ -56,7 +58,7 @@ const shouldAskNotify = (me: Me) => {
 // URL とタブの対応。プロフィールなどの重ねて表示する画面では null（直前のタブを保つ）
 const tabOfPath = (path: string): Tab | null => {
   if (path.startsWith("/friends")) return "friends";
-  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay") || path.startsWith("/tube") || path.startsWith("/extensions") || path.startsWith("/bank")) return "more";
+  if (path.startsWith("/more") || path.startsWith("/store") || path.startsWith("/studio") || path.startsWith("/pay") || path.startsWith("/tube") || path.startsWith("/extensions") || path.startsWith("/bank") || path.startsWith("/lottery")) return "more";
   if (path === "/" || path.startsWith("/home") || path.startsWith("/dm/") || path.startsWith("/groupchat/")) return "talk";
   return null;
 };
@@ -88,6 +90,8 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
   const onPayPage = path === "/pay" || path.startsWith("/pay/");
   // SenninBank（/bank）も専用のページとして開く
   const onBankPage = path === "/bank" || path.startsWith("/bank/");
+  // 宝くじ（/lottery）も専用のページとして開く
+  const onLotteryPage = path === "/lottery" || path.startsWith("/lottery/");
   // senningames（/senningames）も専用のページとして開く
   const onGamesPage = path === "/senningames" || path.startsWith("/senningames/");
   // 仙人Tube Plus（/tube）も専用のページとして開く
@@ -444,6 +448,15 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
                   </button>
                 </li>
                 <li>
+                  <button onClick={() => navigate("/lottery")}>
+                    <span className="option-icon">
+                      <Icon name="star" size={20} />
+                    </span>
+                    宝くじ
+                    <Icon name="chevron" size={18} className="chev" />
+                  </button>
+                </li>
+                <li>
                   <button onClick={() => navigate("/senningames")}>
                     <span className="option-icon">
                       <Icon name="game" size={20} />
@@ -598,6 +611,13 @@ export function Home({ me, onMeChange, onLogout }: { me: Me; onMeChange: (me: Me
         {() => (
           <Suspense fallback={null}>
             <BankPage me={me} flash={storeFlash} onBack={closePage} />
+          </Suspense>
+        )}
+      </ExitMotion>
+      <ExitMotion value={onLotteryPage ? true : null}>
+        {() => (
+          <Suspense fallback={null}>
+            <LotteryPage onBack={closePage} />
           </Suspense>
         )}
       </ExitMotion>

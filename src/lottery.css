@@ -1,0 +1,228 @@
+/* 宝くじ（/lottery）の見た目。既存の色（--panel・--line など）を使い、ふだんの画面になじませる */
+
+.lot-wrap {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 28px;
+}
+.lot-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.lot-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
+}
+.lot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lot-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lot-status {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--raised);
+  color: var(--accent-ink);
+}
+.lot-status.is-done {
+  background: var(--accent);
+  color: #fff;
+}
+.lot-meta {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.lot-prizes {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.lot-prizes li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: var(--bg-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 当選番号の桁 */
+.lot-digits {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 16px 0 4px;
+}
+.lot-digit {
+  width: 52px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--raised);
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.lot-digit.is-spin {
+  color: var(--muted);
+}
+.lot-digit.is-revealed {
+  color: var(--accent-ink);
+  animation: lot-pop 0.5s var(--ease-spring) both;
+}
+@keyframes lot-pop {
+  from { opacity: 0; transform: scale(0.4) rotate(-12deg); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 購入 */
+.lot-buy {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+.lot-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+.lot-stepper button {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 18px;
+}
+.lot-stepper button:disabled {
+  opacity: 0.4;
+}
+.lot-qty {
+  min-width: 56px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lot-buy-btn {
+  width: 100%;
+}
+.lot-msg {
+  margin: 0;
+  font-size: 13px;
+  text-align: center;
+}
+.lot-msg.is-ok {
+  color: var(--accent-ink);
+}
+.lot-msg.is-err {
+  color: var(--danger);
+}
+
+/* 自分の券・当選者 */
+.lot-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.lot-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.lot-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lot-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--raised);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.lot-chip.is-win {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+.lot-winners {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.lot-winners li {
+  display: grid;
+  grid-template-columns: 44px auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--bg-soft);
+  font-size: 14px;
+}
+.lot-win-tier {
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+.lot-win-number {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+}
+.lot-win-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.lot-win-pt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Liquid Glass by sennin をオンにしたときは、カードをガラス調にする */
+:root[data-liquid-senin="on"] .lot-card {
+  background: var(--glass);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+:root[data-liquid-senin="on"] .lot-prizes li,
+:root[data-liquid-senin="on"] .lot-winners li {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lot-digit.is-revealed {
+    animation: none;
+  }
+}
