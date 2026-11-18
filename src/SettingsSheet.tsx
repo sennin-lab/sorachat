@@ -4,6 +4,7 @@ import { Icon } from "./Icon";
 import { disablePush, enablePush, testPush } from "./push";
 import { getShowUnsent, setShowUnsent } from "./prefs";
 import { getLiquidIcon, setLiquidIcon } from "./iconPrefs";
+import { getLiquidSenin, setLiquidSenin } from "./liquidSeninPrefs";
 import type { Me } from "./types";
 
 // 設定（LINE の設定画面のように、項目をグループ分けして表示する）
@@ -26,6 +27,7 @@ export function SettingsSheet({
   const [ai, setAi] = useState(me.aiEnabled);
   const [showUnsent, setShowUnsentState] = useState(getShowUnsent);
   const [liquidIcon, setLiquidIconState] = useState(getLiquidIcon);
+  const [liquidSenin, setLiquidSeninState] = useState(getLiquidSenin);
   const [status, setStatus] = useState("");
   const [testMessage, setTestMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -138,6 +140,23 @@ export function SettingsSheet({
         <label className="page-row">
           <span className="row-label">
             <span className="option-icon">
+              <Icon name="star" size={18} />
+            </span>
+            Liquid Glass by sennin
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={liquidSenin}
+            onChange={(e) => {
+              setLiquidSenin(e.target.checked);
+              setLiquidSeninState(e.target.checked);
+            }}
+          />
+        </label>
+        <label className="page-row">
+          <span className="row-label">
+            <span className="option-icon">
               <Icon name="unsend" size={18} />
             </span>
             送信取り消しの表示
@@ -154,6 +173,7 @@ export function SettingsSheet({
         </label>
       </div>
       <p className="notice center small">Liquid Glass アイコンをオフにすると通常アイコンに戻ります。初期設定は通常アイコンです。</p>
+      <p className="notice center small">Liquid Glass by sennin をオンにすると、画面全体がガラス調の暗いデザインに変わります。オフにすると元の見た目に戻ります（この端末の設定です）。初期設定はオフです。</p>
       <p className="notice center small">オフにすると、取り消されたメッセージはトークに表示されません（この端末の設定です）。</p>
 
       <div className="section-label flush">

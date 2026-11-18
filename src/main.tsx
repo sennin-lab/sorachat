@@ -6,7 +6,10 @@ import { trackKeyboard } from "./keyboard";
 import "./styles.css";
 // ガラスの質感と iOS 風の動き（既存の見た目の後に重ねる）
 import "./glass.css";
+// Liquid Glass by sennin（設定でオンにしたときだけ、この層の見た目が有効になる）
+import "./liquid-senin.css";
 import { applyAppIcon } from "./iconPrefs";
+import { applyLiquidSenin } from "./liquidSeninPrefs";
 
 applyAppIcon();
 
@@ -21,6 +24,8 @@ const isStatus = window.location.pathname.replace(/\/+$/, "") === "/status";
 if (!isAdmin && !isStatus) {
   document.body.classList.add("app-root");
   trackKeyboard();
+  // 設定で選んだ Liquid Glass by sennin の見た目を、チャット画面に反映する
+  applyLiquidSenin();
 }
 
 createRoot(document.getElementById("root")!).render(
