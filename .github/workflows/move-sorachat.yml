@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'sorachat/**'
+      - 'sorachat-main/**'
 
 permissions:
   contents: write
