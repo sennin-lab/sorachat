@@ -1,0 +1,647 @@
+import crypto from "node:crypto";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import { z } from "zod";
+import { config, missingSenninSettings } from "./config.js";
+import { cookieBase, currentUserId, banOfUser, endSession, randomToken, requireAuth, sessionUserId, SESSION_COOKIE, signRealtimeToken, startSession } from "./auth.js";
+import { isAllowedImage, readImage, removeImage, saveImage, upload } from "./media.js";
+import { friendIdsOf, friendshipOf } from "./friends.js";
+import { avatarVersionOf } from "./avatarVersion.js";
+import { disableAi, enableAi } from "./senninai.js";
+import { sb } from "./supabase.js";
+import { befriendTeam } from "./team.js";
+import { attachSenninAccount, SenninError } from "./senninPoints.js";
+import { grantLoginBonus } from "./loginBonus.js";
+import { retryCreatorPayouts } from "./studioPayout.js";
+import { requestIp, manualIp, isIpBanned } from "./ipBans.js";
+import { withKeyedLock } from "./keyedLock.js";
+import { checkInvite, findInviterId, normalizeInviteCode, recordReferral, REFERRAL_ON, ReferralError, retryPendingReferrals } from "./referral.js";
+
+export const accounts = Router();
+
+const hits = new Map<string, { count: number; reset: number }>();
+const authLimit = (req: Request, res: Response, next: NextFunction) => {
+  const key = req.ip ?? "unknown";
+  const now = Date.now();
+  const entry = hits.get(key);
+  if (!entry || entry.reset < now) {
+    hits.set(key, { count: 1, reset: now + 60_000 });
+    next();
+    return;
+  }
+  entry.count += 1;
+  if (entry.count > 20) {
+    res.status(429).json({ error: "試行回数が多すぎます。少し待ってから再度お試しください。" });
+    return;
+  }
+  next();
+};
+
+const UUID = /^[0-9a-f-]{36}$/i;
+const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9_]{3,20}$/, "ユーザー名は英小文字・数字・_ の3〜20文字で入力してください。");
+const passwordSchema = z
+  .string()
+  .min(8, "パスワードは8文字以上にしてください。")
+  .max(72, "パスワードは72文字以内にしてください。");
+const nameSchema = z.string().trim().min(1, "表示名を入力してください。").max(40, "表示名は40文字以内にしてください。");
+
+const registerSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  displayName: nameSchema,
+  // 招待コード（任意）。招待されて登録するとき、招待した人とされた人に報酬が付く
+  inviteCode: z.string().max(16).optional(),
+  // IP が取得できなかったときだけ、利用者が手入力する IP
+  manualIp: z.string().max(64).optional()
+});
+const loginSchema = z.object({
+  username: z.string().trim().toLowerCase().min(1).max(20),
+  password: z.string().min(1).max(72)
+});
+
+export const COVER_THEMES = ["green", "sky", "sunset", "lavender", "sand", "graphite"] as const;
+
+const updateMeSchema = z.object({
+  displayName: nameSchema.optional(),
+  username: usernameSchema.optional(),
+  bio: z.string().max(200).optional(),
+  contact: z.string().max(120).optional(),
+  profileUrl: z.string().max(200).refine((value) => !value || /^https?:\/\//i.test(value), "URLはhttps:// または http:// から入力してください。").optional(),
+  notifyDm: z.boolean().optional(),
+  coverTheme: z.enum(COVER_THEMES).optional(),
+  aiEnabled: z.boolean().optional()
+});
+
+// 買った外観が作品の場合は、その配色（色の値）を返す（画面の色に反映するため）
+async function studioPaletteOf(themeId: string | null): Promise<{ mine: string; bg: string; accent: string } | null> {
+  if (!themeId?.startsWith("work:")) return null;
+  const id = themeId.slice("work:".length);
+  if (!UUID.test(id)) return null;
+  const { data } = await sb.from("sc_studio_works").select("payload, status").eq("id", id).maybeSingle();
+  if (!data || data.status === "removed") return null;
+  const payload = data.payload as { mine?: string; bg?: string; accent?: string } | null;
+  return payload?.mine && payload.bg && payload.accent ? { mine: payload.mine, bg: payload.bg, accent: payload.accent } : null;
+}
+
+// 仙人ストアの情報（任意の機能）。マイグレーション未実行などで読めなくても、ログインは止めない
+async function optionalStoreFields(userId: string): Promise<{ storeTheme: string | null; storeThemePalette: { mine: string; bg: string; accent: string } | null }> {
+  try {
+    const { data, error } = await sb.from("sc_users").select("store_theme").eq("id", userId).maybeSingle();
+    if (error) throw error;
+    const storeTheme = (data?.store_theme ?? null) as string | null;
+    return { storeTheme, storeThemePalette: await studioPaletteOf(storeTheme).catch(() => null) };
+  } catch (error) {
+    console.error("[me] 仙人ストアの情報を読めませんでした（ログインには影響しません）:", error);
+    return { storeTheme: null, storeThemePalette: null };
+  }
+}
+
+async function loadMe(userId: string) {
+  // ログインに必要な列だけで読む（ここが失敗するとログインできなくなるため、新しい列は含めない）
+  const { data, error } = await sb
+    .from("sc_users")
+    .select("id, username, display_name, bio, contact, profile_url, avatar_path, notify_dm, sennin_id, cover_theme, ai_enabled")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const store = await optionalStoreFields(userId);
+  return {
+    id: data.id as string,
+    username: data.username as string,
+    displayName: data.display_name as string,
+    bio: data.bio as string,
+    contact: (data.contact ?? "") as string,
+    profileUrl: (data.profile_url ?? "") as string,
+    hasAvatar: Boolean(data.avatar_path),
+    avatarVersion: avatarVersionOf(data.avatar_path as string | null),
+    notifyDm: data.notify_dm as boolean,
+    sennin: Boolean(data.sennin_id),
+    coverTheme: (data.cover_theme ?? "green") as string,
+    aiEnabled: Boolean(data.ai_enabled),
+    storeTheme: store.storeTheme,
+    storeThemePalette: store.storeThemePalette
+  };
+}
+
+// ユーザーを作る（IP を記録する）。ユーザー名が使われていれば 23505 のエラーを投げる
+async function createUser(username: string, password: string, displayName: string, ip: string): Promise<string> {
+  const { data, error } = await sb.rpc("sc_register", {
+    p_username: username,
+    p_password: password,
+    p_name: displayName
+  });
+  if (error) throw error;
+  const userId = data as string;
+  const { error: ipError } = await sb.from("sc_users").update({ signup_ip: ip, last_ip: ip }).eq("id", userId);
+  if (ipError) console.error("[register] 登録時の IP を保存できませんでした:", ipError);
+  return userId;
+}
+
+accounts.post("/auth/register", authLimit, async (req, res) => {
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0].message });
+    return;
+  }
+  // IP の確認：取得できないときは、利用者に IP を手入力してもらう（画面にモーダルを出す）
+  const ip = requestIp(req) ?? manualIp(parsed.data.manualIp);
+  if (!ip) {
+    res.status(428).json({ code: "ip_required", error: "IPアドレスを取得できませんでした。IPアドレスを入力してください。" });
+    return;
+  }
+  if (isIpBanned(ip)) {
+    res.status(403).json({ error: "このネットワークからは利用できません。" });
+    return;
+  }
+  const { username, password, displayName } = parsed.data;
+  const code = normalizeInviteCode(parsed.data.inviteCode);
+  let inviterId: string | null = null;
+  if (code && REFERRAL_ON) {
+    inviterId = await findInviterId(code);
+    if (!inviterId) {
+      res.status(400).json({ error: "招待コードが見つかりません。" });
+      return;
+    }
+  }
+  let userId: string;
+  try {
+    if (inviterId) {
+      // 同じ招待者への登録は1件ずつ確かめる（同時に来ても、同じ回線からの2件目は必ず弾く）
+      const inviter = inviterId;
+      userId = await withKeyedLock(`referral:${inviter}`, async () => {
+        await checkInvite(inviter, ip);
+        const id = await createUser(username, password, displayName, ip);
+        await recordReferral(inviter, id, null, ip);
+        return id;
+      });
+    } else {
+      userId = await createUser(username, password, displayName, ip);
+    }
+  } catch (error) {
+    if (error instanceof ReferralError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    if ((error as { code?: string })?.code === "23505") {
+      res.status(409).json({ error: "そのユーザー名は使われています。" });
+      return;
+    }
+    throw error;
+  }
+  // 新しい人には、開発チームを友だちに追加しておく（お知らせを受け取れるように）
+  await befriendTeam(userId).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
+  await startSession(res, userId);
+  void retryPendingReferrals(userId);
+  res.json({ ok: true });
+});
+
+accounts.post("/auth/login", authLimit, async (req, res) => {
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "ユーザー名とパスワードを入力してください。" });
+    return;
+  }
+  const { data, error } = await sb.rpc("sc_check_password", {
+    p_username: parsed.data.username,
+    p_password: parsed.data.password
+  });
+  if (error) throw error;
+  if (!data) {
+    res.status(401).json({ error: "ユーザー名かパスワードが違います。" });
+    return;
+  }
+  // 利用停止中でもログインは通す。アプリ側で利用停止の画面（期限つき）を出す
+  const loginIp = requestIp(req);
+  if (loginIp) {
+    const { error: ipError } = await sb.from("sc_users").update({ last_ip: loginIp }).eq("id", data as string);
+    if (ipError) console.error("[login] 最後の IP を保存できませんでした:", ipError);
+  }
+  await startSession(res, data as string);
+  void retryPendingReferrals(data as string);
+  res.json({ ok: true });
+});
+
+accounts.get("/auth/sennin/login", (_req, res) => {
+  const { clientId, authorizationUrl, redirectUri, loginScope } = config.sennin;
+  if (!clientId || !authorizationUrl) {
+    console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、")}`);
+    res.redirect(`${config.appOrigin}/?auth_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
+    return;
+  }
+  const state = randomToken(24);
+  const verifier = randomToken(48);
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  res.cookie("sc_oauth", `${state}.${verifier}`, { ...cookieBase, maxAge: 10 * 60 * 1000 });
+  const url = new URL(authorizationUrl);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", loginScope);
+  url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  res.redirect(url.toString());
+});
+
+export async function fetchSenninProfile(accessToken: string) {
+  const headers = { authorization: `Bearer ${accessToken}`, accept: "application/json" };
+  const fetchJson = (url: string) =>
+    fetch(url, { headers }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const pick = (payload: any) => payload?.user ?? payload?.data ?? payload;
+  let data = pick(await fetchJson(config.sennin.userinfoUrl));
+  if (!data?.id && !data?.sub) data = pick(await fetchJson(config.sennin.meUrl));
+  const id = data?.id ?? data?.sub ?? data?.user_id;
+  if (!id) throw new Error("仙人アカウントの情報を取得できませんでした。");
+  return {
+    id: String(id),
+    name: String(data.name ?? data.display_name ?? data.username ?? "仙人ユーザー").slice(0, 40)
+  };
+}
+
+async function upsertSenninUser(senninId: string, name: string) {
+  const found = await sb.from("sc_users").select("id").eq("sennin_id", senninId).maybeSingle();
+  if (found.error) throw found.error;
+  if (found.data) return found.data.id as string;
+  const inserted = await sb
+    .from("sc_users")
+    .insert({ username: `sn_${crypto.randomBytes(6).toString("hex")}`, display_name: name, sennin_id: senninId })
+    .select("id")
+    .single();
+  if (inserted.error) throw inserted.error;
+  return inserted.data.id as string;
+}
+
+// 仙人アカウントを連携する（ストア用）。ログイン中の人が押すと、仙人アカウントの許可画面へ進む
+// ログイン画面に出す方法（仙人アカウントは設定があるときだけ）
+accounts.get("/auth/options", (_req, res) => {
+  const { clientId, authorizationUrl, tokenUrl, redirectUri } = config.sennin;
+  res.set("Cache-Control", "no-store");
+  res.json({ sennin: Boolean(clientId && authorizationUrl && tokenUrl && redirectUri) });
+});
+
+// 連携の後に戻るページ（仙人ストア・senninstudio は、それぞれ専用のページ）
+const linkReturnPath = (value: unknown) =>
+  value === "studio" ? "/studio" : value === "pay" ? "/pay" : value === "games" ? "/senningames" : value === "bank" ? "/bank" : "/store";
+type LinkFrom = "store" | "studio" | "pay" | "games" | "bank";
+const linkFromOf = (value: unknown): LinkFrom =>
+  value === "studio" ? "studio" : value === "pay" ? "pay" : value === "games" ? "games" : value === "bank" ? "bank" : "store";
+
+accounts.get("/auth/sennin/link", requireAuth, (req, res) => {
+  const { clientId, authorizationUrl, redirectUri, storeScope } = config.sennin;
+  const from = linkFromOf(req.query.from);
+  if (!clientId || !authorizationUrl) {
+    console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、")}`);
+    res.redirect(`${config.appOrigin}${linkReturnPath(from)}?store_error=${encodeURIComponent("仙人アカウントは現在利用できません。")}`);
+    return;
+  }
+  const state = randomToken(24);
+  const verifier = randomToken(48);
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  res.cookie("sc_oauth", `${state}.${verifier}`, { ...cookieBase, maxAge: 10 * 60 * 1000 });
+  res.cookie("sc_oauth_link", from, { ...cookieBase, maxAge: 10 * 60 * 1000 });
+  const url = new URL(authorizationUrl);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", storeScope);
+  url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  res.redirect(url.toString());
+});
+
+// 認可コードをトークンに交換する（ログインと連携で共通）
+async function exchangeSenninCode(code: string, verifier: string) {
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+    accept: "application/json"
+  };
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: config.sennin.redirectUri,
+    code_verifier: verifier
+  });
+  // クライアント認証は一方式だけ使う（secret があれば Basic、なければ本文の client_id）
+  if (config.sennin.clientSecret) {
+    headers.authorization = `Basic ${Buffer.from(`${config.sennin.clientId}:${config.sennin.clientSecret}`).toString("base64")}`;
+  } else {
+    body.set("client_id", config.sennin.clientId);
+  }
+  const tokenResponse = await fetch(config.sennin.tokenUrl, { method: "POST", headers, body });
+  const tokenData: any = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || typeof tokenData.access_token !== "string") {
+    console.error("[sennin] トークン取得に失敗", {
+      status: tokenResponse.status,
+      error: tokenData.error,
+      description: tokenData.error_description,
+      redirectUri: config.sennin.redirectUri,
+      loginBonus: process.env.SENNIN_LOGIN_BONUS ?? null
+    });
+    throw new Error("トークンを取得できませんでした。");
+  }
+  return tokenData as { access_token: string; refresh_token?: unknown };
+}
+
+accounts.get("/auth/sennin/callback", async (req, res) => {
+  // 連携のときは、連携を始めたページ（仙人ストアか senninstudio）へ戻って、結果を出す
+  const linkCookie = req.cookies?.sc_oauth_link;
+  const linking = typeof linkCookie === "string" && linkCookie !== "";
+  const returnPath = linkReturnPath(linkCookie);
+  const fail = (message: string) => {
+    res.clearCookie("sc_oauth", cookieBase);
+    res.clearCookie("sc_oauth_link", cookieBase);
+    const target = linking ? `${config.appOrigin}${returnPath}?store_error=` : `${config.appOrigin}/?auth_error=`;
+    res.redirect(`${target}${encodeURIComponent(message)}`);
+  };
+  if (typeof req.query.error === "string") {
+    fail(linking ? "仙人アカウントで許可されませんでした。ポイントの利用を許可してください。" : "仙人アカウントでの認証がキャンセルされました。");
+    return;
+  }
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  const returned = typeof req.query.state === "string" ? req.query.state : "";
+  const [state, verifier] = String(req.cookies?.sc_oauth ?? "").split(".");
+  if (!code || !state || !verifier || state !== returned) {
+    fail("認証情報を確認できませんでした。もう一度お試しください。");
+    return;
+  }
+  try {
+    const tokenData = await exchangeSenninCode(code, verifier);
+    const profile = await fetchSenninProfile(tokenData.access_token);
+    if (linking) {
+      const userId = await sessionUserId(req.cookies?.[SESSION_COOKIE]);
+      if (!userId) {
+        fail("ログインし直してから、もう一度お試しください。");
+        return;
+      }
+      if (typeof tokenData.refresh_token !== "string") {
+        fail("仙人アカウントから更新用の情報を受け取れませんでした。もう一度お試しください。");
+        return;
+      }
+      await attachSenninAccount(userId, profile.id, tokenData.refresh_token);
+      // 連携できたので、保留になっていた作者への支払いと招待の報酬を払う（なければ何もない）
+      void retryCreatorPayouts(userId).catch((error) => console.error("[studio] 支払いの再送に失敗:", error));
+      void retryPendingReferrals(userId);
+      res.clearCookie("sc_oauth", cookieBase);
+      res.clearCookie("sc_oauth_link", cookieBase);
+      res.redirect(`${config.appOrigin}${returnPath}?store=linked`);
+      return;
+    }
+    const userId = await upsertSenninUser(profile.id, profile.name);
+    await befriendTeam(userId).catch((error) => console.error("開発チームの友だち追加に失敗しました", error));
+    // ログインの許可でポイントの更新用の情報も受け取れたら、連携済みにして初回のログイン特典を付ける
+    if (config.sennin.loginBonus && typeof tokenData.refresh_token === "string") {
+      try {
+        await attachSenninAccount(userId, profile.id, tokenData.refresh_token);
+        void grantLoginBonus(userId).catch((error) => console.error("[bonus] ログイン特典を付与できませんでした（次回のログインで再試行します）:", error));
+        void retryPendingReferrals(userId);
+      } catch (error) {
+        console.error("[sennin] ログインで連携情報を保存できませんでした:", error);
+      }
+    }
+    res.clearCookie("sc_oauth", cookieBase);
+    res.clearCookie("sc_oauth_link", cookieBase);
+    await startSession(res, userId);
+    res.redirect(`${config.appOrigin}/`);
+  } catch (error) {
+    if (error instanceof SenninError) {
+      fail(error.message.slice(0, 180));
+      return;
+    }
+    fail(error instanceof Error ? error.message.slice(0, 180) : "仙人アカウントへの接続に失敗しました。");
+  }
+});
+
+accounts.post("/auth/logout", async (req, res) => {
+  // 利用停止中はログアウトさせない（利用停止の画面から抜けられないように）
+  const userId = await sessionUserId(req.cookies?.[SESSION_COOKIE]);
+  const ban = userId ? await banOfUser(userId) : null;
+  if (ban) {
+    res.status(403).json({ error: "利用停止中はログアウトできません。", ban });
+    return;
+  }
+  await endSession(req.cookies?.[SESSION_COOKIE]);
+  res.clearCookie(SESSION_COOKIE, cookieBase);
+  res.json({ ok: true });
+});
+
+accounts.get("/me", requireAuth, async (_req, res) => {
+  const me = await loadMe(currentUserId(res));
+  if (!me) {
+    res.status(401).json({ error: "ログインしてください。" });
+    return;
+  }
+  res.json(me);
+});
+
+accounts.post("/me", requireAuth, async (req, res) => {
+  const parsed = updateMeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0].message });
+    return;
+  }
+  const body = parsed.data;
+  const update: Record<string, unknown> = {};
+  if (body.displayName !== undefined) update.display_name = body.displayName;
+  if (body.username !== undefined) update.username = body.username;
+  if (body.bio !== undefined) update.bio = body.bio;
+  if (body.contact !== undefined) update.contact = body.contact;
+  if (body.profileUrl !== undefined) update.profile_url = body.profileUrl;
+  if (body.notifyDm !== undefined) update.notify_dm = body.notifyDm;
+  if (body.coverTheme !== undefined) update.cover_theme = body.coverTheme;
+  if (body.aiEnabled !== undefined) update.ai_enabled = body.aiEnabled;
+  const userId = currentUserId(res);
+  const { error } = await sb.from("sc_users").update(update).eq("id", userId);
+  if (error) {
+    if (error.code === "23505") {
+      res.status(409).json({ error: "そのユーザー名は使われています。" });
+      return;
+    }
+    throw error;
+  }
+  // AI機能をオンにしたら、senninaiとのトークを用意する（一覧に出すため）
+  if (body.aiEnabled === true) await enableAi(userId);
+  if (body.aiEnabled === false) await disableAi(userId);
+  res.json(await loadMe(userId));
+});
+
+accounts.post("/me/avatar", requireAuth, upload.single("file"), async (req, res) => {
+  if (!isAllowedImage(req.file)) {
+    res.status(415).json({ error: "JPEG・PNG・WebP・GIF の画像を選んでください。" });
+    return;
+  }
+  const userId = currentUserId(res);
+  // プロフィール画像は、ほかの画像と同じく Turso（sc_blobs）に保存する
+  const path = await saveImage(req.file!, `avatars/${userId}`);
+  const { data } = await sb.from("sc_users").select("avatar_path").eq("id", userId).maybeSingle();
+  const { error } = await sb.from("sc_users").update({ avatar_path: path }).eq("id", userId);
+  if (error) {
+    // DB の更新に失敗したら、いま保存した画像は使われないので消しておく
+    await removeImage(path);
+    throw error;
+  }
+  await removeImage(data?.avatar_path ?? null);
+  res.json(await loadMe(userId));
+});
+
+accounts.get("/users/suggest", requireAuth, async (req, res) => {
+  const q = String(req.query.q ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9_]{1,20}$/.test(q)) {
+    res.json([]);
+    return;
+  }
+  const { data, error } = await sb
+    .from("sc_users")
+    .select("id, username, display_name, avatar_path")
+    .ilike("username", `${q}%`)
+    .neq("id", currentUserId(res))
+    .order("username")
+    .limit(8);
+  if (error) throw error;
+  const friendIds = await friendIdsOf(currentUserId(res));
+  res.json((data ?? []).map((user) => ({
+    id: user.id,
+    username: user.username,
+    displayName: user.display_name,
+    hasAvatar: Boolean(user.avatar_path),
+    isFriend: friendIds.has(user.id)
+  })));
+});
+
+accounts.get("/users/by-username", requireAuth, async (req, res) => {
+  const username = String(req.query.username ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+    res.status(400).json({ error: "ユーザー名の形式が正しくありません。" });
+    return;
+  }
+  const { data, error } = await sb
+    .from("sc_users")
+    .select("id, username, display_name, avatar_path")
+    .eq("username", username)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    res.status(404).json({ error: "そのユーザーは見つかりません。" });
+    return;
+  }
+  // QRで読んだ相手が自分か、すでに友だちかを返す（画面の表示を正しく切り替えるため）
+  const me = currentUserId(res);
+  const friendIds = await friendIdsOf(me);
+  res.json({
+    id: data.id,
+    username: data.username,
+    displayName: data.display_name,
+    hasAvatar: Boolean(data.avatar_path),
+    isSelf: data.id === me,
+    isFriend: friendIds.has(data.id)
+  });
+});
+
+accounts.get("/users/:id/avatar", requireAuth, async (req, res) => {
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).end();
+    return;
+  }
+  const { data } = await sb.from("sc_users").select("avatar_path").eq("id", id).maybeSingle();
+  if (!data?.avatar_path) {
+    res.setHeader("cache-control", "no-store");
+    res.status(404).end();
+    return;
+  }
+  // 版（?v=）が今の画像と同じなら、URL が変わらない限りブラウザに保存させる（同じ版はもう取りに来ない）
+  const versioned = typeof req.query.v === "string" && req.query.v === avatarVersionOf(data.avatar_path);
+  const cacheControl = versioned ? "private, max-age=31536000, immutable" : "private, no-cache";
+  const image = await readImage(data.avatar_path);
+  if (!image) {
+    res.setHeader("cache-control", "no-store");
+    res.status(404).end();
+    return;
+  }
+  res.setHeader("content-type", image.type);
+  res.setHeader("cache-control", cacheControl);
+  res.send(image.buffer);
+});
+
+const noteSchema = z.object({ body: z.string().trim().min(1).max(60) });
+const NOTE_MS = 24 * 60 * 60 * 1000;
+
+accounts.get("/me/note", requireAuth, async (_req, res) => {
+  const { data, error } = await sb
+    .from("sc_notes")
+    .select("body, expires_at")
+    .eq("user_id", currentUserId(res))
+    .maybeSingle();
+  if (error) throw error;
+  const active = data && new Date(data.expires_at).getTime() > Date.now();
+  res.json(active ? { body: data.body, expiresAt: data.expires_at } : null);
+});
+
+accounts.put("/me/note", requireAuth, async (req, res) => {
+  const parsed = noteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "ノートは1〜60文字で入力してください。" });
+    return;
+  }
+  const expiresAt = new Date(Date.now() + NOTE_MS).toISOString();
+  const { error } = await sb.from("sc_notes").upsert(
+    { user_id: currentUserId(res), body: parsed.data.body, expires_at: expiresAt },
+    { onConflict: "user_id" }
+  );
+  if (error) throw error;
+  res.json({ body: parsed.data.body, expiresAt });
+});
+
+accounts.delete("/me/note", requireAuth, async (_req, res) => {
+  const { error } = await sb.from("sc_notes").delete().eq("user_id", currentUserId(res));
+  if (error) throw error;
+  res.json({ ok: true });
+});
+
+accounts.get("/users/:id/profile", requireAuth, async (req, res) => {
+  const id = String(req.params.id);
+  if (!UUID.test(id)) {
+    res.status(404).json({ error: "ユーザーが見つかりません。" });
+    return;
+  }
+  const { data, error } = await sb
+    .from("sc_users")
+    .select("id, username, display_name, bio, contact, profile_url, avatar_path, cover_theme")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    res.status(404).json({ error: "ユーザーが見つかりません。" });
+    return;
+  }
+  const friendship = await friendshipOf(currentUserId(res), id);
+  const isFriend = friendship === "friend";
+  const { data: note } = await sb
+    .from("sc_notes")
+    .select("body, expires_at")
+    .eq("user_id", id)
+    .maybeSingle();
+  const activeNote = note && new Date(note.expires_at).getTime() > Date.now() ? note.body : null;
+  res.json({
+    id: data.id,
+    username: data.username,
+    displayName: data.display_name,
+    bio: data.bio,
+    contact: data.contact ?? "",
+    profileUrl: data.profile_url ?? "",
+    hasAvatar: Boolean(data.avatar_path),
+    coverTheme: data.cover_theme ?? "green",
+    isFriend,
+    friendship,
+    note: activeNote
+  });
+});
+
+accounts.get("/realtime/token", requireAuth, (_req, res) => {
+  const { token, expiresIn } = signRealtimeToken(currentUserId(res));
+  res.json({ token, expiresIn, url: config.supabaseUrl, anonKey: config.supabaseAnonKey });
+});

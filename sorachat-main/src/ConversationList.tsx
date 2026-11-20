@@ -1,0 +1,150 @@
+import { useMemo, useState, type CSSProperties } from "react";
+import { Avatar } from "./Avatar";
+import { Icon } from "./Icon";
+import { Dots } from "./Loading";
+import { formatTime } from "./format";
+import type { Conversation } from "./types";
+
+const previewOf = (c: Conversation) => {
+  if (!c.lastPreview) return "";
+  return c.lastFromMe ? `あなた: ${c.lastPreview}` : c.lastPreview;
+};
+
+type Filter = "all" | "unread" | "group";
+
+// トークの一覧（LINE のトーク一覧のように、アイコン・名前・最後のメッセージ・未読数を並べる）
+export function ConversationList({
+  list,
+  selectedId,
+  onSelect,
+  onCompose,
+  loaded = true,
+  loadingIds
+}: {
+  list: Conversation[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onCompose: () => void;
+  // 一覧を取り終えたか（取り終えるまでは仮の行を出す）
+  loaded?: boolean;
+  // メッセージを先読み中のトーク（その行に読み込み表示を出す）
+  loadingIds?: Set<string>;
+}) {
+  const [query, setQuery] = useState("");
+  // 絞り込み（すべて・未読・グループ）
+  const [filter, setFilter] = useState<Filter>("all");
+  const unreadCount = useMemo(() => list.filter((c) => c.unread > 0).length, [list]);
+  const groupCount = useMemo(() => list.filter((c) => c.isGroup).length, [list]);
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return list.filter((c) => {
+      if (filter === "unread" && c.unread <= 0) return false;
+      if (filter === "group" && !c.isGroup) return false;
+      if (!q) return true;
+      return c.name.toLowerCase().includes(q) || (c.otherUsername ?? "").toLowerCase().includes(q);
+    });
+  }, [list, query, filter]);
+
+  return (
+    <div className="tab-panel" key="talk">
+      <header className="tab-head">
+        <strong className="tab-title">トーク</strong>
+        <button className="icon-btn" onClick={onCompose} aria-label="新規トーク">
+          <Icon name="compose" size={23} />
+        </button>
+      </header>
+
+      <div className="search-bar">
+        <label className="search-field">
+          <Icon name="search" size={16} />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="名前で検索" aria-label="トークを検索" />
+        </label>
+      </div>
+
+      {list.length > 0 && (
+        <div className="filter-chips" role="tablist" aria-label="絞り込み">
+          <button role="tab" aria-selected={filter === "all"} className={`chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
+            すべて
+          </button>
+          <button role="tab" aria-selected={filter === "unread"} className={`chip ${filter === "unread" ? "on" : ""}`} onClick={() => setFilter("unread")}>
+            未読
+            {unreadCount > 0 && <span className="chip-count">{unreadCount}</span>}
+          </button>
+          <button role="tab" aria-selected={filter === "group"} className={`chip ${filter === "group" ? "on" : ""}`} onClick={() => setFilter("group")}>
+            グループ
+            {groupCount > 0 && <span className="chip-count">{groupCount}</span>}
+          </button>
+        </div>
+      )}
+
+      {!loaded && !list.length && (
+        <ul className="skeleton-list" aria-label="読み込み中">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <li key={i}>
+              <div className="skeleton-row" />
+            </li>
+          ))}
+        </ul>
+      )}
+      {loaded && !list.length && (
+        <div className="tab-empty">
+          <p>まだトークはありません。</p>
+          <button className="btn-primary" onClick={onCompose}>
+            新規トーク
+          </button>
+        </div>
+      )}
+      {list.length > 0 && !shown.length && (
+        <p className="muted center pad">
+          {query.trim() ? "見つかりませんでした。" : filter === "unread" ? "未読のトークはありません。" : "グループはまだありません。"}
+        </p>
+      )}
+
+      {shown.length > 0 && (
+        <ul className="convs">
+          {shown.map((c, i) => (
+            <li key={c.id} className="conv-li" style={{ "--i": Math.min(i, 14) } as CSSProperties}>
+              <button
+                className={`conv ${c.id === selectedId ? "active" : ""} ${c.unread > 0 ? "unread" : ""}`}
+                onClick={() => onSelect(c.id)}
+                aria-label={c.unread > 0 ? `${c.name}（未読 ${c.unread}件）` : c.name}
+              >
+                <Avatar
+                  userId={c.isGroup ? "" : c.otherId ?? ""}
+                  hasAvatar={c.hasAvatar}
+                  name={c.name}
+                  size={52}
+                  src={c.isGroup ? `/api/dm/${c.id}/avatar` : undefined}
+                />
+                <span className="conv-body">
+                  <span className="conv-top">
+                    <strong>
+                      {c.name}
+                      {c.isGroup && <span className="group-count"> {c.memberCount}</span>}
+                      {c.muted && <Icon name="bellOff" size={13} className="mute-mark" />}
+                    </strong>
+                    <time>{formatTime(c.lastMessageAt)}</time>
+                  </span>
+                  <span className="conv-bottom">
+                    {loadingIds?.has(c.id) ? (
+                      <span className="preview loading-text">
+                        <Dots />
+                      </span>
+                    ) : (
+                      <span className="preview">{previewOf(c)}</span>
+                    )}
+                    {c.unread > 0 && (
+                      <span className="badge-count" key={c.unread}>
+                        {c.unread > 99 ? "99+" : c.unread}
+                      </span>
+                    )}
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

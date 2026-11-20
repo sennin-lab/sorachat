@@ -1,0 +1,238 @@
+/* 大手サービス風の仕上げ層（redesign.css の後に読み込む）
+   ・ガラス（すりガラス）・グラデーション・光る影・跳ねる動きをやめ、平らな面と細い線で作る
+   ・ボタンは「1つの濃い青」を主役にし、ほかは薄い面か枠線にする
+   ・動きは短く、ease-out のみ（ばね・弾みは使わない）
+   ・Liquid Glass by sennin を設定でオンにしたときは、その見た目が優先される（liquid-senin.css は後に読み込む） */
+
+/* ---- 色と動きの基本 ---- */
+:root {
+  --glass: var(--panel);
+  --glass-strong: var(--panel);
+  --glass-edge: var(--line);
+  --glass-blur: none;
+  --glass-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ios-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ios-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.1);
+  --mine: #2563eb;
+  --mine-text: #ffffff;
+}
+:root[data-theme="dark"] {
+  --glass: var(--panel);
+  --glass-strong: var(--panel);
+  --glass-edge: var(--line);
+  --glass-shadow: none;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --mine: #2563eb;
+  --mine-text: #ffffff;
+}
+/* 仙人ストアの外観を選んでいるときは、その配色を優先する */
+:root[data-store-theme] { --mine-text: #111111; }
+
+/* ---- ガラスの面をやめて、平らな面にする ---- */
+.glass, .glass-strong, .tabbar, .page-head, .chat-head, .tab-head, .sheet, .msg-menu,
+.more-list, .option-list {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.tabbar, .page-head, .chat-head, .tab-head {
+  background: var(--panel);
+  box-shadow: none;
+}
+.tabbar { border-top: 1px solid var(--line); }
+.sheet {
+  background: var(--panel);
+  border-top: 0;
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -6px 24px rgba(15, 23, 42, 0.12);
+}
+.sheet-backdrop { background: rgba(15, 23, 42, 0.4); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.msg-menu { background: var(--panel); border-radius: 14px; box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18); }
+
+/* ---- 光る・グラデーションのアイコン類を、単色にする ---- */
+.avatar { background: var(--accent-soft); color: var(--accent-ink); }
+:root[data-theme="dark"] .avatar { background: #1c2a40; color: #93c5fd; }
+.empty-mark { background: var(--accent); box-shadow: none; }
+.auth-logo { background: var(--accent); box-shadow: none; }
+.auth-backdrop { display: none; }
+.auth-panel { box-shadow: var(--shadow); border-radius: 20px; }
+.bank::before { display: none; }
+
+/* ---- ボタン：主役は1つ、ほかは面か枠 ---- */
+.btn-primary {
+  min-height: 44px;
+  padding: 11px 20px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: none;
+}
+.btn-primary:not(:disabled):hover { background: var(--accent-ink); filter: none; }
+.btn-primary:disabled { opacity: 0.45; }
+.btn-secondary {
+  min-height: 44px;
+  padding: 11px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--accent-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+.btn-secondary:hover { background: var(--accent-soft); }
+.btn-small { height: 34px; padding: 0 14px; border-radius: 999px; font-size: 14px; font-weight: 700; }
+.btn-small.accent { background: var(--accent); color: #fff; }
+.btn-text { color: var(--accent-ink); font-weight: 700; }
+.icon-btn { width: 44px; height: 44px; border-radius: 12px; color: var(--text); }
+.icon-btn:hover { background: var(--bg-soft); color: var(--text); }
+button:not(:disabled):active { transform: scale(0.97); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.icon { stroke-width: 1.8; }
+
+/* ---- チャットの画面 ---- */
+.chat-head {
+  min-height: 60px;
+  border-bottom: 1px solid var(--line);
+}
+.head-who { border-radius: 12px; }
+.head-who strong { font-size: 17px; font-weight: 700; }
+.head-who .small { font-size: 12px; color: var(--muted); }
+
+.thread { background: var(--chat-bg); padding: 12px 12px 16px; }
+.msg-wrap { max-width: min(72%, 520px); }
+.bubble {
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: var(--bubble-in);
+  color: var(--bubble-in-text);
+  box-shadow: none;
+  font-size: 15px;
+}
+.row.mine .bubble { background: var(--mine); color: var(--mine-text); }
+.bubble p { font-size: 15px; line-height: 1.5; }
+.bubble time { font-size: 11px; }
+.msg-time { font-size: 11px; color: var(--muted); }
+.dm-divider span, .unread-line { font-size: 12px; font-weight: 700; }
+
+/* 入力欄：角丸の面（枠と光を使わない）。送信ボタンは有効なときだけ濃い青 */
+.composer {
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+.composer-field {
+  border-radius: 22px;
+  background: var(--bg-soft);
+  box-shadow: none;
+  min-height: 40px;
+}
+.composer-field:focus-within { box-shadow: inset 0 0 0 1px var(--accent); background: var(--panel); }
+.composer textarea { font-size: 16px; }
+.composer-icon { color: var(--muted); }
+.composer-icon.plus { color: var(--accent-ink); }
+.send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+}
+.send-btn:disabled { background: var(--line); color: var(--muted); opacity: 1; }
+
+/* ---- シートの中の一覧・操作 ---- */
+.sheet-title-row { border-bottom: 1px solid var(--line); }
+.sheet-title-row strong { font-size: 17px; font-weight: 700; }
+.sheet .user-list button:hover { background: var(--bg-soft); }
+
+/* ---- 動き：短いフェードと、少しのずれだけ（跳ねない） ---- */
+@keyframes pop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+@keyframes tab-bounce { from { transform: scale(0.96); } to { transform: none; } }
+@keyframes bubble-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes page-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes tab-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes list-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes auth-pop { from { opacity: 0; } to { opacity: 1; } }
+@keyframes auth-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* 一覧の名前の横に、通知オフのマークや人数を並べるとき、折り返さず一列にする */
+.conv-top strong { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.conv-top strong > .group-count, .conv-top strong > .mute-mark { flex: none; }
+
+/* カードの左右の余白を、はみ出さないように幅で調整する */
+.profile-card, .me-row { width: calc(100% - 24px); }
+/* サービスの名前は途中で折り返さない（「オープンチャット」などを一語のまま出す） */
+.more-tile { font-size: 12px; word-break: keep-all; overflow-wrap: normal; }
+
+/* ---- その他タブのレイアウト（見出しと行を見やすく、間隔をゆったりと） ---- */
+.more-section { padding: 6px 0 14px; }
+.more-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 12px;
+}
+.more-section-title { font-size: 15px; font-weight: 800; color: var(--text); padding: 16px 20px 10px; }
+.more-section-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border-radius: 999px;
+  color: var(--accent-ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+.more-section-more:hover { background: var(--accent-soft); }
+.more-list { margin: 0 12px; }
+.more-list button { min-height: 60px; padding: 12px 16px; gap: 14px; }
+.more-list .option-icon { width: 38px; height: 38px; }
+.more-grid { gap: 10px; padding: 0 12px; }
+.more-tile { min-height: 108px; padding: 16px 8px; gap: 10px; font-size: 13px; }
+.more-tile-icon { width: 48px; height: 48px; }
+
+/* ---- サービスのすべてを見るページ ---- */
+.services-page { padding: 4px 0 32px; }
+.services-group { padding-top: 12px; }
+.services-group-title {
+  margin: 0;
+  padding: 10px 20px 8px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.services-list {
+  list-style: none;
+  margin: 0 12px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--bg-soft);
+}
+.services-list li + li { border-top: 1px solid var(--line); }
+.services-row {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  text-align: left;
+}
+.services-row:hover { background: var(--accent-soft); }
+.services-row-icon {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+.services-row-label { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; }
+.services-row .chev { color: var(--muted); }

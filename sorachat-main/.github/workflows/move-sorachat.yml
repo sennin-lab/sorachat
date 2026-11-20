@@ -1,0 +1,66 @@
+name: Move sorachat Contents to Root and Push
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'sorachat/**'
+
+permissions:
+  contents: write
+
+jobs:
+  move-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # リモートの履歴を完全に取得する
+
+      - name: Gitユーザー情報のセットアップ
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: sorachatフォルダの中身をプロジェクトルートに移動
+        run: |
+          if [ -d "sorachat" ]; then
+            echo "sorachatフォルダが見つかりました。中身をプロジェクトルートに移動します..."
+            
+            shopt -s dotglob
+            if [ "$(ls -A sorachat)" ]; then
+              mv -f sorachat/* .
+              echo "移動が完了しました。"
+            else
+              echo "sorachatフォルダの中身が空です。"
+            fi
+            
+            rm -rf sorachat
+            shopt -u dotglob
+          else
+            echo "sorachatフォルダが存在しません。処理をスキップします。"
+          fi
+
+      - name: 変更をコミットしてプッシュ
+        run: |
+          git add -A
+          git status
+          
+          # 変更差分がある場合のみコミットとプッシュを行う
+          if git diff --staged --quiet; then
+            echo "変更はありません。"
+          else
+            git commit -m "chore: move sorachat contents to root and push [skip ci]"
+            
+            # ブランチ名を動的に取得
+            CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
+            if [ -z "$CURRENT_BRANCH" ]; then
+              CURRENT_BRANCH=$(git branch --show-current)
+            fi
+            echo "対象ブランチ: $CURRENT_BRANCH"
+            
+            # リモートの変更を安全に取り込んでからプッシュ
+            git pull --rebase origin "$CURRENT_BRANCH" || echo "Rebase skipped"
+            git push origin "$CURRENT_BRANCH"
+          fi

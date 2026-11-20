@@ -1,0 +1,601 @@
+import { useCallback, useEffect, useState } from "react";
+import { ApiError, api, post, put } from "./api";
+
+// 管理者パネルの「作品」タブ（senninstudio の審査・通報・作者の停止・支払いの再送）
+// 作者ができない操作（公開停止・復帰・削除・作者の停止・支払いの再送）はここで行う
+
+type Sub = "works" | "reports" | "payouts";
+
+type WorkRow = {
+  id: string;
+  kind: string;
+  name: string;
+  price: number;
+  status: string;
+  hiddenReason: string | null;
+  creatorName: string;
+  reportCount: number;
+  sales: number;
+  createdAt: string;
+};
+type WorkDetail = {
+  id: string;
+  kind: string;
+  name: string;
+  description: string;
+  price: number;
+  status: string;
+  hiddenReason: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  images: { id: string; role: string }[];
+  creator: { id: string; name: string; suspended: boolean; suspendedReason: string | null; certified: boolean };
+  reports: { reporterName: string; reason: string; createdAt: string }[];
+  grant: GrantInfo | null;
+};
+// 拡張機能からのポイント配布の上限（管理者が決める）
+type GrantInfo = { maxPoints: number; usedPoints: number; active: boolean; perUserMinuteMax: number; perCallMax: number };
+type ReportRow = { id: string; name: string; kind: string; status: string; hiddenReason: string | null; creatorName: string; reportCount: number; latestAt: string };
+type PayoutRow = { id: string; creatorName: string; workName: string; amount: number; status: string; attempts: number; lastError: string | null; createdAt: string };
+
+const KIND: Record<string, string> = { stamp_pack: "スタンプ", theme: "外観", quiz: "クイズ", ai_style: "応答スタイル", extension: "拡張機能" };
+const STATUS: Record<string, string> = { published: "販売中", hidden: "非公開", deleted: "作者が削除", removed: "運営が削除" };
+const REASON: Record<string, string> = { reports: "通報による自動非公開", admin: "運営が非公開", creator_suspended: "作者の停止" };
+const when = (iso: string) => new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const errorOf = (e: unknown) => (e instanceof ApiError ? e.message : "通信に失敗しました。");
+
+async function adminApi<T>(path: string, init?: RequestInit): Promise<T> {
+  try {
+    return await api<T>(path, init);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) window.dispatchEvent(new Event("admin-expired"));
+    throw err;
+  }
+}
+
+export function StudioPanel() {
+  const [sub, setSub] = useState<Sub>("works");
+  // 開いている作品（タブを行き来しても、詳細の表示を保つ）
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <div className="admin-studio">
+      <div className="admin-segment" role="tablist">
+        <button role="tab" aria-selected={sub === "works"} className={sub === "works" ? "on" : ""} onClick={() => setSub("works")}>
+          作品
+        </button>
+        <button role="tab" aria-selected={sub === "reports"} className={sub === "reports" ? "on" : ""} onClick={() => setSub("reports")}>
+          通報
+        </button>
+        <button role="tab" aria-selected={sub === "payouts"} className={sub === "payouts" ? "on" : ""} onClick={() => setSub("payouts")}>
+          支払い
+        </button>
+      </div>
+      {sub === "works" && <WorksList openId={openId} onOpen={setOpenId} />}
+      {sub === "reports" && (
+        <ReportsList
+          onOpen={(id) => {
+            setOpenId(id);
+            setSub("works");
+          }}
+        />
+      )}
+      {sub === "payouts" && <PayoutsList />}
+    </div>
+  );
+}
+
+function WorksList({ openId, onOpen }: { openId: string | null; onOpen: (id: string | null) => void }) {
+  const [status, setStatus] = useState("all");
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<WorkRow[]>([]);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await adminApi<WorkRow[]>(`/api/admin/studio/works?status=${status}&q=${encodeURIComponent(q)}`));
+      setError("");
+    } catch (e) {
+      setError(errorOf(e));
+    }
+  }, [status, q]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (openId) {
+    return (
+      <WorkDetailView
+        id={openId}
+        onBack={() => {
+          onOpen(null);
+          void load();
+        }}
+      />
+    );
+  }
+
+  return (
+    <>
+      <div className="admin-toolbar">
+        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="状態で絞る">
+          <option value="all">すべて</option>
+          <option value="published">販売中</option>
+          <option value="hidden">非公開</option>
+          <option value="removed">運営が削除</option>
+          <option value="deleted">作者が削除</option>
+        </select>
+        <input placeholder="作品名で検索" value={q} onChange={(e) => setQ(e.target.value)} aria-label="作品名で検索" />
+      </div>
+      {error && <p className="notice error center">{error}</p>}
+      <ul className="admin-list">
+        {rows.map((w) => (
+          <li key={w.id}>
+            <button type="button" onClick={() => onOpen(w.id)}>
+              <span className="admin-list-main">
+                <strong>{w.name}</strong>
+                <small>
+                  {KIND[w.kind] ?? w.kind} ・ {w.price} pt ・ 作者 {w.creatorName} ・ 販売 {w.sales} 件
+                </small>
+              </span>
+              <span className="admin-list-tag">
+                {STATUS[w.status]}
+                {w.reportCount > 0 && <em> 通報 {w.reportCount}</em>}
+              </span>
+            </button>
+          </li>
+        ))}
+        {rows.length === 0 && !error && <li className="admin-empty">作品はありません。</li>}
+      </ul>
+    </>
+  );
+}
+
+// 拡張機能の配布の上限を決める（0 にするか、配布を許可しないにすると止まる）
+function ExtensionGrantEditor({ id, grant, onChanged }: { id: string; grant: GrantInfo | null; onChanged: () => Promise<void> }) {
+  const [max, setMax] = useState(String(grant?.maxPoints ?? 0));
+  const [perMinute, setPerMinute] = useState(String(grant?.perUserMinuteMax ?? 0));
+  const [perCall, setPerCall] = useState(String(grant?.perCallMax ?? 500));
+  const [active, setActive] = useState(grant?.active ?? false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    setMax(String(grant?.maxPoints ?? 0));
+    setPerMinute(String(grant?.perUserMinuteMax ?? 0));
+    setPerCall(String(grant?.perCallMax ?? 500));
+    setActive(grant?.active ?? false);
+  }, [grant?.maxPoints, grant?.perUserMinuteMax, grant?.perCallMax, grant?.active]);
+
+  const save = async () => {
+    const n = Number(max);
+    const m = Number(perMinute);
+    const c = Number(perCall);
+    if (!Number.isInteger(n) || n < 0 || !Number.isInteger(m) || m < 0) {
+      setMessage({ ok: false, text: "0 以上の整数で入力してください。" });
+      return;
+    }
+    if (!Number.isInteger(c) || c < 1) {
+      setMessage({ ok: false, text: "1回の上限は 1 以上の整数で入力してください。" });
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      await adminApi(`/api/admin/studio/works/${id}/grant`, {
+        method: "PUT",
+        body: JSON.stringify({ maxPoints: n, active, perUserMinuteMax: m, perCallMax: c })
+      });
+      setMessage({ ok: true, text: "保存しました。" });
+      await onChanged();
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="admin-grant">
+      <h4 className="admin-subtitle">ポイントの配布の上限</h4>
+      <p className="admin-meta">
+        この拡張機能が利用者に配れる、合計のポイントです（利用者ごとではなく全体）。作者は変えられません。
+      </p>
+      <p className="admin-meta">配布済み：{grant?.usedPoints ?? 0} pt</p>
+      <p className="admin-meta">
+        1人が1分間に受け取れるポイントの上限です。0 にすると、1分あたりの制限はありません。
+      </p>
+      <p className="admin-meta">
+        1回の配布で配れる量の上限です。初期値は 500pt です。上限はありません（変えたいときは、ここで指定してください）。
+      </p>
+      <div className="admin-grant-row">
+        <label>
+          1回の上限{" "}
+          <input type="number" inputMode="numeric" min={1} value={perCall} onChange={(e) => setPerCall(e.target.value)} disabled={busy} /> pt
+        </label>
+        <label>
+          全体の上限{" "}
+          <input type="number" inputMode="numeric" min={0} value={max} onChange={(e) => setMax(e.target.value)} disabled={busy} /> pt
+        </label>
+        <label>
+          1人・1分あたり{" "}
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={perMinute}
+            onChange={(e) => setPerMinute(e.target.value)}
+            disabled={busy}
+          />{" "}
+          pt
+        </label>
+        <label className="admin-grant-check">
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={busy} /> 配布を許可する
+        </label>
+      </div>
+      <button type="button" className="btn-small" disabled={busy} onClick={save}>
+        保存
+      </button>
+      {message && <p className={`notice center${message.ok ? "" : " error"}`}>{message.text}</p>}
+    </section>
+  );
+}
+
+type CodeEditRow = { reason: string; createdAt: string };
+
+// 拡張機能のコードを書き直す（管理者）。理由は必須。保存すると、公開中の拡張機能にもすぐ反映される
+function ExtensionCodeEditor({ work, onSaved }: { work: WorkDetail; onSaved: () => Promise<void> }) {
+  const initial = work.payload ?? {};
+  const [html, setHtml] = useState(String(initial.html ?? ""));
+  const [css, setCss] = useState(String(initial.css ?? ""));
+  const [js, setJs] = useState(String(initial.js ?? ""));
+  const [why, setWhy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [history, setHistory] = useState<CodeEditRow[]>([]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistory(await adminApi<CodeEditRow[]>(`/api/admin/studio/works/${work.id}/code-edits`));
+    } catch {
+      // 履歴が読めなくても、書き直しはできる
+    }
+  }, [work.id]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+
+  const save = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await adminApi(`/api/admin/studio/works/${work.id}/code`, put({ html, css, js, reason: why.trim(), updatedAt: work.updatedAt }));
+      setMessage({ ok: true, text: "コードを書き直して保存しました。" });
+      setWhy("");
+      await onSaved();
+      await loadHistory();
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canSave = !busy && why.trim().length >= 2 && (html.trim() !== "" || js.trim() !== "");
+
+  return (
+    <section className="admin-grant">
+      <h4 className="admin-subtitle">コードを書き直す</h4>
+      <p className="admin-meta">保存すると、公開中の拡張機能にもすぐ反映されます。作者の了承を取ってから書き直してください。</p>
+      <label className="admin-field">
+        <span>HTML</span>
+        <textarea className="admin-code" value={html} onChange={(e) => setHtml(e.target.value)} spellCheck={false} />
+      </label>
+      <label className="admin-field">
+        <span>CSS</span>
+        <textarea className="admin-code" value={css} onChange={(e) => setCss(e.target.value)} spellCheck={false} />
+      </label>
+      <label className="admin-field">
+        <span>JavaScript</span>
+        <textarea className="admin-code" value={js} onChange={(e) => setJs(e.target.value)} spellCheck={false} />
+      </label>
+      <label className="admin-field">
+        <span>書き直した理由（必須・履歴に残ります）</span>
+        <input value={why} maxLength={200} onChange={(e) => setWhy(e.target.value)} />
+      </label>
+      <div className="admin-actions">
+        <button type="button" className="btn-primary" disabled={!canSave} onClick={() => void save()}>
+          保存して反映
+        </button>
+      </div>
+      {message && <p className={message.ok ? "admin-meta" : "notice error center"}>{message.text}</p>}
+      <h5 className="admin-subtitle">書き直しの履歴</h5>
+      {history.length === 0 ? (
+        <p className="admin-empty">履歴はありません。</p>
+      ) : (
+        <ul className="admin-plain">
+          {history.map((h, i) => (
+            <li key={i}>
+              {when(h.createdAt)}：{h.reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function WorkDetailView({ id, onBack }: { id: string; onBack: () => void }) {
+  const [work, setWork] = useState<WorkDetail | null>(null);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setWork(await adminApi<WorkDetail>(`/api/admin/studio/works/${id}`));
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const act = async (label: string, run: () => Promise<unknown>) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await run();
+      setMessage({ ok: true, text: `${label}しました。` });
+      await load();
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setStatus = (status: "published" | "hidden" | "removed", label: string) =>
+    act(label, () => adminApi(`/api/admin/studio/works/${id}/status`, post({ status, reason: reason.trim() || undefined })));
+
+  // 認定開発者：拡張機能の支払いの上限が高くなる（隔離・通信禁止は、認定の有無に関係なく同じ）
+  const certify = (certified: boolean) =>
+    act(certified ? "認定開発者にしました" : "認定を外しました", () =>
+      adminApi(`/api/admin/studio/creators/${work?.creator.id}/certified`, post({ certified }))
+    );
+
+  const suspend = (suspended: boolean) =>
+    act(suspended ? "作者を停止" : "作者の停止を解除", () =>
+      adminApi(`/api/admin/studio/creators/${work?.creator.id}/suspend`, post({ suspended, reason: reason.trim() || undefined }))
+    );
+
+  if (!work) {
+    return (
+      <div className="admin-detail">
+        <button type="button" className="btn-small" onClick={onBack}>
+          一覧へ戻る
+        </button>
+        {message && <p className="notice error center">{message.text}</p>}
+      </div>
+    );
+  }
+
+  const imageUrl = (imageId: string) => `/api/admin/studio/images/${imageId}`;
+  return (
+    <div className="admin-detail">
+      <button type="button" className="btn-small" onClick={onBack}>
+        一覧へ戻る
+      </button>
+      <h3 className="admin-title">{work.name}</h3>
+      <p className="admin-meta">
+        {KIND[work.kind]} ・ {work.price} pt ・ 作者 {work.creator.name} ・ {when(work.createdAt)}
+      </p>
+      <p className="admin-state">
+        状態: {STATUS[work.status]}
+        {work.hiddenReason && `（${REASON[work.hiddenReason] ?? work.hiddenReason}）`}
+      </p>
+      <p className="admin-desc">{work.description || "（説明なし）"}</p>
+
+      {work.kind === "extension" && <ExtensionGrantEditor id={work.id} grant={work.grant} onChanged={load} />}
+      {work.kind === "extension" && <ExtensionCodeEditor work={work} onSaved={load} />}
+
+      <div className="admin-thumbs">
+        {work.images.map((img) => (
+          <img key={img.id} src={imageUrl(img.id)} alt="" className={img.role === "thumb" ? "is-thumb" : ""} loading="lazy" />
+        ))}
+      </div>
+
+      {work.kind === "quiz" && Array.isArray((work.payload as { questions?: unknown })?.questions) && (
+        <details className="admin-details">
+          <summary>問題の中身</summary>
+          <ol>
+            {((work.payload as { questions: { q: string; options: string[]; answer: number }[] }).questions).map((q, i) => (
+              <li key={i}>
+                {q.q}（{q.options.map((o, oi) => (oi === q.answer ? `【${o}】` : o)).join(" / ")}）
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+
+      <h4 className="admin-subtitle">通報（{work.reports.length}件）</h4>
+      {work.reports.length === 0 ? (
+        <p className="admin-empty">通報はありません。</p>
+      ) : (
+        <ul className="admin-plain">
+          {work.reports.map((r, i) => (
+            <li key={i}>
+              {r.reporterName}・{when(r.createdAt)}{r.reason && `：${r.reason}`}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <label className="admin-field">
+        <span>理由（任意・作者や通報者には表示されません）</span>
+        <input value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} />
+      </label>
+
+      <div className="admin-actions">
+        {work.status !== "published" && work.status !== "removed" && (
+          <button type="button" className="btn-primary" disabled={busy} onClick={() => setStatus("published", "公開に戻し")}>
+            公開に戻す
+          </button>
+        )}
+        {work.status === "published" && (
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => setStatus("hidden", "非公開にし")}>
+            非公開にする
+          </button>
+        )}
+        {work.status !== "removed" && (
+          <button type="button" className="btn-small danger" disabled={busy} onClick={() => setStatus("removed", "削除し")}>
+            運営として削除する
+          </button>
+        )}
+        {work.reports.length > 0 && (
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={busy}
+            onClick={() => act("通報の記録を消し", () => adminApi(`/api/admin/studio/works/${id}/dismiss-reports`, post()))}
+          >
+            通報を消す
+          </button>
+        )}
+      </div>
+
+      <div className="admin-actions">
+        {work.creator.suspended ? (
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => suspend(false)}>
+            この作者の停止を解除
+          </button>
+        ) : (
+          <button type="button" className="btn-small danger" disabled={busy} onClick={() => suspend(true)}>
+            この作者を停止する
+          </button>
+        )}
+      </div>
+      {work.creator.suspended && <p className="admin-state">作者は停止中です。{work.creator.suspendedReason && `（${work.creator.suspendedReason}）`}</p>}
+
+      <div className="admin-actions">
+        {work.creator.certified ? (
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => certify(false)}>
+            認定開発者を外す
+          </button>
+        ) : (
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => certify(true)}>
+            認定開発者にする
+          </button>
+        )}
+      </div>
+      {work.creator.certified && <p className="admin-state">この作者は認定開発者です（拡張機能の支払いの上限が高くなります）。</p>}
+
+      {message && <p className={`notice center ${message.ok ? "" : "error"}`}>{message.text}</p>}
+    </div>
+  );
+}
+
+function ReportsList({ onOpen }: { onOpen: (id: string) => void }) {
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    adminApi<ReportRow[]>("/api/admin/studio/reports")
+      .then(setRows)
+      .catch((e) => setError(errorOf(e)));
+  }, []);
+  return (
+    <>
+      {error && <p className="notice error center">{error}</p>}
+      <ul className="admin-list">
+        {rows.map((r) => (
+          <li key={r.id}>
+            <button type="button" onClick={() => onOpen(r.id)}>
+              <span className="admin-list-main">
+                <strong>{r.name}</strong>
+                <small>
+                  作者 {r.creatorName} ・ 最新の通報 {when(r.latestAt)}
+                </small>
+              </span>
+              <span className="admin-list-tag">
+                通報 {r.reportCount}
+                <em> {STATUS[r.status]}</em>
+              </span>
+            </button>
+          </li>
+        ))}
+        {rows.length === 0 && !error && <li className="admin-empty">通報はありません。</li>}
+      </ul>
+    </>
+  );
+}
+
+function PayoutsList() {
+  const [status, setStatus] = useState("pending");
+  const [rows, setRows] = useState<PayoutRow[]>([]);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await adminApi<PayoutRow[]>(`/api/admin/studio/payouts?status=${status}`));
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    }
+  }, [status]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const retry = async (id: string) => {
+    setBusyId(id);
+    setMessage(null);
+    try {
+      await adminApi(`/api/admin/studio/payouts/${id}/retry`, post());
+      setMessage({ ok: true, text: "支払いを行いました。" });
+    } catch (e) {
+      setMessage({ ok: false, text: errorOf(e) });
+    } finally {
+      setBusyId(null);
+      void load();
+    }
+  };
+
+  return (
+    <>
+      <div className="admin-toolbar">
+        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="状態で絞る">
+          <option value="pending">保留中</option>
+          <option value="failed">失敗</option>
+          <option value="paid">支払い済み</option>
+        </select>
+      </div>
+      {message && <p className={`notice center ${message.ok ? "" : "error"}`}>{message.text}</p>}
+      <ul className="admin-list">
+        {rows.map((p) => (
+          <li key={p.id} className="admin-payout">
+            <span className="admin-list-main">
+              <strong>
+                {p.amount} pt ・ {p.creatorName}
+              </strong>
+              <small>
+                作品 {p.workName} ・ {when(p.createdAt)} ・ 試行 {p.attempts} 回
+              </small>
+              {p.lastError && <small className="admin-error">{p.lastError}</small>}
+            </span>
+            {p.status !== "paid" && (
+              <button type="button" className="btn-small accent" disabled={busyId !== null} onClick={() => void retry(p.id)}>
+                {busyId === p.id ? "処理中…" : "再送"}
+              </button>
+            )}
+          </li>
+        ))}
+        {rows.length === 0 && <li className="admin-empty">該当する支払いはありません。</li>}
+      </ul>
+    </>
+  );
+}

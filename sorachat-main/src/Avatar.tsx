@@ -1,0 +1,161 @@
+import { useEffect, useRef, useState } from "react";
+import { avatarObjectUrl, cachedAvatar, dropAvatarObjectUrl, knownAvatarVersion, onAvatarCacheChange } from "./avatarCache";
+import { RobotFace, SENNIN_BOT_ID } from "./robot";
+
+// 一時的に読めなかった画像は、少し待って読み直す（ネットワークの一瞬の失敗で文字のアイコンに戻らないように）
+const MAX_RETRY = 2;
+// それでも読めなかったときは、文字のアイコンを出したまま、間を空けて何度か読み直す（リロードしなくても表示されるように）
+const RECOVER_MS = [4_000, 10_000, 20_000, 40_000, 60_000];
+const MAX_RECOVER = 8;
+
+// 写真があれば写真、なければ名前の1文字。src を渡すとグループなど別の画像URLを使う
+// 友だちの画像は、保存済みのもの（localStorage → IndexedDB）があればデータベースに問い合わせる前に表示する
+export function Avatar({
+  userId,
+  hasAvatar,
+  name,
+  size = 40,
+  src
+}: {
+  userId: string;
+  hasAvatar: boolean;
+  name: string;
+  size?: number;
+  src?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  // 読み直しの回数（増えると、URL に付けた印が変わり、ブラウザが取り直す）
+  const [retry, setRetry] = useState(0);
+  // 失敗したあとの、間を空けた読み直しの回数
+  const recovered = useRef(0);
+  const [saved, setSaved] = useState<string | null>(() => (!src && userId && hasAvatar ? cachedAvatar(userId) : null));
+  // IndexedDB から読んだ画像。undefined は「まだ確かめていない」、null は「保存なし」
+  const [dbUrl, setDbUrl] = useState<string | null | undefined>(undefined);
+  // 手元の画像（保存済みのデータURL・オブジェクトURL）が読めなかったときのURL。そのURLは使わず、別の経路で出し直す
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  // 手元の画像を作り直すのは、人ごとに1回まで（作り直した画像も読めないときは、サーバーから取る）
+  const droppedOnce = useRef(false);
+  useEffect(() => {
+    droppedOnce.current = false;
+  }, [userId]);
+
+  useEffect(() => {
+    if (src || !userId) return;
+    const update = () => setSaved(hasAvatar ? cachedAvatar(userId) : null);
+    update();
+    return onAvatarCacheChange(update);
+  }, [userId, hasAvatar, src]);
+
+  // localStorage に無いときだけ IndexedDB を見る
+  useEffect(() => {
+    setDbUrl(undefined);
+    if (src || !userId || !hasAvatar || userId === SENNIN_BOT_ID) {
+      setDbUrl(null);
+      return;
+    }
+    let alive = true;
+    const update = () => {
+      avatarObjectUrl(userId).then((url) => {
+        if (alive) setDbUrl(url);
+      });
+    };
+    update();
+    const off = onAvatarCacheChange(update);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [userId, hasAvatar, src]);
+
+  // 人や画像が変わったら、失敗の記録と読み直しの回数をリセットする
+  useEffect(() => {
+    setFailed(false);
+    setRetry(0);
+    recovered.current = 0;
+  }, [userId, src, saved, dbUrl, hasAvatar]);
+
+  // 読めなかったあとも、あきらめない。間を空けて読み直し、回線が戻った・画面に戻ってきたときはすぐ読み直す
+  useEffect(() => {
+    if (!failed) return;
+    const revive = () => {
+      setFailed(false);
+      setRetry((n) => n + 1);
+    };
+    let timer: number | undefined;
+    if (recovered.current < MAX_RECOVER) {
+      const wait = RECOVER_MS[Math.min(recovered.current, RECOVER_MS.length - 1)];
+      timer = window.setTimeout(() => {
+        recovered.current += 1;
+        revive();
+      }, wait);
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") revive();
+    };
+    window.addEventListener("online", revive);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("online", revive);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [failed]);
+
+  const initial = name.trim().charAt(0).toUpperCase() || "?";
+  const style = { width: size, height: size, fontSize: Math.round(size * 0.42) };
+  if (userId === SENNIN_BOT_ID) {
+    return (
+      <span className="avatar" style={style} aria-hidden="true">
+        <RobotFace />
+      </span>
+    );
+  }
+  // 優先順：指定された画像 → localStorage → IndexedDB → 通常の読み込み（確かめ終わってから）
+  const fromDb = dbUrl === undefined ? null : dbUrl;
+  // 読めなかったURLは候補から外す
+  const pick = (candidate: string | null | undefined) => (candidate && candidate !== brokenUrl ? candidate : null);
+  // 版（?v=）を付けると、画像が変わっていないあいだはブラウザに保存された分を使い、サーバーに取りに行かない
+  const version = knownAvatarVersion(userId);
+  const params = new URLSearchParams();
+  if (version) params.set("v", version);
+  // 読み直すときだけ印を付け、ブラウザが失敗した応答を使い回さないようにする
+  if (retry > 0) params.set("r", String(retry));
+  const query = params.toString();
+  const remote = `/api/users/${userId}/avatar${query ? `?${query}` : ""}`;
+  const url = pick(src) ?? pick(saved) ?? pick(fromDb) ?? (userId && dbUrl !== undefined ? remote : "");
+  if (!url || !hasAvatar || failed) {
+    return (
+      <span className="avatar" style={style} aria-hidden="true">
+        {initial}
+      </span>
+    );
+  }
+  return (
+    <img
+      className="avatar"
+      style={style}
+      src={url}
+      alt=""
+      onLoad={() => {
+        recovered.current = 0;
+      }}
+      onError={() => {
+        // 手元の画像が読めなかったときは、その画像を外して別の経路で出し直す（同じURLを何度も読みに行かない）
+        if (!src && url !== remote) {
+          setBrokenUrl(url);
+          if (url === fromDb && !droppedOnce.current && userId) {
+            droppedOnce.current = true;
+            dropAvatarObjectUrl(userId);
+          }
+          return;
+        }
+        if (retry < MAX_RETRY) {
+          // 少し待ってから読み直す（一時的な失敗なら、次の読み込みで表示される）
+          window.setTimeout(() => setRetry((n) => n + 1), 600 * (retry + 1));
+          return;
+        }
+        setFailed(true);
+      }}
+    />
+  );
+}

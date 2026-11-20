@@ -1,0 +1,151 @@
+/* SenninPay の動き（出入り・押したときの反応・完了の演出）。
+   styles.css の見た目はそのまま使い、動きだけをここに重ねる。
+   動きを減らす設定（prefers-reduced-motion）のときは、すべて止める。 */
+
+/* 画面が変わったとき（.pp は画面ごとに作り直される）*/
+.pp { animation: pp-screen-in 0.38s var(--ease-out) both; }
+@keyframes pp-screen-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 残高 */
+.pp-hero { overflow: hidden; animation: pp-rise 0.5s var(--ease-out) both; }
+.pp-hero::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 40%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: skewX(-18deg);
+  animation: pp-sheen 4.5s ease-in-out 0.8s infinite;
+  pointer-events: none;
+}
+.pp-hero-value { animation: pp-value-pop 0.42s var(--ease-spring); }
+.pp-hero-value,
+.pp-hero-sub { transition: filter 0.3s ease; }
+.pp-hero-link { transition: transform 0.15s var(--ease-out); }
+.pp-hero-link:hover { transform: translateX(3px); }
+.pp-hero-btn { transition: transform 0.15s var(--ease-out), background 0.2s; }
+.pp-hero-btn:active { transform: scale(0.9); }
+.pp-hero-btn:hover { transform: translateY(-1px); }
+@keyframes pp-sheen { 0% { left: -60%; } 55%, 100% { left: 130%; } }
+@keyframes pp-value-pop {
+  0% { transform: scale(0.86); opacity: 0.2; }
+  60% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* 通知・エラー */
+.pp-notice { animation: pp-drop 0.4s var(--ease-spring) both; }
+.pp-error { animation: pp-shake 0.42s ease-in-out; }
+@keyframes pp-drop { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+@keyframes pp-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+
+/* 4つの大きなボタン（ふわっと並んで出る・浮き上がる・押すと沈む） */
+.pp-tile { animation: pp-rise 0.5s var(--ease-spring) both; transition: transform 0.2s var(--ease-out), box-shadow 0.25s ease; }
+.pp-tile:hover { transform: translateY(-4px); box-shadow: 0 0 0 1px var(--accent), 0 12px 22px rgba(77, 156, 219, 0.18); }
+.pp-tile:active { transform: scale(0.93); }
+.pp-tile-icon { transition: transform 0.3s var(--ease-spring); }
+.pp-tile:hover .pp-tile-icon { transform: rotate(-8deg) scale(1.1); }
+.pp-tile.is-primary { position: relative; }
+.pp-tile.is-primary::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 22px;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  animation: pp-ring 2.4s ease-out 1s infinite;
+  pointer-events: none;
+}
+
+/* 取引の一覧（上から順にふわっと出る） */
+.pp-history-row { animation: pp-rise 0.45s var(--ease-out) both; transition: background 0.2s; }
+.pp-history-row:hover { background: var(--raised); }
+.pp-history-icon { transition: transform 0.3s var(--ease-spring); }
+.pp-history-row:hover .pp-history-icon { transform: scale(1.12) rotate(-6deg); }
+.pp-history-side strong { display: inline-block; transition: transform 0.2s; }
+.pp-section { animation: pp-rise 0.5s var(--ease-out) 0.15s both; }
+
+/* 送る・受け取るの相手の一覧 */
+.pp-person, .pp-target, .pp-card, .pp-merchant { transition: transform 0.18s var(--ease-out), box-shadow 0.2s; }
+.pp-person:active, .pp-target:active { transform: scale(0.98); }
+.pp-qr-card, .pp-card { animation: pp-rise 0.5s var(--ease-spring) both; }
+.pp-qr-card { position: relative; }
+
+/* ボタン（押したときの沈み・ふくらみ） */
+.pp-primary, .pp-secondary, .pp-link-btn { transition: transform 0.15s var(--ease-out), box-shadow 0.2s, opacity 0.2s; }
+.pp-primary:not(:disabled):hover { transform: translateY(-1px); }
+.pp-primary:not(:disabled):active, .pp-secondary:active, .pp-link-btn:active { transform: scale(0.96); }
+.pp-primary:disabled { transition: opacity 0.2s; }
+.pp-submit:not(:disabled) { animation: pp-breathe 2.6s ease-in-out infinite; }
+
+/* テンキー（押すと一瞬ふくらみ、数字が入るとポンと弾む） */
+.pp-key { transition: transform 0.12s var(--ease-out), background 0.15s; }
+.pp-key:active { transform: scale(0.88); background: var(--accent); color: #fff; }
+.pp-amount-num { display: inline-block; animation: pp-value-pop 0.25s var(--ease-spring); }
+.pp-amount-display { transition: transform 0.2s; }
+
+/* 完了（丸いアイコンが弾んで出る。成功は輪が広がり、失敗は小さく揺れる） */
+.pp-done { animation: pp-rise 0.45s var(--ease-out) both; }
+.pp-done-icon { position: relative; }
+.pp-done-icon.is-ok::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  border: 3px solid var(--accent);
+  opacity: 0;
+  animation: pp-ring 1.2s ease-out 0.25s 2;
+  pointer-events: none;
+}
+.pp-done-icon.is-ng { animation: pp-shake 0.6s ease-in-out 0.2s both, pp-value-pop 0.4s var(--ease-spring); }
+.pp-done-amount { animation: pp-rise 0.5s var(--ease-out) 0.2s both; }
+.pp-done .pp-hint, .pp-done .pp-error { animation: pp-rise 0.5s var(--ease-out) 0.3s both; }
+.pp-done-actions { animation: pp-rise 0.5s var(--ease-out) 0.4s both; }
+
+/* スキャン（読み取り枠の中を、光の線が行き来する） */
+.pp-scan-box::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #79b9ef, transparent);
+  box-shadow: 0 0 12px #79b9ef;
+  animation: pp-scanline 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+.pp-scan-checking { animation: pp-breathe 1.4s ease-in-out infinite; }
+
+/* 店舗のバッジ */
+.pp-chip, .pp-shop-badge { animation: pp-pop-in 0.4s var(--ease-spring) both; }
+
+/* キーフレーム */
+@keyframes pp-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes pp-pop-in { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: none; } }
+@keyframes pp-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+@keyframes pp-ring { 0% { opacity: 0.8; transform: scale(0.96); } 100% { opacity: 0; transform: scale(1.22); } }
+@keyframes pp-scanline { 0%, 100% { top: 12px; } 50% { top: calc(100% - 14px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pp,
+  .pp *,
+  .pp *::before,
+  .pp *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

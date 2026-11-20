@@ -1,0 +1,206 @@
+/* SoraChat の見た目の整理（大手サービスのように、誰でも迷わず使える一覧・タブ・友だち・その他の画面）
+   styles.css と glass.css の後、liquid-senin.css の前に読み込む。
+   ・色は1つの青（アクセント）に絞り、未読の赤だけを目立たせる
+   ・文字は読みやすい大きさ（本文 16px 以上）、押すところは 44px 以上
+   ・同じ形の角丸・余白・影で、画面ごとの見た目のばらつきをなくす */
+
+:root {
+  --accent: #2563eb;
+  --accent-ink: #1d4ed8;
+  --accent-soft: #eaf1ff;
+  --badge: #ef4444;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+}
+:root[data-theme="dark"] {
+  --accent: #3b82f6;
+  --accent-ink: #93c5fd;
+  --accent-soft: #1c2a40;
+  --badge: #f43f5e;
+}
+
+
+/* ---- 下のタブバー：ラベルを読みやすく、選んだタブは色の丸で示す ---- */
+.tabbar { padding-top: 4px; }
+.tab-btn { min-height: 58px; gap: 3px; padding: 6px 0 8px; font-size: 12px; font-weight: 600; }
+.tab-icon { width: 56px; height: 30px; border-radius: 16px; transition: background-color 0.2s ease; }
+.tab-btn.on .tab-icon { background: var(--accent-soft); }
+.tab-btn.on { color: var(--accent-ink); }
+.tab-badge { top: -2px; left: 32px; background: var(--badge); }
+
+/* ---- 各画面の見出し（上に固定し、タイトルを大きく） ---- */
+.tab-head {
+  min-height: 60px;
+  padding: 12px 12px 6px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+.tab-title { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.icon-btn { width: 44px; height: 44px; color: var(--text); }
+.icon-btn:hover { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* ---- 検索欄：角丸で、入力中は青い枠 ---- */
+.search-bar { padding: 4px 16px 10px; }
+.search-field { height: 42px; border-radius: 12px; background: var(--bg-soft); }
+.search-field input { font-size: 16px; }
+.search-field:focus-within { box-shadow: 0 0 0 2px var(--accent); background: var(--panel); }
+
+/* ---- 絞り込み（すべて・未読・グループ）---- */
+.filter-chips {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.filter-chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: none;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip .chip-count { margin-left: 4px; opacity: 0.85; font-weight: 700; }
+
+/* ---- 見出し（セクション名）---- */
+.section-label {
+  padding: 18px 20px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* ---- トーク一覧 ---- */
+.convs { padding: 0 0 16px; }
+.conv {
+  min-height: 80px;
+  gap: 14px;
+  padding: 12px 16px;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.conv:hover, .conv.active { background: var(--accent-soft); }
+.conv-body { gap: 4px; }
+.conv-top strong { font-size: 16px; font-weight: 700; }
+.conv-top time { font-size: 12px; }
+.preview { font-size: 14px; }
+.conv.unread .conv-top strong { font-weight: 800; }
+.conv.unread .conv-top time { color: var(--accent-ink); font-weight: 700; }
+.badge-count {
+  min-width: 22px;
+  height: 22px;
+  line-height: 22px;
+  padding: 0 7px;
+  background: var(--badge);
+  font-size: 12px;
+}
+
+/* ---- 友だち・ユーザー行 ---- */
+.user-list-ul { padding-bottom: 12px; }
+.user-row {
+  min-height: 72px;
+  gap: 14px;
+  padding: 10px 16px;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.user-row strong { font-size: 16px; font-weight: 700; }
+.row-text small { font-size: 13px; }
+.request-actions { display: flex; gap: 8px; }
+.btn-small {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.btn-small.accent { background: var(--accent); }
+
+/* 自分の行：カードのように目立たせる */
+.me-row {
+  min-height: 84px;
+  margin: 4px 12px 8px;
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  box-shadow: none;
+}
+.me-row:hover:not(:disabled) { background: var(--accent-soft); }
+
+/* ---- その他タブ：アカウントの一覧 + サービスのアイコン・グリッド ---- */
+.profile-card {
+  margin: 4px 12px 8px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  border-bottom: 0;
+}
+.profile-card:hover { background: var(--accent-soft); }
+.more-section { padding-bottom: 8px; }
+.more-section-title {
+  margin: 0;
+  padding: 16px 20px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.more-list {
+  margin: 0 12px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+.more-list li + li { border-top: 1px solid var(--line); }
+.more-list button { min-height: 56px; padding: 12px 16px; font-size: 16px; font-weight: 600; }
+.more-list .option-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--panel);
+  color: var(--accent-ink);
+}
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px;
+}
+.more-tile {
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+}
+.more-tile:hover { background: var(--accent-soft); }
+.more-tile-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+/* ---- 空の画面（トークが選ばれていないとき）---- */
+.empty-mark { background: var(--accent); }
+.empty-title { font-size: 20px; font-weight: 800; }
